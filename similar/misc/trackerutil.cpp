@@ -14,7 +14,7 @@ void TrackerUtil::ReqGames( dxx_http_callback cb )
 	// URL to hit
 	char sUrl[256];
 	sprintf( sUrl, "http://%s/api/%s/games?game=%s&major=%d&minor=%d&micro=%d",
-		GameArg.MplTrackerHost,
+		GameArg.MplTrackerHost.c_str(),
 		DXX_TRACKER_API_VERSION,
 		DXX_NAME_NUMBER,
 		DXX_VERSION_MAJORi,
@@ -31,7 +31,7 @@ void TrackerUtil::RegisterGame( Json::Value &data, dxx_http_callback cb )
 	// The URL to hit
 	char sUrl[256];
 	sprintf( sUrl, "http://%s/api/%s/games/new",
-		GameArg.MplTrackerHost,
+		GameArg.MplTrackerHost.c_str(),
 		DXX_TRACKER_API_VERSION
 	);
 
@@ -44,7 +44,7 @@ void TrackerUtil::UnregisterGame( Json::Value &data, dxx_http_callback cb )
 	// The URL to hit
 	char sUrl[256];
 	sprintf( sUrl, "http://%s/api/%s/games/delete",
-		GameArg.MplTrackerHost,
+		GameArg.MplTrackerHost.c_str(),
 		DXX_TRACKER_API_VERSION
 	);
 
@@ -57,7 +57,7 @@ void TrackerUtil::CheckIfVerified( Json::Value &data, dxx_http_callback cb )
 	// The URL to hit
 	char sUrl[256];
 	sprintf( sUrl, "http://%s/api/%s/games/%u",
-		GameArg.MplTrackerHost,
+		GameArg.MplTrackerHost.c_str(),
 		DXX_TRACKER_API_VERSION,
 		data["id"].asInt()
 	);

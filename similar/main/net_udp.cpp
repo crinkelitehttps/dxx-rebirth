@@ -3894,7 +3894,7 @@ int net_udp_setup_game()
 	/* Force off _after_ writing profile, so that command line does not
 	 * change ngp file.
 	 */
-	if (!GameArg.MplTrackerHost)
+	if( GameArg.MplTrackerHost.empty() )
 		Netgame.Tracker = 0;
 #endif
 
@@ -4801,7 +4801,7 @@ void net_udp_do_frame(int force, int listen)
 			iAttempts = 0;
 			
 			// Warn
-			nm_messagebox( TXT_WARNING, 1, TXT_OK, "No response from tracker!\nPossible causes:\nTracker is down\nYour port is likely not open!\n\nTracker: %s\nGame port: %hu", GameArg.MplTrackerHost, UDP_MyPort );
+			nm_messagebox( TXT_WARNING, 1, TXT_OK, "No response from tracker!\nPossible causes:\nTracker is down\nYour port is likely not open!\n\nTracker: %s\nGame port: %hu", GameArg.MplTrackerHost.c_str(), UDP_MyPort );
 		}
 	}
 #endif

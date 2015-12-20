@@ -134,7 +134,7 @@ struct Arg : prohibit_void_ptr<Arg>
 	uint16_t MplUdpHostPort;
 	uint16_t MplUdpMyPort;
 #ifdef USE_TRACKER
-	const char *MplTrackerHost;
+	std::string MplTrackerHost;
 #endif
 #ifdef DXX_BUILD_DESCENT_II
 	std::string EdiAutoLoad;
