@@ -41,7 +41,8 @@ class integral_type
 {
 	static_assert(tt::is_integral<T>::value, "integral_type used on non-integral type");
 public:
-	static const std::size_t maximum_size = sizeof(T);
+	typedef tt::integral_constant<std::size_t, sizeof(T)> maximum_size_type;
+	static constexpr maximum_size_type maximum_size = {};
 };
 
 template <typename T>
@@ -49,7 +50,8 @@ class enum_type
 {
 	static_assert(tt::is_enum<T>::value, "enum_type used on non-enum type");
 public:
-	static const std::size_t maximum_size = sizeof(T);
+	typedef tt::integral_constant<std::size_t, sizeof(T)> maximum_size_type;
+	static constexpr maximum_size_type maximum_size = {};
 };
 
 template <typename>
@@ -93,8 +95,9 @@ class class_type;
 template <typename>
 class array_type;
 
-struct endian_access
+class endian_access
 {
+public:
 	/*
 	 * Endian access modes:
 	 * - foreign_endian: assume buffered data is foreign endian
@@ -106,10 +109,15 @@ struct endian_access
 	 * - native_endian: assume buffered data is native endian
 	 *   Copy regardless of host byte order
 	 */
-	static const uint16_t foreign_endian = 0;
-	static const uint16_t little_endian = 255;
-	static const uint16_t big_endian = 256;
-	static const uint16_t native_endian = 257;
+	typedef tt::integral_constant<uint16_t, 0> foreign_endian_type;
+	typedef tt::integral_constant<uint16_t, 255> little_endian_type;
+	typedef tt::integral_constant<uint16_t, 256> big_endian_type;
+	typedef tt::integral_constant<uint16_t, 257> native_endian_type;
+
+	static constexpr auto foreign_endian = foreign_endian_type{};
+	static constexpr auto little_endian = little_endian_type{};
+	static constexpr auto big_endian = big_endian_type{};
+	static constexpr auto native_endian = native_endian_type{};
 };
 
 	/* Implementation details - avoid namespace pollution */
@@ -185,12 +193,10 @@ message<array<uint8_t, amount>> udt_to_message(const pad_type<amount, value> &);
  * specialization is missing.
  */
 template <typename T>
-struct missing_udt_specialization
+class missing_udt_specialization
 {
-#ifndef DXX_HAVE_CXX11_EXPLICIT_DELETE
-protected:
-#endif
-	missing_udt_specialization() DXX_CXX11_EXPLICIT_DELETE;
+public:
+	missing_udt_specialization() = delete;
 };
 
 template <typename T>
@@ -295,6 +301,15 @@ static inline const T &extract_value(const std::tuple<T> &t)
 	return std::get<0>(t);
 }
 
+/* Never defined.  Used only in unevaluated context for decltype.
+ * If minimum_size exists, it is used.  Otherwise, maximum_size is used.
+ */
+template <typename T>
+typename T::minimum_size_type get_minimum_size(T *);
+
+template <typename T>
+typename T::maximum_size_type get_minimum_size(...);
+
 }
 
 template <std::size_t amount, uint8_t value = 0xcc>
@@ -331,7 +346,7 @@ static inline detail::pad_type<amount, value> pad()
 template <typename M1, typename T1, typename M1rcv_rr = typename tt::remove_cv<typename tt::remove_reference<M1>::type>::type>
 struct udt_message_compatible_same_type : tt::is_same<M1rcv_rr, T1>
 {
-	static_assert(tt::is_same<M1rcv_rr, T1>::value, "parameter type mismatch");
+	static_assert((tt::is_same<M1rcv_rr, T1>::value), "parameter type mismatch");
 };
 
 template <bool, typename M, typename T>
@@ -378,7 +393,7 @@ class assert_udt_message_compatible<C, std::tuple<T1, Tn...>> : public assert_ud
 	ASSERT_SERIAL_UDT_MESSAGE_MUTABLE_TYPE(T, TYPELIST);	\
 
 #define _ASSERT_SERIAL_UDT_MESSAGE_TYPE(T, TYPELIST)	\
-	static_assert(serial::assert_udt_message_compatible<T, std::tuple<_SERIAL_UDT_UNWRAP_LIST TYPELIST>>::value, "udt/message mismatch")
+	static_assert((serial::assert_udt_message_compatible<T, std::tuple<_SERIAL_UDT_UNWRAP_LIST TYPELIST>>::value), "udt/message mismatch")
 
 #define ASSERT_SERIAL_UDT_MESSAGE_CONST_TYPE(T, TYPELIST)	\
 	_ASSERT_SERIAL_UDT_MESSAGE_TYPE(const T, TYPELIST)
@@ -391,7 +406,7 @@ union endian_skip_byteswap_u
 	uint16_t s;
 	constexpr endian_skip_byteswap_u(const uint16_t &u) : s(u)
 	{
-		static_assert(offsetof(endian_skip_byteswap_u, c) == offsetof(endian_skip_byteswap_u, s), "union layout error");
+		static_assert((offsetof(endian_skip_byteswap_u, c) == offsetof(endian_skip_byteswap_u, s)), "union layout error");
 	}
 };
 
@@ -404,7 +419,11 @@ template <typename T, std::size_t N>
 union unaligned_storage
 {
 	T a;
+	typename tt::conditional<N < 4,
+		typename tt::conditional<N == 1, uint8_t, uint16_t>,
+		typename tt::conditional<N == 4, uint32_t, uint64_t>>::type::type i;
 	uint8_t u[N];
+	assert_equal(sizeof(i), N, "sizeof(i) is not N");
 	assert_equal(sizeof(a), sizeof(u), "sizeof(T) is not N");
 };
 
@@ -445,8 +464,14 @@ class message_type : message_dispatch_type<typename tt::remove_reference<T>::typ
 	typedef message_dispatch_type<typename tt::remove_reference<T>::type> base_type;
 	typedef typename base_type::effective_type effective_type;
 public:
-	static const std::size_t maximum_size = effective_type::maximum_size;
+	typedef decltype(detail::get_minimum_size<effective_type>(nullptr)) minimum_size_type;
+	typedef typename effective_type::maximum_size_type maximum_size_type;
+	static constexpr minimum_size_type minimum_size = {};
+	static constexpr maximum_size_type maximum_size = {};
 };
+
+template <typename T>
+constexpr typename message_type<T>::maximum_size_type message_type<T>::maximum_size;
 
 template <typename A1>
 class message_dispatch_type<message<A1>, void>
@@ -458,7 +483,7 @@ public:
 };
 
 template <typename T>
-class class_type : public message_type<decltype(udt_to_message(std::forward<T>(*static_cast<T*>(nullptr))))>
+class class_type : public message_type<decltype(udt_to_message(std::declval<T>()))>
 {
 };
 
@@ -466,7 +491,8 @@ template <typename T, std::size_t N>
 class array_type<const array<T, N>>
 {
 public:
-	static const std::size_t maximum_size = message_type<T>::maximum_size * N;
+	typedef tt::integral_constant<std::size_t, message_type<T>::maximum_size * N> maximum_size_type;
+	static constexpr maximum_size_type maximum_size = {};
 };
 
 template <typename T, std::size_t N>
@@ -479,7 +505,10 @@ class message_type<message<A1, A2, Args...>>
 {
 public:
 	typedef message<A1, A2, Args...> as_message;
-	static const std::size_t maximum_size = message_type<A1>::maximum_size + message_type<message<A2, Args...>>::maximum_size;
+	typedef tt::integral_constant<std::size_t, message_type<A1>::minimum_size + message_type<message<A2, Args...>>::minimum_size> minimum_size_type;
+	typedef tt::integral_constant<std::size_t, message_type<A1>::maximum_size + message_type<message<A2, Args...>>::maximum_size> maximum_size_type;
+	static constexpr minimum_size_type minimum_size = {};
+	static constexpr maximum_size_type maximum_size = {};
 };
 
 template <typename A1, typename... Args>
@@ -584,18 +613,11 @@ static inline void unaligned_copy(const uint8_t *src, unaligned_storage<A1, 1> &
 	dst.u[0] = *src;
 }
 
-#define SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(BITS)	\
-	template <typename A1>	\
-	static inline void unaligned_copy(const uint8_t *src, unaligned_storage<A1, BITS / 8> &dst)	\
-	{	\
-		std::copy_n(src, sizeof(dst.u), dst.u);	\
-	}
-
-SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(16);
-SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(32);
-SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(64);
-
-#undef SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY
+template <typename A1, std::size_t BYTES>
+static inline void unaligned_copy(const uint8_t *src, unaligned_storage<A1, BYTES> &dst)
+{
+	std::copy_n(src, sizeof(dst.u), dst.u);
+}
 
 template <typename Accessor, typename A1>
 static inline void process_integer(Accessor &buffer, A1 &a1)
@@ -603,7 +625,9 @@ static inline void process_integer(Accessor &buffer, A1 &a1)
 	using std::advance;
 	unaligned_storage<A1, message_type<A1>::maximum_size> u;
 	unaligned_copy(buffer, u);
-	a1 = endian_skip_byteswap(buffer.endian()) ? u.a : bswap(u.a);
+	if (!endian_skip_byteswap(buffer.endian()))
+		u.i = bswap(u.i);
+	a1 = u.a;
 	advance(buffer, sizeof(u.u));
 }
 
@@ -635,24 +659,19 @@ static inline void unaligned_copy(const unaligned_storage<A1, 1> &src, uint8_t *
 /* If inline unaligned_copy, gcc inlining of copy_n creates a loop instead
  * of a store.
  */
-#define SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(BITS)	\
-	template <typename A1>	\
-	static inline void unaligned_copy(unaligned_storage<A1, BITS / 8> src, uint8_t *dst)	\
-	{	\
-		std::copy_n(src.u, sizeof(src.u), dst);	\
-	}
-
-SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(16);
-SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(32);
-SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY(64);
-
-#undef SERIAL_DEFINE_SIZE_SPECIFIC_UNALIGNED_COPY
+template <typename A1, std::size_t BYTES>
+static inline void unaligned_copy(const unaligned_storage<A1, BYTES> &src, uint8_t *dst)
+{
+	std::copy_n(src.u, sizeof(src.u), dst);
+}
 
 template <typename Accessor, typename A1>
 static inline void process_integer(Accessor &buffer, const A1 &a1)
 {
 	using std::advance;
-	unaligned_storage<A1, message_type<A1>::maximum_size> u{endian_skip_byteswap(buffer.endian()) ? a1 : bswap(a1)};
+	unaligned_storage<A1, message_type<A1>::maximum_size> u{a1};
+	if (!endian_skip_byteswap(buffer.endian()))
+		u.i = bswap(u.i);
 	unaligned_copy(u, buffer);
 	advance(buffer, sizeof(u.u));
 }

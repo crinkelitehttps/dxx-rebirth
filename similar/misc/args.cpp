@@ -28,6 +28,13 @@
 #include "net_udp.h"
 #endif
 
+#include "compiler-range_for.h"
+#include "partial_range.h"
+
+dcx::CArg dcx::CGameArg;
+
+namespace dsx {
+
 #define MAX_ARGS 1000
 #if defined(DXX_BUILD_DESCENT_I)
 #define INI_FILENAME "d1x.ini"
@@ -36,42 +43,75 @@
 #endif
 
 typedef std::vector<std::string> Arglist;
-static Arglist Args;
+
+class ini_entry
+{
+	std::string m_filename;
+public:
+	ini_entry(std::string &&f) :
+		m_filename(std::move(f))
+	{
+	}
+	const std::string &filename() const
+	{
+		return m_filename;
+	}
+};
+
+typedef std::vector<ini_entry> Inilist;
 
 class argument_exception
 {
 public:
-	const char *arg;
-	argument_exception(const char *a) : arg(a) {}
+	const std::string arg;
+	argument_exception(std::string &&a) :
+		arg(std::move(a))
+	{
+	}
 };
 
 class missing_parameter : public argument_exception
 {
 public:
-	missing_parameter(const char *a) : argument_exception(a) {}
+	missing_parameter(std::string &&a) :
+		argument_exception(std::move(a))
+	{
+	}
 };
 
 class unhandled_argument : public argument_exception
 {
 public:
-	unhandled_argument(const char *a) : argument_exception(a) {}
+	unhandled_argument(std::string &&a) :
+		argument_exception(std::move(a))
+	{
+	}
 };
 
 class conversion_failure : public argument_exception
 {
 public:
-	const char *value;
-	conversion_failure(const char *a, const char *v) : argument_exception(a), value(v) {}
+	const std::string value;
+	conversion_failure(std::string &&a, std::string &&v) :
+		argument_exception(std::move(a)), value(std::move(v))
+	{
+	}
 };
 
-struct Arg GameArg;
-
-static void AppendIniArgs(void)
+class nesting_depth_exceeded
 {
-	if (auto f = PHYSFSX_openReadBuffered(INI_FILENAME))
+};
+
+Arg GameArg;
+
+static void ReadCmdArgs(Inilist &ini, Arglist &Args);
+
+static void AppendIniArgs(const char *filename, Arglist &Args)
+{
+	if (auto f = PHYSFSX_openReadBuffered(filename))
 	{
 		PHYSFSX_gets_line_t<1024> line;
-		while(!PHYSFS_eof(f) && Args.size() < MAX_ARGS && PHYSFSX_fgets(line, f))
+		while (Args.size() < MAX_ARGS && PHYSFSX_fgets(line, f))
 		{
 			static const char separator[] = " ";
 			for(char *token = strtok(line, separator); token != NULL; token = strtok(NULL, separator))
@@ -84,35 +124,40 @@ static void AppendIniArgs(void)
 	}
 }
 
-static const char *arg_string(Arglist::const_iterator &pp, Arglist::const_iterator end)
+static std::string &&arg_string(Arglist::iterator &pp, Arglist::const_iterator end)
 {
-	Arglist::const_iterator arg = pp;
+	auto arg = pp;
 	if (++pp == end)
-		throw missing_parameter(arg->c_str());
-	return pp->c_str();
+		throw missing_parameter(std::move(*arg));
+	return std::move(*pp);
 }
 
-static long arg_integer(Arglist::const_iterator &pp, Arglist::const_iterator end)
+static long arg_integer(Arglist::iterator &pp, Arglist::const_iterator end)
 {
-	Arglist::const_iterator arg = pp;
-	const char *value = arg_string(pp, end);
+	auto arg = pp;
+	auto &&value = arg_string(pp, end);
 	char *p;
-	long i = strtol(value, &p, 10);
+	auto i = strtol(value.c_str(), &p, 10);
 	if (*p)
-		throw conversion_failure(arg->c_str(), value);
+		throw conversion_failure(std::move(*arg), std::move(value));
 	return i;
 }
 
-static void arg_port_number(Arglist::const_iterator &pp, Arglist::const_iterator end, uint16_t &out, bool allow_privileged)
+template<typename E> E arg_enum(Arglist::iterator &pp, Arglist::const_iterator end)
+{
+	return static_cast<E>(arg_integer(pp, end));
+}
+
+static void arg_port_number(Arglist::iterator &pp, Arglist::const_iterator end, uint16_t &out, bool allow_privileged)
 {
 	auto port = arg_integer(pp, end);
 	if (static_cast<uint16_t>(port) == port && (allow_privileged || port >= 1024))
 		out = port;
 }
 
-static void ReadCmdArgs(void)
+static void InitGameArg()
 {
-	GameArg.SysMaxFPS = MAXIMUM_FPS;
+	CGameArg.SysMaxFPS = MAXIMUM_FPS;
 #if defined(DXX_BUILD_DESCENT_II)
 	GameArg.SndDigiSampleRate = SAMPLE_RATE_22K;
 #endif
@@ -122,30 +167,54 @@ static void ReadCmdArgs(void)
 	GameArg.MplTrackerHost = TRACKER_HOST_DEFAULT;
 #endif
 #endif
-	GameArg.DbgVerbose = CON_NORMAL;
-	GameArg.DbgBpp 			= 32;
+	CGameArg.DbgVerbose = CON_NORMAL;
+	CGameArg.DbgBpp = 32;
 #ifdef OGL
-	GameArg.DbgGlIntensity4Ok 	= 1;
-	GameArg.DbgGlLuminance4Alpha4Ok = 1;
-	GameArg.DbgGlRGBA2Ok 		= 1;
-	GameArg.DbgGlReadPixelsOk 	= 1;
-	GameArg.DbgGlGetTexLevelParamOk = 1;
+	GameArg.OglSyncMethod 		= OGL_SYNC_METHOD_DEFAULT;
+	GameArg.OglSyncWait		= OGL_SYNC_WAIT_DEFAULT;
+	CGameArg.DbgGlIntensity4Ok 	= true;
+	CGameArg.DbgGlLuminance4Alpha4Ok = true;
+	CGameArg.DbgGlRGBA2Ok = true;
+	CGameArg.DbgGlReadPixelsOk = true;
+	CGameArg.DbgGlGetTexLevelParamOk = true;
 #endif
-	for (Arglist::const_iterator pp = Args.begin(), end = Args.end(); pp != end; ++pp)
+}
+
+static void ReadIniArgs(Inilist &ini)
+{
+	Arglist Args;
+	AppendIniArgs(ini.back().filename().c_str(), Args);
+	ReadCmdArgs(ini, Args);
+}
+
+static void ReadCmdArgs(Inilist &ini, Arglist &Args)
+{
+	for (Arglist::iterator pp = Args.begin(), end = Args.end(); pp != end; ++pp)
 	{
 		const char *p = pp->c_str();
 	// System Options
 
 		if (!d_stricmp(p, "-help") || !d_stricmp(p, "-h") || !d_stricmp(p, "-?") || !d_stricmp(p, "?"))
-			GameArg.SysShowCmdHelp = 1;
+			CGameArg.SysShowCmdHelp = true;
 		else if (!d_stricmp(p, "-nonicefps"))
 			GameArg.SysNoNiceFPS = 1;
 		else if (!d_stricmp(p, "-maxfps"))
-			GameArg.SysMaxFPS = arg_integer(pp, end);
+			CGameArg.SysMaxFPS = arg_integer(pp, end);
 		else if (!d_stricmp(p, "-hogdir"))
 			GameArg.SysHogDir = arg_string(pp, end);
+#if PHYSFS_VER_MAJOR >= 2
+		else if (!d_stricmp(p, "-add-missions-dir"))
+			CGameArg.SysMissionDir = arg_string(pp, end);
+#endif
 		else if (!d_stricmp(p, "-nohogdir"))
-			GameArg.SysNoHogDir = 1;
+		{
+			/* No effect on non-Unix.  Ignore it so that players can
+			 * pass it via a cross-platform ini.
+			 */
+#if defined(__unix__)
+			CGameArg.SysNoHogDir = true;
+#endif
+		}
 		else if (!d_stricmp(p, "-use_players_dir"))
 			GameArg.SysUsePlayersDir 	= 1;
 		else if (!d_stricmp(p, "-lowmem"))
@@ -160,10 +229,9 @@ static void ReadCmdArgs(void)
 			GameArg.SysWindow 		= 1;
 		else if (!d_stricmp(p, "-noborders"))
 			GameArg.SysNoBorders 		= 1;
-#if defined(DXX_BUILD_DESCENT_I)
 		else if (!d_stricmp(p, "-notitles"))
 			GameArg.SysNoTitles 		= 1;
-#elif defined(DXX_BUILD_DESCENT_II)
+#if defined(DXX_BUILD_DESCENT_II)
 		else if (!d_stricmp(p, "-nomovies"))
 			GameArg.SysNoMovies 		= 1;
 #endif
@@ -173,18 +241,22 @@ static void ReadCmdArgs(void)
 	// Control Options
 
 		else if (!d_stricmp(p, "-nocursor"))
-			GameArg.CtlNoCursor 		= 1;
+			CGameArg.CtlNoCursor 		= true;
 		else if (!d_stricmp(p, "-nomouse"))
-			GameArg.CtlNoMouse 		= 1;
+			CGameArg.CtlNoMouse 		= true;
 		else if (!d_stricmp(p, "-nojoystick"))
-			GameArg.CtlNoJoystick 		= 1;
+		{
+#if MAX_JOYSTICKS
+			CGameArg.CtlNoJoystick		= 1;
+#endif
+		}
 		else if (!d_stricmp(p, "-nostickykeys"))
-			GameArg.CtlNoStickyKeys		= 1;
+			CGameArg.CtlNoStickyKeys	= true;
 
 	// Sound Options
 
 		else if (!d_stricmp(p, "-nosound"))
-			GameArg.SndNoSound 		= 1;
+			CGameArg.SndNoSound		= 1;
 		else if (!d_stricmp(p, "-nomusic"))
 			GameArg.SndNoMusic 		= 1;
 #if defined(DXX_BUILD_DESCENT_II)
@@ -194,7 +266,7 @@ static void ReadCmdArgs(void)
 		else if (!d_stricmp(p, "-nosdlmixer"))
 		{
 #ifdef USE_SDLMIXER
-			GameArg.SndDisableSdlMixer = true;
+			CGameArg.SndDisableSdlMixer = true;
 #endif
 		}
 
@@ -213,6 +285,10 @@ static void ReadCmdArgs(void)
 
 		else if (!d_stricmp(p, "-gl_fixedfont"))
 			GameArg.OglFixedFont 		= 1;
+		else if (!d_stricmp(p, "-gl_syncmethod"))
+			GameArg.OglSyncMethod = arg_enum<SyncGLMethod>(pp, end);
+		else if (!d_stricmp(p, "-gl_syncwait"))
+			GameArg.OglSyncWait = arg_integer(pp, end);
 #endif
 
 	// Multiplayer Options
@@ -229,18 +305,18 @@ static void ReadCmdArgs(void)
 		{
 			arg_port_number(pp, end, GameArg.MplUdpMyPort, false);
 		}
+#endif
+#ifdef USE_TRACKER
 		else if (!d_stricmp(p, "-no-tracker"))
 		{
 			/* Always recognized.  No-op if tracker support compiled
 			 * out. */
-#ifdef USE_TRACKER
-			GameArg.MplTrackerHost = nullptr;
-#endif
+			GameArg.MplTrackerHost.clear();
 		}
+#endif
 #ifdef USE_TRACKER
 		else if (!d_stricmp(p, "-tracker_host"))
 			GameArg.MplTrackerHost = arg_string(pp, end);
-#endif
 #endif
 
 #if defined(DXX_BUILD_DESCENT_I)
@@ -262,14 +338,14 @@ static void ReadCmdArgs(void)
 	// Debug Options
 
 		else if (!d_stricmp(p, "-debug"))
-			GameArg.DbgVerbose 	= CON_DEBUG;
+			CGameArg.DbgVerbose 	= CON_DEBUG;
 		else if (!d_stricmp(p, "-verbose"))
-			GameArg.DbgVerbose 	= CON_VERBOSE;
+			CGameArg.DbgVerbose 	= CON_VERBOSE;
 
 		else if (!d_stricmp(p, "-no-grab"))
-			GameArg.DbgForbidConsoleGrab = 1;
+			CGameArg.DbgForbidConsoleGrab = true;
 		else if (!d_stricmp(p, "-safelog"))
-			GameArg.DbgSafelog 		= 1;
+			CGameArg.DbgSafelog = true;
 		else if (!d_stricmp(p, "-norun"))
 			GameArg.DbgNoRun 		= 1;
 		else if (!d_stricmp(p, "-renderstats"))
@@ -279,68 +355,110 @@ static void ReadCmdArgs(void)
 		else if (!d_stricmp(p, "-tmap"))
 			GameArg.DbgTexMap = arg_string(pp, end);
 		else if (!d_stricmp(p, "-showmeminfo"))
-			GameArg.DbgShowMemInfo 		= 1;
+			CGameArg.DbgShowMemInfo 		= 1;
 		else if (!d_stricmp(p, "-nodoublebuffer"))
 			GameArg.DbgNoDoubleBuffer 	= 1;
 		else if (!d_stricmp(p, "-bigpig"))
 			GameArg.DbgNoCompressPigBitmap 		= 1;
 		else if (!d_stricmp(p, "-16bpp"))
-			GameArg.DbgBpp 		= 16;
+			CGameArg.DbgBpp		= 16;
 
 #ifdef OGL
 		else if (!d_stricmp(p, "-gl_oldtexmerge"))
-			GameArg.DbgUseOldTextureMerge 		= 1;
+			CGameArg.DbgUseOldTextureMerge = true;
 		else if (!d_stricmp(p, "-gl_intensity4_ok"))
-			GameArg.DbgGlIntensity4Ok 		                       = arg_integer(pp, end);
+			CGameArg.DbgGlIntensity4Ok = arg_integer(pp, end);
 		else if (!d_stricmp(p, "-gl_luminance4_alpha4_ok"))
-			GameArg.DbgGlLuminance4Alpha4Ok                        = arg_integer(pp, end);
+			CGameArg.DbgGlLuminance4Alpha4Ok = arg_integer(pp, end);
 		else if (!d_stricmp(p, "-gl_rgba2_ok"))
-			GameArg.DbgGlRGBA2Ok 			                       = arg_integer(pp, end);
+			CGameArg.DbgGlRGBA2Ok = arg_integer(pp, end);
 		else if (!d_stricmp(p, "-gl_readpixels_ok"))
-			GameArg.DbgGlReadPixelsOk 		                       = arg_integer(pp, end);
+			CGameArg.DbgGlReadPixelsOk = arg_integer(pp, end);
 		else if (!d_stricmp(p, "-gl_gettexlevelparam_ok"))
-			GameArg.DbgGlGetTexLevelParamOk                        = arg_integer(pp, end);
+			CGameArg.DbgGlGetTexLevelParamOk = arg_integer(pp, end);
 #else
 		else if (!d_stricmp(p, "-hwsurface"))
 			GameArg.DbgSdlHWSurface = 1;
 		else if (!d_stricmp(p, "-asyncblit"))
 			GameArg.DbgSdlASyncBlit = 1;
 #endif
+		else if (!d_stricmp(p, "-ini"))
+		{
+			ini.emplace_back(arg_string(pp, end));
+			if (ini.size() > 10)
+				throw nesting_depth_exceeded();
+			ReadIniArgs(ini);
+			ini.pop_back();
+		}
 		else
-			throw unhandled_argument(p);
+			throw unhandled_argument(std::move(*pp));
 	}
+}
 
-	if (GameArg.SysMaxFPS < MINIMUM_FPS)
-		GameArg.SysMaxFPS = MINIMUM_FPS;
-	else if (GameArg.SysMaxFPS > MAXIMUM_FPS)
-		GameArg.SysMaxFPS = MAXIMUM_FPS;
+static void PostProcessGameArg()
+{
+	if (CGameArg.SysMaxFPS < MINIMUM_FPS)
+		CGameArg.SysMaxFPS = MINIMUM_FPS;
+	else if (CGameArg.SysMaxFPS > MAXIMUM_FPS)
+		CGameArg.SysMaxFPS = MAXIMUM_FPS;
+#if PHYSFS_VER_MAJOR >= 2
+	if (!CGameArg.SysMissionDir.empty())
+		PHYSFS_mount(CGameArg.SysMissionDir.c_str(), MISSION_DIR, 1);
+#endif
 
 	static char sdl_disable_lock_keys[] = "SDL_DISABLE_LOCK_KEYS=0";
-	if (GameArg.CtlNoStickyKeys) // Must happen before SDL_Init!
+	if (CGameArg.CtlNoStickyKeys) // Must happen before SDL_Init!
 		sdl_disable_lock_keys[sizeof(sdl_disable_lock_keys) - 1] = '1';
 	SDL_putenv(sdl_disable_lock_keys);
 }
 
-void args_exit(void)
+static std::string ConstructIniStackExplanation(const Inilist &ini)
 {
-	Args.clear();
+	Inilist::const_reverse_iterator i = ini.rbegin(), e = ini.rend();
+	if (i == e)
+		return " while processing <command line>";
+	std::string result;
+	result.reserve(ini.size() * 128);
+	result += " while processing \"";
+	for (;;)
+	{
+		result += i->filename();
+		if (++ i == e)
+			return result += "\"";
+		result += "\"\n    included from \"";
+	}
 }
 
 bool InitArgs( int argc,char **argv )
 {
-	for (int i=1; i < argc; i++ )
-		Args.push_back(argv[i]);
+	InitGameArg();
 
-	AppendIniArgs();
+	Inilist ini;
 	try {
-		ReadCmdArgs();
+		{
+			Arglist Args;
+			Args.reserve(argc);
+			range_for (auto &i, unchecked_partial_range(argv, 1u, static_cast<unsigned>(argc)))
+				Args.push_back(i);
+			ReadCmdArgs(ini, Args);
+		}
+		{
+			assert(ini.empty());
+			ini.emplace_back(INI_FILENAME);
+			ReadIniArgs(ini);
+		}
+		PostProcessGameArg();
 		return true;
 	} catch(const missing_parameter& e) {
-		Warning("Missing parameter for argument \"%s\"", e.arg);
+		UserError("Missing parameter for argument \"%s\"%s", e.arg.c_str(), ConstructIniStackExplanation(ini).c_str());
 	} catch(const unhandled_argument& e) {
-		Warning("Unhandled argument \"%s\"", e.arg);
+		UserError("Unhandled argument \"%s\"%s", e.arg.c_str(), ConstructIniStackExplanation(ini).c_str());
 	} catch(const conversion_failure& e) {
-		Warning("Failed to convert parameter \"%s\" for argument \"%s\"", e.value, e.arg);
+		UserError("Failed to convert argument \"%s\" parameter \"%s\"%s", e.arg.c_str(), e.value.c_str(), ConstructIniStackExplanation(ini).c_str());
+	} catch(const nesting_depth_exceeded &) {
+		UserError("Nesting depth exceeded%s", ConstructIniStackExplanation(ini).c_str());
 	}
 	return false;
+}
+
 }

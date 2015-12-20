@@ -18,6 +18,7 @@
 #include <time.h>
 #include <SDL.h>
 #include "window.h"
+#include "event.h"
 #include "console.h"
 #include "args.h"
 #include "gr.h"
@@ -27,6 +28,8 @@
 #include "key.h"
 #include "vers_id.h"
 #include "timer.h"
+#include "cli.h"
+#include "cvar.h"
 
 #include "dxxsconf.h"
 #include "compiler-array.h"
@@ -43,8 +46,8 @@ static void con_add_buffer_line(int priority, const char *buffer, size_t len)
 	c.priority=priority;
 
 	size_t copy = std::min(len, CON_LINE_LENGTH - 1);
-	memcpy(&c.line,buffer, copy);
 	c.line[copy] = 0;
+	memcpy(&c.line,buffer, copy);
 }
 
 void (con_printf)(int priority, const char *fmt, ...)
@@ -52,7 +55,7 @@ void (con_printf)(int priority, const char *fmt, ...)
 	va_list arglist;
 	char buffer[CON_LINE_LENGTH];
 
-	if (priority <= ((int)GameArg.DbgVerbose))
+	if (priority <= CGameArg.DbgVerbose)
 	{
 		va_start (arglist, fmt);
 		size_t len = vsnprintf (buffer, sizeof(buffer), fmt, arglist);
@@ -69,7 +72,7 @@ static void con_scrub_markup(char *buffer)
 		{
 			case CC_COLOR:
 			case CC_LSPACING:
-				if (!*p1++)
+				if (!*++p1)
 					break;
 			case CC_UNDERLINE:
 				p1++;
@@ -105,7 +108,7 @@ static void con_print_file(const char *buffer)
 
 void con_puts(int priority, char *buffer, size_t len)
 {
-	if (priority <= ((int)GameArg.DbgVerbose))
+	if (priority <= CGameArg.DbgVerbose)
 	{
 		con_add_buffer_line(priority, buffer, len);
 		con_scrub_markup(buffer);
@@ -116,7 +119,7 @@ void con_puts(int priority, char *buffer, size_t len)
 
 void con_puts(int priority, const char *buffer, size_t len)
 {
-	if (priority <= ((int)GameArg.DbgVerbose))
+	if (priority <= CGameArg.DbgVerbose)
 	{
 		/* add given string to con_buffer */
 		con_add_buffer_line(priority, buffer, len);
@@ -124,9 +127,27 @@ void con_puts(int priority, const char *buffer, size_t len)
 	}
 }
 
+static color_t get_console_color_by_priority(int priority)
+{
+	switch (priority)
+	{
+		case CON_CRITICAL:
+			return BM_XRGB(28,0,0);
+		case CON_URGENT:
+			return BM_XRGB(54,54,0);
+		case CON_DEBUG:
+		case CON_VERBOSE:
+			return BM_XRGB(14,14,14);
+		case CON_HUD:
+			return BM_XRGB(0,28,0);
+		default:
+			return BM_XRGB(255,255,255);
+	}
+}
+
 static void con_draw(void)
 {
-	int i = 0, y = 0, done = 0;
+	int i = 0, y = 0;
 
 	if (con_size <= 0)
 		return;
@@ -135,46 +156,36 @@ static void con_draw(void)
 	gr_set_curfont(GAME_FONT);
 	gr_setcolor(BM_XRGB(0,0,0));
 	gr_settransblend(7, GR_BLEND_NORMAL);
-	gr_rect(0,0,SWIDTH,(LINE_SPACING*(con_size))+FSPACY(1));
+	const auto &&fspacy1 = FSPACY(1);
+	const auto &&line_spacing = LINE_SPACING;
+	y = fspacy1 + (line_spacing * con_size);
+	gr_rect(0, 0, SWIDTH, y);
 	gr_settransblend(GR_FADE_OFF, GR_BLEND_NORMAL);
-	y=FSPACY(1)+(LINE_SPACING*con_size);
 	i+=con_scroll_offset;
-	while (!done)
-	{
-		int w,h,aw;
 
-		switch (con_buffer[CON_LINES_MAX-1-i].priority)
-		{
-			case CON_CRITICAL:
-				gr_set_fontcolor(BM_XRGB(28,0,0),-1);
-				break;
-			case CON_URGENT:
-				gr_set_fontcolor(BM_XRGB(54,54,0),-1);
-				break;
-			case CON_DEBUG:
-			case CON_VERBOSE:
-				gr_set_fontcolor(BM_XRGB(14,14,14),-1);
-				break;
-			case CON_HUD:
-				gr_set_fontcolor(BM_XRGB(0,28,0),-1);
-				break;
-			default:
-				gr_set_fontcolor(BM_XRGB(255,255,255),-1);
-				break;
-		}
-		gr_get_string_size(con_buffer[CON_LINES_MAX-1-i].line,&w,&h,&aw);
-		y-=h+FSPACY(1);
-		gr_string(FSPACX(1),y,con_buffer[CON_LINES_MAX-1-i].line);
+	gr_set_fontcolor(BM_XRGB(255,255,255), -1);
+	cli_draw(y);
+	y -= line_spacing;
+
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacx1 = fspacx(1);
+	for (;;)
+	{
+		gr_set_fontcolor(get_console_color_by_priority(con_buffer[CON_LINES_MAX-1-i].priority), -1);
+		int w,h;
+		gr_get_string_size(con_buffer[CON_LINES_MAX-1-i].line, &w, &h, nullptr);
+		y -= h + fspacy1;
+		gr_string(fspacx1, y, con_buffer[CON_LINES_MAX - 1 - i].line);
 		i++;
 
 		if (y<=0 || CON_LINES_MAX-1-i <= 0 || i < 0)
-			done=1;
+			break;
 	}
 	gr_setcolor(BM_XRGB(0,0,0));
-	gr_rect(0,0,SWIDTH,LINE_SPACING);
+	gr_rect(0, 0, SWIDTH, line_spacing);
 	gr_set_fontcolor(BM_XRGB(255,255,255),-1);
-	gr_printf(FSPACX(1),FSPACY(1),"%s LOG", DESCENT_VERSION);
-	gr_string(SWIDTH-FSPACX(110),FSPACY(1),"PAGE-UP/DOWN TO SCROLL");
+	gr_printf(fspacx1, fspacy1, "%s LOG", DESCENT_VERSION);
+	gr_string(SWIDTH - fspacx(110), fspacy1, "PAGE-UP/DOWN TO SCROLL");
 }
 
 static window_event_result con_handler(window *wind,const d_event &event, const unused_window_userdata_t *)
@@ -185,9 +196,11 @@ static window_event_result con_handler(window *wind,const d_event &event, const 
 	switch (event.type)
 	{
 		case EVENT_WINDOW_ACTIVATED:
+			key_toggle_repeat(1);
 			break;
 
 		case EVENT_WINDOW_DEACTIVATED:
+			key_toggle_repeat(0);
 			con_size = 0;
 			con_state = CON_STATE_CLOSED;
 			break;
@@ -222,7 +235,28 @@ static window_event_result con_handler(window *wind,const d_event &event, const 
 					if (con_scroll_offset<0)
 						con_scroll_offset=0;
 					break;
+				case KEY_CTRLED + KEY_A:
+				case KEY_HOME:              cli_cursor_home();      break;
+				case KEY_END:
+				case KEY_CTRLED + KEY_E:    cli_cursor_end();       break;
+				case KEY_CTRLED + KEY_C:    cli_clear();            break;
+				case KEY_LEFT:              cli_cursor_left();      break;
+				case KEY_RIGHT:             cli_cursor_right();     break;
+				case KEY_BACKSP:            cli_cursor_backspace(); break;
+				case KEY_CTRLED + KEY_D:
+				case KEY_DELETE:            cli_cursor_del();       break;
+				case KEY_UP:                cli_history_prev();     break;
+				case KEY_DOWN:              cli_history_next();     break;
+				case KEY_TAB:               cli_autocomplete();     break;
+				case KEY_ENTER:             cli_execute();          break;
+				case KEY_INSERT:
+					CLI_insert_mode = CLI_insert_mode == CLI_insert_type::insert ? CLI_insert_type::overwrite : CLI_insert_type::insert;
+					break;
 				default:
+					int character = key_ascii();
+					if (character == 255)
+						break;
+					cli_add_character(character);
 					break;
 			}
 			return window_event_result::handled;
@@ -234,7 +268,8 @@ static window_event_result con_handler(window *wind,const d_event &event, const 
 				if (con_size < CON_LINES_ONSCREEN && timer_query() >= last_scroll_time+(F1_0/30))
 				{
 					last_scroll_time = timer_query();
-					con_size++;
+					if (++ con_size >= CON_LINES_ONSCREEN)
+						con_state = CON_STATE_OPEN;
 				}
 			}
 			else if (con_state == CON_STATE_CLOSING)
@@ -242,13 +277,10 @@ static window_event_result con_handler(window *wind,const d_event &event, const 
 				if (con_size > 0 && timer_query() >= last_scroll_time+(F1_0/30))
 				{
 					last_scroll_time = timer_query();
-					con_size--;
+					if (! -- con_size)
+						con_state = CON_STATE_CLOSED;
 				}
 			}
-			if (con_size >= CON_LINES_ONSCREEN)
-				con_state = CON_STATE_OPEN;
-			else if (con_size <= 0)
-				con_state = CON_STATE_CLOSED;
 			con_draw();
 			if (con_state == CON_STATE_CLOSED && wind)
 			{
@@ -280,18 +312,16 @@ void con_showup(void)
 	}
 }
 
-static void con_close(void)
-{
-	gamelog_fp.reset();
-}
-
 void con_init(void)
 {
 	con_buffer = {};
-	if (GameArg.DbgSafelog)
+	if (CGameArg.DbgSafelog)
 		gamelog_fp.reset(PHYSFS_openWrite("gamelog.txt"));
 	else
 		gamelog_fp = PHYSFSX_openWriteBuffered("gamelog.txt");
-	atexit(con_close);
-}
 
+	cli_init();
+	cmd_init();
+	cvar_init();
+
+}

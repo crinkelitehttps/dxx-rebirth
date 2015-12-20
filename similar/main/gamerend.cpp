@@ -48,6 +48,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "newdemo.h"
 #include "text.h"
 #include "multi.h"
+#include "hudmsg.h"
 #include "endlevel.h"
 #include "cntrlcen.h"
 #include "powerup.h"
@@ -105,28 +106,10 @@ static void game_draw_multi_message()
 static void show_framerate()
 {
 	static int fps_count = 0, fps_rate = 0;
-	int y = GHEIGHT;
 	static fix64 fps_time = 0;
 
 	gr_set_curfont(GAME_FONT);
 	gr_set_fontcolor(BM_XRGB(0,31,0),-1);
-
-	if (PlayerCfg.CockpitMode[1] == CM_FULL_SCREEN) {
-		if ((Game_mode & GM_MULTI) || (Newdemo_state == ND_STATE_PLAYBACK && Newdemo_game_mode & GM_MULTI))
-			y -= LINE_SPACING * 10;
-		else
-			y -= LINE_SPACING * 4;
-	} else if (PlayerCfg.CockpitMode[1] == CM_STATUS_BAR) {
-		if ((Game_mode & GM_MULTI) || (Newdemo_state == ND_STATE_PLAYBACK && Newdemo_game_mode & GM_MULTI))
-			y -= LINE_SPACING * 6;
-		else
-			y -= LINE_SPACING * 1;
-	} else {
-		if ((Game_mode & GM_MULTI) || (Newdemo_state == ND_STATE_PLAYBACK && Newdemo_game_mode & GM_MULTI))
-			y -= LINE_SPACING * 7;
-		else
-			y -= LINE_SPACING * 2;
-	}
 
 	fps_count++;
 	if (timer_query() >= fps_time + F1_0)
@@ -135,58 +118,66 @@ static void show_framerate()
 		fps_count = 0;
 		fps_time = timer_query();
 	}
-	gr_printf(SWIDTH-(GameArg.SysMaxFPS>999?FSPACX(43):FSPACX(37)),y,"FPS: %i",fps_rate);
+	if (CGameArg.DbgVerbose)
+                gr_printf(FSPACX(2),LINE_SPACING*16,"%iFPS (%.2fms)",fps_rate, ((float)1000/(F1_0/FrameTime)));
+        else
+                gr_printf(FSPACX(2),LINE_SPACING*16,"%iFPS",fps_rate);
 }
 
 static void show_netplayerinfo()
 {
-	int x=0, y=0, eff=0;
+	int x=0, y=0;
 	static const char *const eff_strings[]={"trashing","really hurting","seriously affecting","hurting","affecting","tarnishing"};
 
 	gr_set_current_canvas(NULL);
 	gr_set_curfont(GAME_FONT);
 	gr_set_fontcolor(255,-1);
 
-	x=(SWIDTH/2)-FSPACX(120);
-	y=(SHEIGHT/2)-FSPACY(84);
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacx120 = fspacx(120);
+	const auto &&fspacy84 = FSPACY(84);
+	x = (SWIDTH / 2) - fspacx120;
+	y = (SHEIGHT / 2) - fspacy84;
 
 	gr_settransblend(14, GR_BLEND_NORMAL);
 	gr_setcolor( BM_XRGB(0,0,0) );
-	gr_rect((SWIDTH/2)-FSPACX(120),(SHEIGHT/2)-FSPACY(84),(SWIDTH/2)+FSPACX(120),(SHEIGHT/2)+FSPACY(84));
+	gr_rect((SWIDTH / 2) - fspacx120, (SHEIGHT / 2) - fspacy84, (SWIDTH / 2) + fspacx120, (SHEIGHT / 2) + fspacy84);
 	gr_settransblend(GR_FADE_OFF, GR_BLEND_NORMAL);
 
 	// general game information
-	y+=LINE_SPACING;
+	const auto &&line_spacing = LINE_SPACING;
+	y += line_spacing;
 	gr_string(0x8000,y,Netgame.game_name.data());
-	y+=LINE_SPACING;
+	y += line_spacing;
 	gr_printf(0x8000, y, "%s - lvl: %i", Netgame.mission_title.data(), Netgame.levelnum);
 
-	x+=FSPACX(8);
-	y+=LINE_SPACING*2;
+	const auto &&fspacx8 = fspacx(8);
+	x += fspacx8;
+	y += line_spacing * 2;
 	unsigned gamemode = Netgame.gamemode;
-	gr_printf(x,y,"game mode: %s",gamemode < (sizeof(GMNames) / sizeof(GMNames[0])) ? GMNames[gamemode] : "INVALID");
-	y+=LINE_SPACING;
+	gr_printf(x, y, "game mode: %s", gamemode < GMNames.size() ? GMNames[gamemode] : "INVALID");
+	y += line_spacing;
 	gr_printf(x,y,"difficulty: %s",MENU_DIFFICULTY_TEXT(Netgame.difficulty));
-	y+=LINE_SPACING;
-	gr_printf(x,y,"level time: %i:%02i:%02i",Players[Player_num].hours_level,f2i(Players[Player_num].time_level) / 60 % 60,f2i(Players[Player_num].time_level) % 60);
-	y+=LINE_SPACING;
-	gr_printf(x,y,"total time: %i:%02i:%02i",Players[Player_num].hours_total,f2i(Players[Player_num].time_total) / 60 % 60,f2i(Players[Player_num].time_total) % 60);
-	y+=LINE_SPACING;
+	y += line_spacing;
+	gr_printf(x,y,"level time: %i:%02i:%02i", get_local_player().hours_level, f2i(get_local_player().time_level) / 60 % 60, f2i(get_local_player().time_level) % 60);
+	y += line_spacing;
+	gr_printf(x,y,"total time: %i:%02i:%02i", get_local_player().hours_total, f2i(get_local_player().time_total) / 60 % 60, f2i(get_local_player().time_total) % 60);
+	y += line_spacing;
 	if (Netgame.KillGoal)
 		gr_printf(x,y,"Kill goal: %d",Netgame.KillGoal*5);
 
 	// player information (name, kills, ping, game efficiency)
-	y+=LINE_SPACING*2;
+	y += line_spacing * 2;
 	gr_string(x,y,"player");
 	if (Game_mode & GM_MULTI_COOP)
-		gr_string(x+FSPACX(8)*7,y,"score");
+		gr_string(x + fspacx8 * 7, y, "score");
 	else
 	{
-		gr_string(x+FSPACX(8)*7,y,"kills");
-		gr_string(x+FSPACX(8)*12,y,"deaths");
+		gr_string(x + fspacx8 * 7, y, "kills");
+		gr_string(x + fspacx8 * 12, y, "deaths");
 	}
-	gr_string(x+FSPACX(8)*18,y,"ping");
-	gr_string(x+FSPACX(8)*23,y,"efficiency");
+	gr_string(x + fspacx8 * 18, y, "ping");
+	gr_string(x + fspacx8 * 23, y, "efficiency");
 
 	// process players table
 	for (uint_fast32_t i = 0; i < MAX_PLAYERS; i++)
@@ -194,51 +185,48 @@ static void show_netplayerinfo()
 		if (!Players[i].connected)
 			continue;
 
-		y+=LINE_SPACING;
+		y += line_spacing;
 
 		const auto color = get_player_or_team_color(i);
 		gr_set_fontcolor( BM_XRGB(player_rgb[color].r,player_rgb[color].g,player_rgb[color].b),-1 );
 		gr_printf(x,y,"%s\n",static_cast<const char *>(Players[i].callsign));
 		if (Game_mode & GM_MULTI_COOP)
-			gr_printf(x+FSPACX(8)*7,y,"%-6d",Players[i].score);
+			gr_printf(x + fspacx8 * 7, y, "%-6d", Players[i].score);
 		else
 		{
-			gr_printf(x+FSPACX(8)*7,y,"%-6d",Players[i].net_kills_total);
-			gr_printf(x+FSPACX(8)*12,y,"%-6d",Players[i].net_killed_total);
+			gr_printf(x + fspacx8 * 7, y,"%-6d", Players[i].net_kills_total);
+			gr_printf(x + fspacx8 * 12, y,"%-6d", Players[i].net_killed_total);
 		}
 
-		gr_printf(x+FSPACX(8)*18,y,"%-6d",Netgame.players[i].ping);
+		gr_printf(x + fspacx8 * 18, y,"%-6d", Netgame.players[i].ping);
 		if (i != Player_num)
-			gr_printf(x+FSPACX(8)*23, y, "%hu/%hu", kill_matrix[Player_num][i], kill_matrix[i][Player_num]);
+			gr_printf(x + fspacx8 * 23, y, "%hu/%hu", kill_matrix[Player_num][i], kill_matrix[i][Player_num]);
 	}
 
-	y+=(LINE_SPACING*2)+(LINE_SPACING*(MAX_PLAYERS-N_players));
+	y += (line_spacing * 2) + (line_spacing * (MAX_PLAYERS - N_players));
 
 	// printf team scores
 	if (Game_mode & GM_TEAM)
 	{
 		gr_set_fontcolor(255,-1);
 		gr_string(x,y,"team");
-		gr_string(x+FSPACX(8)*8,y,"score");
-		y+=LINE_SPACING;
+		gr_string(x + fspacx8 * 8, y, "score");
+		y += line_spacing;
 		gr_set_fontcolor(BM_XRGB(player_rgb[0].r,player_rgb[0].g,player_rgb[0].b),-1 );
 		gr_printf(x,y,"%s:",static_cast<const char *>(Netgame.team_name[0]));
-		gr_printf(x+FSPACX(8)*8,y,"%i",team_kills[0]);
-		y+=LINE_SPACING;
+		gr_printf(x + fspacx8 * 8, y, "%i", team_kills[0]);
+		y += line_spacing;
 		gr_set_fontcolor(BM_XRGB(player_rgb[1].r,player_rgb[1].g,player_rgb[1].b),-1 );
 		gr_printf(x,y,"%s:",static_cast<const char *>(Netgame.team_name[1]));
-		gr_printf(x+FSPACX(8)*8,y,"%i",team_kills[1]);
-		y+=LINE_SPACING*2;
+		gr_printf(x + fspacx8 * 8, y, "%i", team_kills[1]);
+		y += line_spacing * 2;
 	}
 	else
-		y+=LINE_SPACING*4;
+		y += line_spacing * 4;
 
 	gr_set_fontcolor(255,-1);
 
 	// additional information about game - hoard, ranking
-	eff=(int)((float)((float)PlayerCfg.NetlifeKills/((float)PlayerCfg.NetlifeKilled+(float)PlayerCfg.NetlifeKills))*100.0);
-	if (eff<0)
-		eff=0;
 
 #if defined(DXX_BUILD_DESCENT_II)
 	if (game_mode_hoard())
@@ -252,13 +240,21 @@ static void show_netplayerinfo()
 #endif
 	if (!PlayerCfg.NoRankings)
 	{
+		const int ieff = (PlayerCfg.NetlifeKills + PlayerCfg.NetlifeKilled <= 0)
+			? 0
+			: static_cast<int>(
+				static_cast<float>(PlayerCfg.NetlifeKills) / (
+					static_cast<float>(PlayerCfg.NetlifeKilled) + static_cast<float>(PlayerCfg.NetlifeKills)
+				) * 100.0
+			);
+		const unsigned eff = ieff < 0 ? 0 : static_cast<unsigned>(ieff);
 		gr_printf(0x8000,y,"Your lifetime efficiency of %d%% (%d/%d)",eff,PlayerCfg.NetlifeKills,PlayerCfg.NetlifeKilled);
-		y+=LINE_SPACING;
+		y += line_spacing;
 		if (eff<60)
 			gr_printf(0x8000,y,"is %s your ranking.",eff_strings[eff/10]);
 		else
 			gr_string(0x8000,y,"is serving you well.");
-		y+=LINE_SPACING;
+		y += line_spacing;
 		gr_printf(0x8000,y,"your rank is: %s",RankStrings[GetMyNetRanking()]);
 	}
 }
@@ -280,7 +276,7 @@ static void draw_window_label()
 			case OBJ_FIREBALL:	viewer_name = "Fireball"; break;
 			case OBJ_ROBOT:		viewer_name = "Robot";
 #ifdef EDITOR
-										viewer_id = Robot_names[get_robot_id(Viewer)];
+				viewer_id = Robot_names[get_robot_id(vcobjptr(Viewer))];
 #endif
 				break;
 			case OBJ_HOSTAGE:		viewer_name = "Hostage"; break;
@@ -289,7 +285,7 @@ static void draw_window_label()
 			case OBJ_CAMERA:		viewer_name = "Camera"; break;
 			case OBJ_POWERUP:		viewer_name = "Powerup";
 #ifdef EDITOR
-										viewer_id = Powerup_names[get_powerup_id(Viewer)];
+				viewer_id = Powerup_names[get_powerup_id(vcobjptr(Viewer))];
 #endif
 				break;
 			case OBJ_DEBRIS:		viewer_name = "Debris"; break;
@@ -309,7 +305,7 @@ static void draw_window_label()
 
 		gr_set_curfont(GAME_FONT);
 		gr_set_fontcolor(BM_XRGB(31,0,0),-1);
-		gr_printf( 0x8000, (SHEIGHT/10), "%li: %s [%s] View - %s",(long)(Viewer-Objects), viewer_name, viewer_id, control_name );
+		gr_printf(0x8000, (SHEIGHT/10), "%hu: %s [%s] View - %s", static_cast<objnum_t>(Viewer - Objects), viewer_name, viewer_id, control_name);
 
 	}
 }
@@ -379,7 +375,7 @@ static void game_draw_hud_stuff()
 	if (Newdemo_state == ND_STATE_PLAYBACK)
 		Game_mode = GM_NORMAL;
 
-	if ( Player_is_dead )
+	if (Player_dead_state != player_dead_state::no)
 		player_dead_message();
 }
 
@@ -404,19 +400,19 @@ static const char *get_missile_name(const unsigned laser_type)
 {
 	switch(laser_type)
 	{
-		case CONCUSSION_ID:
+		case weapon_id_type::CONCUSSION_ID:
 			return "CONCUSSION";
-		case HOMING_ID:
+		case weapon_id_type::HOMING_ID:
 			return "HOMING";
-		case SMART_ID:
+		case weapon_id_type::SMART_ID:
 			return "SMART";
-		case MEGA_ID:
+		case weapon_id_type::MEGA_ID:
 			return "MEGA";
-		case FLASH_ID:
+		case weapon_id_type::FLASH_ID:
 			return "FLASH";
-		case MERCURY_ID:
+		case weapon_id_type::MERCURY_ID:
 			return "MERCURY";
-		case EARTHSHAKER_ID:
+		case weapon_id_type::EARTHSHAKER_ID:
 			return "SHAKER";
 		default:
 			return "MISSILE";	// Bad!
@@ -435,21 +431,21 @@ static void clear_missile_viewer()
 }
 
 __attribute_warn_unused_result
-static bool is_viewable_missile(weapon_type_t laser_type)
+static bool is_viewable_missile(weapon_id_type laser_type)
 {
-	return laser_type == CONCUSSION_ID ||
-		laser_type == HOMING_ID ||
-		laser_type == SMART_ID ||
-		laser_type == MEGA_ID ||
-		laser_type == FLASH_ID ||
-		laser_type == GUIDEDMISS_ID ||
-		laser_type == MERCURY_ID ||
-		laser_type == EARTHSHAKER_ID;
+	return laser_type == weapon_id_type::CONCUSSION_ID ||
+		laser_type == weapon_id_type::HOMING_ID ||
+		laser_type == weapon_id_type::SMART_ID ||
+		laser_type == weapon_id_type::MEGA_ID ||
+		laser_type == weapon_id_type::FLASH_ID ||
+		laser_type == weapon_id_type::GUIDEDMISS_ID ||
+		laser_type == weapon_id_type::MERCURY_ID ||
+		laser_type == weapon_id_type::EARTHSHAKER_ID;
 }
 
 static bool choose_missile_viewer()
 {
-	if (unlikely(!PlayerCfg.MissileViewEnabled))
+	if (unlikely(PlayerCfg.MissileViewEnabled == MissileViewMode::None))
 		return false;
 	const auto need_new_missile_viewer = []{
 		if (!Missile_viewer)
@@ -485,7 +481,7 @@ static bool choose_missile_viewer()
 		const auto laser_type = get_weapon_id(o);
 		if (!is_viewable_missile(laser_type))
 			continue;
-		if (o->ctype.laser_info.parent_num == Players[Player_num].objnum)
+		if (o->ctype.laser_info.parent_num == get_local_player().objnum)
 		{
 			if (!better_match(local_player_missile, o))
 				continue;
@@ -495,14 +491,16 @@ static bool choose_missile_viewer()
 		{
 			if (!better_match(other_player_missile, o))
 				continue;
-			if (game_mode & GM_MULTI_COOP)
+			if (PlayerCfg.MissileViewEnabled != MissileViewMode::EnabledSelfAndAllies)
+                                continue;
+			else if (game_mode & GM_MULTI_COOP)
 			{
 				/* Always allow missiles of other players */
 			}
 			else if (game_mode & GM_TEAM)
 			{
 				/* Allow missiles from same team */
-				if (get_team(Player_num) != get_team(Objects[o->ctype.laser_info.parent_num].id))
+				if (get_team(Player_num) != get_team(get_player_id(vcobjptr(o->ctype.laser_info.parent_num))))
 					continue;
 			}
 			else
@@ -536,7 +534,7 @@ static void show_extra_views()
 				do_cockpit_window_view(0,&DemoLeftExtra,DemoRearCheck[DemoDoLeft],DemoWBUType[DemoDoLeft],DemoExtraMessage[DemoDoLeft]);
 		}
 		else
-			do_cockpit_window_view(0,0,WBU_WEAPON,NULL);
+			do_cockpit_window_view(0,WBU_WEAPON);
 	
 		if (DemoDoRight)
 		{
@@ -550,14 +548,17 @@ static void show_extra_views()
 			}
 		}
 		else
-			do_cockpit_window_view(1,0,WBU_WEAPON,NULL);
+			do_cockpit_window_view(1,WBU_WEAPON);
 		
 		DemoDoLeft=DemoDoRight=0;
 		DemoDoingLeft=DemoDoingRight=0;
 		return;
 	}
 
-	if (Guided_missile[Player_num] && Guided_missile[Player_num]->type==OBJ_WEAPON && Guided_missile[Player_num]->id==GUIDEDMISS_ID && Guided_missile[Player_num]->signature==Guided_missile_sig[Player_num]) 
+	if (Guided_missile[Player_num] &&
+		Guided_missile[Player_num]->type == OBJ_WEAPON &&
+		get_weapon_id(*Guided_missile[Player_num]) == weapon_id_type::GUIDEDMISS_ID &&
+		Guided_missile[Player_num]->signature == Guided_missile_sig[Player_num])
 	{
 		if (PlayerCfg.GuidedInBigWindow)
 		{
@@ -576,20 +577,20 @@ static void show_extra_views()
 
 		if (Guided_missile[Player_num]) {		//used to be active
 			if (!PlayerCfg.GuidedInBigWindow)
-				do_cockpit_window_view(1,0,WBU_STATIC,NULL);
+				do_cockpit_window_view(1,WBU_STATIC);
 			Guided_missile[Player_num] = NULL;
 		}
 		if (choose_missile_viewer())
 		//do missile view
 			{
   				RenderingType=2+(1<<4);
-				do_cockpit_window_view(1,Missile_viewer,0,WBU_MISSILE,get_missile_name(Missile_viewer->id));
+				do_cockpit_window_view(1, Missile_viewer, 0, WBU_MISSILE, get_missile_name(get_weapon_id(*Missile_viewer)));
 				did_missile_view=1;
 			}
 			else {
 				clear_missile_viewer();
 				RenderingType=255;
-				do_cockpit_window_view(1,0,WBU_STATIC,NULL);
+				do_cockpit_window_view(1,WBU_STATIC);
 			}
 	}
 
@@ -610,7 +611,7 @@ static void show_one_extra_view(const int w)
 		switch (PlayerCfg.Cockpit3DView[w]) {
 			case CV_NONE:
 				RenderingType=255;
-				do_cockpit_window_view(w,0,WBU_WEAPON,NULL);
+				do_cockpit_window_view(w,WBU_WEAPON);
 				break;
 			case CV_REAR:
 				if (Rear_view) {		//if big window is rear view, show front here
@@ -625,7 +626,7 @@ static void show_one_extra_view(const int w)
 			case CV_ESCORT: {
 				auto buddy = find_escort();
 				if (buddy == object_none) {
-					do_cockpit_window_view(w,0,WBU_WEAPON,NULL);
+					do_cockpit_window_view(w,WBU_WEAPON);
 					PlayerCfg.Cockpit3DView[w] = CV_NONE;
 				}
 				else {
@@ -640,9 +641,9 @@ static void show_one_extra_view(const int w)
 	         RenderingType=255; // don't handle coop stuff			
 				
 				if (player!=-1 && Players[player].connected && ((Game_mode & GM_MULTI_COOP) || ((Game_mode & GM_TEAM) && (get_team(player) == get_team(Player_num)))))
-					do_cockpit_window_view(w,&Objects[Players[Coop_view_player[w]].objnum],0,WBU_COOP,Players[Coop_view_player[w]].callsign);
+					do_cockpit_window_view(w, vobjptr(Players[Coop_view_player[w]].objnum), 0, WBU_COOP, Players[Coop_view_player[w]].callsign);
 				else {
-					do_cockpit_window_view(w,0,WBU_WEAPON,NULL);
+					do_cockpit_window_view(w,WBU_WEAPON);
 					PlayerCfg.Cockpit3DView[w] = CV_NONE;
 				}
 				break;
@@ -655,7 +656,7 @@ static void show_one_extra_view(const int w)
 					break;
 				}
 				sprintf(label,"Marker %d",Marker_viewer_num[w]+1);
-				do_cockpit_window_view(w,&Objects[MarkerObject[Marker_viewer_num[w]]],0,WBU_MARKER,label);
+				do_cockpit_window_view(w, vobjptr(MarkerObject[Marker_viewer_num[w]]), 0, WBU_MARKER, label);
 				break;
 			}
 			default:
@@ -674,7 +675,12 @@ void game_render_frame_mono()
 
 	gr_set_current_canvas(&Screen_3d_window);
 #if defined(DXX_BUILD_DESCENT_II)
-	if (Guided_missile[Player_num] && Guided_missile[Player_num]->type==OBJ_WEAPON && Guided_missile[Player_num]->id==GUIDEDMISS_ID && Guided_missile[Player_num]->signature==Guided_missile_sig[Player_num] && PlayerCfg.GuidedInBigWindow) {
+	if (PlayerCfg.GuidedInBigWindow &&
+		Guided_missile[Player_num] &&
+		Guided_missile[Player_num]->type == OBJ_WEAPON &&
+		get_weapon_id(*Guided_missile[Player_num]) == weapon_id_type::GUIDEDMISS_ID &&
+		Guided_missile[Player_num]->signature == Guided_missile_sig[Player_num])
+	{
 		object *viewer_save = Viewer;
 
 		if (PlayerCfg.CockpitMode[1]==CM_FULL_COCKPIT || PlayerCfg.CockpitMode[1]==CM_REAR_VIEW)
@@ -759,7 +765,7 @@ void toggle_cockpit()
 {
 	enum cockpit_mode_t new_mode=CM_FULL_SCREEN;
 
-	if (Rear_view || Player_is_dead)
+	if (Rear_view || Player_dead_state != player_dead_state::no)
 		return;
 
 	switch (PlayerCfg.CockpitMode[1])
@@ -859,20 +865,20 @@ void game_render_frame()
 //show a message in a nice little box
 void show_boxed_message(const char *msg, int RenderFlag)
 {
-	int w,h,aw;
+	int w,h;
 	int x,y;
 	
 	gr_set_current_canvas(NULL);
 	gr_set_curfont( MEDIUM1_FONT );
 	gr_set_fontcolor(BM_XRGB(31, 31, 31), -1);
-	gr_get_string_size(msg,&w,&h,&aw);
+	gr_get_string_size(msg, &w, &h, nullptr);
 	
 	x = (SWIDTH-w)/2;
 	y = (SHEIGHT-h)/2;
 	
 	nm_draw_background(x-BORDERX,y-BORDERY,x+w+BORDERX,y+h+BORDERY);
 	
-	gr_string( 0x8000, y, msg );
+	gr_string(0x8000, y, msg, w, h);
 	
 	// If we haven't drawn behind it, need to flip
 	if (!RenderFlag)

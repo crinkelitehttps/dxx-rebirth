@@ -20,7 +20,7 @@
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #define for_each_multiplayer_command(VALUE)	\
-	VALUE(MULTI_POSITION              , 25)	\
+	VALUE(MULTI_POSITION              , 1+sizeof(quaternionpos))	\
 	VALUE(MULTI_REAPPEAR              , 4)	\
 	VALUE(MULTI_FIRE                  , 18)	\
 	VALUE(MULTI_FIRE_TRACK            , 21)	\
@@ -38,7 +38,7 @@
 	VALUE(MULTI_CONTROLCEN_FIRE      , 16)	\
 	VALUE(MULTI_CREATE_POWERUP       , 19)	\
 	VALUE(MULTI_DECLOAK              , 2)	\
-	VALUE(MULTI_ROBOT_POSITION       , 5+sizeof(shortpos))	\
+	VALUE(MULTI_ROBOT_POSITION       , 5+sizeof(quaternionpos))	\
 	VALUE(MULTI_PLAYER_DERES         , DXX_MP_SIZE_PLAYER_RELATED)	\
 	VALUE(MULTI_DOOR_OPEN            , DXX_MP_SIZE_DOOR_OPEN)	\
 	VALUE(MULTI_ROBOT_EXPLODE        , 7)	\
@@ -65,9 +65,8 @@
 	VALUE(MULTI_KILL_HOST            , 7)	\
 	VALUE(MULTI_KILL_CLIENT          , 5)	\
 	VALUE(MULTI_RANK                 , 3)	\
+	VALUE(MULTI_DROP_WEAPON          , 10)	\
 	D2X_MP_COMMANDS(VALUE)	\
-
-#endif
 
 #if defined(DXX_BUILD_DESCENT_I)
 #define DXX_MP_SIZE_PLAYER_RELATED	58
@@ -80,7 +79,6 @@
 #define DXX_MP_SIZE_DOOR_OPEN	5
 #define D2X_MP_COMMANDS(VALUE)	\
 	VALUE(MULTI_MARKER               , 55)	\
-	VALUE(MULTI_DROP_WEAPON          , 10)	\
 	VALUE(MULTI_GUIDED               , 3+sizeof(shortpos))	\
 	VALUE(MULTI_STOLEN_ITEMS         , 11)	\
 	VALUE(MULTI_WALL_STATUS          , 6)	/* send to new players */	\
@@ -121,15 +119,12 @@ static inline void multi_send_data(ubyte *buf, unsigned len, int priority)
 {
 	buf[0] = C;
 	unsigned expected = command_length<C>::value;
+#ifdef DXX_CONSTANT_TRUE
+	if (DXX_CONSTANT_TRUE(len != expected))
+		DXX_ALWAYS_ERROR_FUNCTION(dxx_trap_multi_send_data, "wrong packet size");
+#endif
 	if (len != expected)
 	{
-#ifdef DXX_HAVE_BUILTIN_CONSTANT_P
-		/* Restate (len != expected) for <gcc-4.9.  Otherwise it reports
-		 * failure on valid inputs.
-		 */
-		if (__builtin_constant_p(len != expected) && len != expected)
-			DXX_ALWAYS_ERROR_FUNCTION(dxx_trap_multi_send_data, "wrong packet size");
-#endif
 		Error("multi_send_data: Packet type %i length: %i, expected: %i\n", C, len, expected);
 	}
 	_multi_send_data(buf, len, priority);
@@ -158,3 +153,5 @@ static inline decltype(serial::pad<1, static_cast<uint8_t>(C)>()) multiplayer_co
 	static_assert(static_cast<uint8_t>(C) == static_cast<unsigned>(C), "command truncated");
 	return serial::pad<1, static_cast<uint8_t>(C)>();
 }
+
+#endif

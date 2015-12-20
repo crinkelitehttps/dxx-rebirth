@@ -34,6 +34,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "game.h"
 #include "object.h"
 #include "player.h"
+#include "weapon.h"
 #include "bm.h"
 #include "controls.h"
 #include "render.h"
@@ -66,12 +67,18 @@ void read_flying_controls(const vobjptr_t obj)
 	Assert(FrameTime > 0); 		//Get MATT if hit this!
 
 #if defined(DXX_BUILD_DESCENT_II)
-	if ((obj->type!=OBJ_PLAYER) || (obj->id!=Player_num)) return;	//references to player_ship require that this obj be the player
+	if (obj->type != OBJ_PLAYER || get_player_id(obj) != Player_num)
+		return;	//references to player_ship require that this obj be the player
 
-	if (Guided_missile[Player_num] && Guided_missile[Player_num]->signature==Guided_missile_sig[Player_num]) {
+	const auto control_guided_missile = [&] {
+		const auto m = Guided_missile[Player_num];
+		if (!m)
+			return false;
+		if (m->type != OBJ_WEAPON)
+			return false;
+		if (m->signature != Guided_missile_sig[Player_num])
+			return false;
 		vms_angvec rotangs;
-		fix speed;
-
 		//this is a horrible hack.  guided missile stuff should not be
 		//handled in the middle of a routine that is dealing with the player
 
@@ -82,16 +89,16 @@ void read_flying_controls(const vobjptr_t obj)
 		rotangs.h = Controls.heading_time / 2 + Seismic_tremor_magnitude/64;
 
 		const auto &&rotmat = vm_angles_2_matrix(rotangs);
-		Guided_missile[Player_num]->orient = vm_matrix_x_matrix(Guided_missile[Player_num]->orient, rotmat);
+		m->orient = vm_matrix_x_matrix(m->orient, rotmat);
 
-		speed = Weapon_info[Guided_missile[Player_num]->id].speed[Difficulty_level];
+		const auto speed = Weapon_info[get_weapon_id(*m)].speed[Difficulty_level];
 
-		vm_vec_copy_scale(Guided_missile[Player_num]->mtype.phys_info.velocity,Guided_missile[Player_num]->orient.fvec,speed);
+		vm_vec_copy_scale(m->mtype.phys_info.velocity, m->orient.fvec, speed);
 		if (Game_mode & GM_MULTI)
-			multi_send_guided_info (Guided_missile[Player_num],0);
-
-	}
-	else
+			multi_send_guided_info(m, 0);
+		return true;
+	};
+	if (!control_guided_missile())
 #endif
 	{
 		obj->mtype.phys_info.rotthrust.x = Controls.pitch_time;
@@ -102,7 +109,7 @@ void read_flying_controls(const vobjptr_t obj)
 	forward_thrust_time = Controls.forward_thrust_time;
 
 #if defined(DXX_BUILD_DESCENT_II)
-	if (Players[Player_num].flags & PLAYER_FLAGS_AFTERBURNER)
+	if (get_local_player_flags() & PLAYER_FLAGS_AFTERBURNER)
 	{
 		if (Controls.state.afterburner) {			//player has key down
 			{
@@ -133,14 +140,14 @@ void read_flying_controls(const vobjptr_t obj)
 			//charge up to full
 			charge_up = min(FrameTime/8,f1_0 - Afterburner_charge);	//recharge over 8 seconds
 	
-			cur_energy = max(Players[Player_num].energy-i2f(10),0);	//don't drop below 10
+			cur_energy = max(get_local_player_energy()-i2f(10),0);	//don't drop below 10
 
 			//maybe limit charge up by energy
 			charge_up = min(charge_up,cur_energy/10);
 	
 			Afterburner_charge += charge_up;
 	
-			Players[Player_num].energy -= charge_up * 100 / 10;	//full charge uses 10% of energy
+			get_local_player_energy() -= charge_up * 100 / 10;	//full charge uses 10% of energy
 		}
 	}
 #endif
@@ -188,7 +195,7 @@ void read_flying_controls(const vobjptr_t obj)
 	}
 
 	// moved here by WraithX
-	if (Player_is_dead)
+	if (Player_dead_state != player_dead_state::no)
 	{
 		//vm_vec_zero(&obj->mtype.phys_info.rotthrust); // let dead players rotate, changed by WraithX
 		vm_vec_zero(obj->mtype.phys_info.thrust);  // don't let dead players move, changed by WraithX

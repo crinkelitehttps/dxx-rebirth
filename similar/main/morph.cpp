@@ -45,7 +45,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 using std::max;
 
-morph_data morph_objects[MAX_MORPH_OBJECTS];
+array<morph_data, MAX_MORPH_OBJECTS> morph_objects;
 
 //returns ptr to data for this object, or NULL if none
 morph_data *find_morph_data(const vobjptr_t obj)
@@ -377,6 +377,7 @@ static void draw_model(polygon_model_points &robot_points, polymodel *pm, int su
 		if (mn == submodel_num) {
  			int i;
 
+			array<bitmap_index, MAX_POLYOBJ_TEXTURES> texture_list_index;
 			for (i=0;i<pm->n_textures;i++)		{
 				texture_list_index[i] = ObjBitmaps[ObjBitmapPtrs[pm->first_texture+i]];
 				texture_list[i] = &GameBitmaps[ObjBitmaps[ObjBitmapPtrs[pm->first_texture+i]].index];

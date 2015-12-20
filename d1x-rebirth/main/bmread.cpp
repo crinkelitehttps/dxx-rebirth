@@ -115,7 +115,7 @@ static sbyte 		bm_flag = BM_NONE;
 static int 			abm_flag = 0;
 static int 			rod_flag = 0;
 static short		wall_open_sound, wall_close_sound,wall_explodes,wall_blastable, wall_hidden;
-float		vlighting=0;
+static float		vlighting=0;
 static int			obj_eclip;
 static int			dest_vclip;		//what vclip to play when exploding
 static int			dest_eclip;		//what eclip to play when exploding
@@ -566,12 +566,12 @@ void verify_textures()
 	if (j) Error("There are game textures that are not 64x64");
 }
 
-static void set_lighting_flag(sbyte *bp)
+static void set_lighting_flag(grs_bitmap &bmp)
 {
 	if (vlighting < 0)
-		*bp |= BM_FLAG_NO_LIGHTING;
+		bmp.bm_flags |= BM_FLAG_NO_LIGHTING;
 	else
-		*bp &= (0xff ^ BM_FLAG_NO_LIGHTING);
+		bmp.bm_flags &= ~BM_FLAG_NO_LIGHTING;
 }
 
 static void set_texture_name(const char *name)
@@ -600,7 +600,7 @@ static void bm_read_eclip(const std::string &dest_bm, const char *const arg, int
 
 		Assert(clip_count < frames);
 		Effects[clip_num].vc.frames[clip_count] = bitmap;
-		set_lighting_flag(&GameBitmaps[bitmap.index].bm_flags);
+		set_lighting_flag(GameBitmaps[bitmap.index]);
 
 		Assert(!obj_eclip);		//obj eclips for non-abm files not supported!
 		Assert(crit_flag==0);
@@ -629,7 +629,7 @@ static void bm_read_eclip(const std::string &dest_bm, const char *const arg, int
 		Effects[clip_num].vc.frame_time = Effects[clip_num].vc.play_time/Effects[clip_num].vc.num_frames;
 
 		clip_count = 0;	
-		set_lighting_flag( &GameBitmaps[bm[clip_count].index].bm_flags);
+		set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 		Effects[clip_num].vc.frames[clip_count] = bm[clip_count];
 
 		if (!obj_eclip && !crit_flag) {
@@ -657,7 +657,7 @@ static void bm_read_eclip(const std::string &dest_bm, const char *const arg, int
 		//if for an object, Effects_bm_ptrs set in object load
 
 		for(clip_count=1;clip_count < Effects[clip_num].vc.num_frames; clip_count++) {
-			set_lighting_flag( &GameBitmaps[bm[clip_count].index].bm_flags);
+			set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 			Effects[clip_num].vc.frames[clip_count] = bm[clip_count];
 		}
 
@@ -749,7 +749,7 @@ static void bm_read_wclip(char *const arg, int skip)
 		WallAnims[clip_num].open_sound = wall_open_sound;
 		WallAnims[clip_num].close_sound = wall_close_sound;
 		Textures[texture_count] = bitmap;
-		set_lighting_flag(&GameBitmaps[bitmap.index].bm_flags);
+		set_lighting_flag(GameBitmaps[bitmap.index]);
 		set_texture_name( arg );
 		Assert(texture_count < MAX_TEXTURES);
 		texture_count++;
@@ -774,11 +774,11 @@ static void bm_read_wclip(char *const arg, int skip)
 
 		if (clip_num >= Num_wall_anims) Num_wall_anims = clip_num+1;
 
-		set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+		set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 
 		for (clip_count=0;clip_count < WallAnims[clip_num].num_frames; clip_count++)	{
 			Textures[texture_count] = bm[clip_count];
-			set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+			set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 			WallAnims[clip_num].frames[clip_count] = texture_count;
 			REMOVE_DOTS(arg);
 			snprintf(&TmapInfo[texture_count].filename[0u], TmapInfo[texture_count].filename.size(), "%s#%d", arg, clip_count);
@@ -803,7 +803,7 @@ static void bm_read_vclip(const char *const arg, int skip)
 		Vclip[clip_num].frame_time = fl2f(play_time)/frames;
 		Vclip[clip_num].light_value = fl2f(vlighting);
 		Vclip[clip_num].sound_num = sound_num;
-		set_lighting_flag(&GameBitmaps[bi.index].bm_flags);
+		set_lighting_flag(GameBitmaps[bi.index]);
 		Assert(clip_count < frames);
 		Vclip[clip_num].frames[clip_count++] = bi;
 		if (rod_flag) {
@@ -827,10 +827,10 @@ static void bm_read_vclip(const char *const arg, int skip)
 		Vclip[clip_num].frame_time = fl2f(play_time)/Vclip[clip_num].num_frames;
 		Vclip[clip_num].light_value = fl2f(vlighting);
 		Vclip[clip_num].sound_num = sound_num;
-		set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+		set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 
 		for (clip_count=0;clip_count < Vclip[clip_num].num_frames; clip_count++) {
-			set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+			set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 			Vclip[clip_num].frames[clip_count] = bm[clip_count];
 		}
 	}
@@ -872,7 +872,7 @@ static void adjust_field_of_view(array<fix, NDL> &fovp)
 		}
 		ff = ff/360;
 		tt = fl2f(ff);
-		fix_sincos(tt, nullptr, &i);
+		i = fix_cos(tt);
 	}
 }
 
@@ -999,7 +999,7 @@ static void bm_read_robot(char *&arg, int skip)
 	fix			strength = F1_0*10;		// Default strength
 	fix			mass = f1_0*4;
 	fix			drag = f1_0/2;
-	short 		weapon_type = 0;
+	weapon_id_type weapon_type = weapon_id_type::LASER_ID_L1;
 	int			g,s;
 	char			name[ROBOT_NAME_LENGTH];
 	int			contains_count=0, contains_id=0, contains_prob=0, contains_type=0;
@@ -1048,7 +1048,7 @@ static void bm_read_robot(char *&arg, int skip)
 					Error( "In bitmaps.tbl, lighting value of %.2f is out of range 0..1.\n", f2fl(lighting));
 				}
 			} else if (!d_stricmp( arg, "weapon_type" )) {
-				weapon_type = atoi(equal_ptr);
+				weapon_type = static_cast<weapon_id_type>(atoi(equal_ptr));
 			} else if (!d_stricmp( arg, "strength" )) {
 				strength = i2f(atoi(equal_ptr));
 			} else if (!d_stricmp( arg, "mass" )) {
@@ -1213,7 +1213,7 @@ void bm_read_object(char *&arg, int skip)
 	model_num = load_polygon_model(model_name,n_normal_bitmaps,first_bitmap_num,NULL);
 
 	if (type == OL_CONTROL_CENTER)
-		Reactors[0].n_guns = read_model_guns(model_name,Reactors[0].gun_points,Reactors[0].gun_dirs);
+		read_model_guns(model_name, Reactors[0]);
 
 	if ( model_name_dead )
 		Dead_modelnums[model_num]  = load_polygon_model(model_name_dead,N_ObjBitmapPtrs-first_bitmap_num_dead,first_bitmap_num_dead,NULL);
@@ -1311,10 +1311,6 @@ void bm_read_player_ship(char *&arg, int skip)
 
 		arg = strtok( NULL, space_tab );
 	}
-
-	Assert(model_name != NULL);
-
-
 	if (First_multi_bitmap_num!=-1 && last_multi_bitmap_num==-1)
 		last_multi_bitmap_num=N_ObjBitmapPtrs;
 

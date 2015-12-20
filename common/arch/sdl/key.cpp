@@ -28,22 +28,13 @@
 #include "dxxsconf.h"
 #include "compiler-array.h"
 
-static unsigned char Installed = 0;
+namespace dcx {
 
 //-------- Variable accessed by outside functions ---------
-int			keyd_repeat = 0; // 1 = use repeats, 0 no repeats
-volatile unsigned char 	keyd_last_pressed;
-volatile unsigned char 	keyd_last_released;
-volatile unsigned char	keyd_pressed[256];
+static bool keyd_repeat; // 1 = use repeats, 0 no repeats
+pressed_keys keyd_pressed;
 fix64			keyd_time_when_last_pressed;
 array<unsigned char, KEY_BUFFER_SIZE>		unicode_frame_buffer;
-
-struct keyboard
-{
-	ubyte state[256];
-};
-
-static keyboard key_data;
 
 const array<key_props, 256> key_properties = {{
 { "",       255,    SDLK_UNKNOWN                 }, // 0
@@ -304,10 +295,14 @@ const array<key_props, 256> key_properties = {{
 { "W95",    255,    SDLK_WORLD_95      }, // 255
 }};
 
+namespace {
+
 struct d_event_keycommand : d_event
 {
 	int			keycode;
 };
+
+}
 
 static int key_ismodlck(int keycode)
 {
@@ -359,15 +354,53 @@ unsigned char key_ascii()
 		return 255;
 }
 
+void pressed_keys::update(const std::size_t keycode, const uint8_t down)
+{
+	constexpr unsigned all_modifiers_combined = KEY_SHIFTED | KEY_ALTED | KEY_CTRLED | KEY_DEBUGGED | KEY_METAED;
+	constexpr unsigned all_modifiers_shifted = all_modifiers_combined >> modifier_shift;
+	static_assert(all_modifiers_combined == all_modifiers_shifted << modifier_shift, "shift error");
+	static_assert(all_modifiers_shifted == static_cast<uint8_t>(all_modifiers_shifted), "truncation error");
+	uint8_t mask;
+	keyd_pressed.update_pressed(keycode, down);
+	switch (keycode)
+	{
+		case KEY_LSHIFT:
+		case KEY_RSHIFT:
+			mask = KEY_SHIFTED >> modifier_shift;
+			break;
+		case KEY_LALT:
+		case KEY_RALT:
+			mask = KEY_ALTED >> modifier_shift;
+			break;
+		case KEY_LCTRL:
+		case KEY_RCTRL:
+			mask = KEY_CTRLED >> modifier_shift;
+			break;
+		case KEY_DELETE:
+			mask = KEY_DEBUGGED >> modifier_shift;
+			break;
+		case KEY_LMETA:
+		case KEY_RMETA:
+			mask = KEY_METAED >> modifier_shift;
+			break;
+		default:
+			return;
+	}
+	if (down)
+		modifier_cache |= mask;
+	else
+		modifier_cache &= ~mask;
+}
+
 void key_handler(SDL_KeyboardEvent *kevent)
 {
-	int event_keysym=-1, key_state;
+	int event_keysym=-1;
 
 	// Read SDLK symbol and state
         event_keysym = kevent->keysym.sym;
 		if (event_keysym == SDLK_UNKNOWN)
 			return;
-        key_state = (kevent->state == SDL_PRESSED)?1:0;
+	const auto key_state = (kevent->state != SDL_RELEASED);
 
 	// fill the unicode frame-related unicode buffer 
 	if (key_state && kevent->keysym.unicode > 31 && kevent->keysym.unicode < 255)
@@ -400,23 +433,8 @@ void key_handler(SDL_KeyboardEvent *kevent)
 		d_event_keycommand event;
 
 		// now update the key props
-		if (key_state) {
-			keyd_last_pressed = keycode;
-			keyd_pressed[keycode] = key_data.state[keycode] = 1;
-		} else {
-			keyd_pressed[keycode] = key_data.state[keycode] = 0;
-		}
-
-		if ( keyd_pressed[KEY_LSHIFT] || keyd_pressed[KEY_RSHIFT])
-			keycode |= KEY_SHIFTED;
-		if ( keyd_pressed[KEY_LALT] || keyd_pressed[KEY_RALT])
-			keycode |= KEY_ALTED;
-		if ( keyd_pressed[KEY_LCTRL] || keyd_pressed[KEY_RCTRL])
-			keycode |= KEY_CTRLED;
-		if ( keyd_pressed[KEY_DELETE] )
-			keycode |= KEY_DEBUGGED;
-		if ( keyd_pressed[KEY_LMETA] || keyd_pressed[KEY_RMETA])
-			keycode |= KEY_METAED;
+		keyd_pressed.update(keycode, key_state);
+		keycode |= keyd_pressed.get_modifiers();
 
 		// We allowed the key to be added to the queue for now,
 		// because there are still input loops without associated windows
@@ -435,16 +453,8 @@ void key_handler(SDL_KeyboardEvent *kevent)
 	}
 }
 
-void key_close()
-{
-      Installed = 0;
-}
-
 void key_init()
 {
-	if (Installed) return;
-
-	Installed=1;
 	SDL_EnableUNICODE(1);
 	key_toggle_repeat(1);
 
@@ -453,28 +463,25 @@ void key_init()
 	key_flush();
 }
 
+static void restore_sticky_key(const uint8_t *keystate, const unsigned i)
+{
+	if (keystate[key_properties[i].sym]) // do not flush status of sticky keys
+	{
+		keyd_pressed.update_pressed(i, 1);
+	}
+}
+
 void key_flush()
 {
-	Uint8 *keystate = SDL_GetKeyState(NULL);
-
-	if (!Installed)
-		key_init();
-
 	//Clear the unicode buffer
 	unicode_frame_buffer = {};
-
-	for (int i=0; i<256; i++ ) {
-		if (key_ismodlck(i) == KEY_ISLCK && keystate[key_properties[i].sym] && !GameArg.CtlNoStickyKeys) // do not flush status of sticky keys
-		{
-			keyd_pressed[i] = 1;
-			key_data.state[i] = 0;
-		}
-		else
-		{
-			keyd_pressed[i] = 0;
-			key_data.state[i] = 1;
-		}
-	}
+	keyd_pressed = {};
+	if (unlikely(CGameArg.CtlNoStickyKeys))
+		return;
+	const auto &keystate = SDL_GetKeyState(NULL);
+	restore_sticky_key(keystate, KEY_NUMLOCK);
+	restore_sticky_key(keystate, KEY_SCROLLOCK);
+	restore_sticky_key(keystate, KEY_CAPSLOCK);
 }
 
 int event_key_get(const d_event &event)
@@ -487,15 +494,7 @@ int event_key_get(const d_event &event)
 // same as above but without mod states
 int event_key_get_raw(const d_event &event)
 {
-	auto &e = static_cast<const d_event_keycommand &>(event);
-	Assert(e.type == EVENT_KEY_COMMAND || e.type == EVENT_KEY_RELEASE);
-	auto keycode = e.keycode;
-	if ( keycode & KEY_SHIFTED ) keycode &= ~KEY_SHIFTED;
-	if ( keycode & KEY_ALTED ) keycode &= ~KEY_ALTED;
-	if ( keycode & KEY_CTRLED ) keycode &= ~KEY_CTRLED;
-	if ( keycode & KEY_DEBUGGED ) keycode &= ~KEY_DEBUGGED;
-	if ( keycode & KEY_METAED ) keycode &= ~KEY_METAED;
-	return keycode;
+	return event_key_get(event) & ~(KEY_SHIFTED | KEY_ALTED | KEY_CTRLED | KEY_DEBUGGED | KEY_METAED);
 }
 
 void key_toggle_repeat(int enable)
@@ -511,4 +510,6 @@ void key_toggle_repeat(int enable)
 		keyd_repeat = 0;
 	}
 	key_flush();
+}
+
 }

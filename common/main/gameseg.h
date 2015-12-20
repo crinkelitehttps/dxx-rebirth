@@ -23,9 +23,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-#ifndef _GAMESEG_H
-#define _GAMESEG_H
+#pragma once
 
 #include "pstypes.h"
 #include "maths.h"
@@ -49,6 +47,7 @@ struct segment_depth_array_t : public array<ubyte, MAX_SEGMENTS> {};
 extern unsigned Highest_vertex_index;                   // Highest index in Vertices and Vertex_active, an efficiency hack
 extern int	Doing_lighting_hack_flag;
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 void compute_center_point_on_side(vms_vector &vp,vcsegptr_t sp,int side);
 static inline vms_vector compute_center_point_on_side(const vcsegptr_t sp,int side)
 {
@@ -75,6 +74,11 @@ static inline side_vertnum_list_t get_side_verts(vcsegptr_t segnum,int sidenum)
 }
 
 struct vertex_array_list_t : array<int, 6> {};
+struct vertex_vertnum_pair
+{
+	int vertex, vertnum;
+};
+using vertex_vertnum_array_list = array<vertex_vertnum_pair, 6>;
 
 #ifdef EDITOR
 //      Create all vertex lists (1 or 2) for faces on a side.
@@ -87,24 +91,31 @@ struct vertex_array_list_t : array<int, 6> {};
 // Note: these are not absolute vertex numbers, but are relative to the segment
 // Note:  for triagulated sides, the middle vertex of each trianle is the one NOT
 //   adjacent on the diagonal edge
-uint_fast32_t create_all_vertex_lists(vertex_array_list_t &vertices, vcsegptr_t segnum, int sidenum);
+uint_fast32_t create_all_vertex_lists(vertex_array_list_t &vertices, vcsegptr_t segnum, const side *sidep, uint_fast32_t sidenum);
 __attribute_warn_unused_result
-static inline std::pair<uint_fast32_t, vertex_array_list_t> create_all_vertex_lists(vcsegptr_t segnum, int sidenum)
+static inline std::pair<uint_fast32_t, vertex_array_list_t> create_all_vertex_lists(vcsegptr_t segnum, const side *sidep, uint_fast32_t sidenum)
 {
 	vertex_array_list_t r;
-	auto n = create_all_vertex_lists(r, segnum, sidenum);
+	auto n = create_all_vertex_lists(r, segnum, sidep, sidenum);
 	return {n, r};
 }
 #endif
 
 //like create_all_vertex_lists(), but generate absolute point numbers
-uint_fast32_t create_abs_vertex_lists(vertex_array_list_t &vertices, vcsegptr_t segnum, int sidenum);
+uint_fast32_t create_abs_vertex_lists(vertex_array_list_t &vertices, vcsegptr_t segnum, const side *sidep, uint_fast32_t sidenum);
+
 __attribute_warn_unused_result
-static inline std::pair<uint_fast32_t, vertex_array_list_t> create_abs_vertex_lists(vcsegptr_t segnum, int sidenum)
+static inline std::pair<uint_fast32_t, vertex_array_list_t> create_abs_vertex_lists(vcsegptr_t segnum, const side *sidep, uint_fast32_t sidenum)
 {
 	vertex_array_list_t r;
-	auto n = create_abs_vertex_lists(r, segnum, sidenum);
+	auto n = create_abs_vertex_lists(r, segnum, sidep, sidenum);
 	return {n, r};
+}
+
+__attribute_warn_unused_result
+static inline std::pair<uint_fast32_t, vertex_array_list_t> create_abs_vertex_lists(vcsegptr_t segp, uint_fast32_t sidenum)
+{
+	return create_abs_vertex_lists(segp, &segp->sides[sidenum], sidenum);
 }
 
 // -----------------------------------------------------------------------------------
@@ -113,13 +124,12 @@ static inline std::pair<uint_fast32_t, vertex_array_list_t> create_abs_vertex_li
 //      If there is one face, it has 4 vertices.
 //      If there are two faces, they both have three vertices, so face #0 is stored in vertices 0,1,2,
 //      face #1 is stored in vertices 3,4,5.
-uint_fast32_t create_all_vertnum_lists(vertex_array_list_t &vertnums, vcsegptr_t segnum, int sidenum);
+void create_all_vertnum_lists(vertex_vertnum_array_list &vertnums, vcsegptr_t segnum, const side *const sidep, uint_fast32_t sidenum);
 __attribute_warn_unused_result
-static inline std::pair<uint_fast32_t, vertex_array_list_t> create_all_vertnum_lists(vcsegptr_t segnum, int sidenum)
+static inline vertex_vertnum_array_list create_all_vertnum_lists(vcsegptr_t segnum, const side *const sidep, uint_fast32_t sidenum)
 {
-	vertex_array_list_t r;
-	auto n = create_all_vertnum_lists(r, segnum, sidenum);
-	return {n, r};
+	vertex_vertnum_array_list r;
+	return create_all_vertnum_lists(r, segnum, sidep, sidenum), r;
 }
 
 //      Given a side, return the number of faces
@@ -127,10 +137,10 @@ int get_num_faces(const side *sidep);
 
 //returns 3 different bitmasks with info telling if this sphere is in
 //this segment.  See segmasks structure for info on fields
-segmasks get_seg_masks(const vms_vector &checkp, vcsegptridx_t segnum, fix rad, const char *calling_file, int calling_linenum);
+segmasks get_seg_masks(const vms_vector &checkp, vcsegptr_t segnum, fix rad);
 
 //this macro returns true if the segnum for an object is correct
-#define check_obj_seg(obj) (get_seg_masks((obj)->pos, (obj)->segnum, 0, __FILE__, __LINE__).centermask == 0)
+#define check_obj_seg(obj) (get_seg_masks((obj)->pos, vcsegptr((obj)->segnum), 0).centermask == 0)
 
 //Tries to find a segment for a point, in the following way:
 // 1. Check the given segment
@@ -184,14 +194,15 @@ static inline vms_vector pick_random_point_in_seg(vcsegptr_t sp)
 }
 
 void validate_segment_side(vsegptridx_t sp, int sidenum);
+#endif
 int check_segment_connections(void);
 void flush_fcd_cache(void);
 unsigned set_segment_depths(int start_seg, array<ubyte, MAX_SEGMENTS> *limit, segment_depth_array_t &depths);
+#if defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 void apply_all_changed_light(void);
 void	set_ambient_sound_flags(void);
-
+}
 #endif
 
 #endif
-
-

@@ -25,14 +25,12 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
-#include "maths.h"
-#include "hudmsg.h"
-#include "player.h"
+#include "fwd-player.h"
 
 struct bitmap_index;
 
 #ifdef __cplusplus
-#include "fwdvalptridx.h"
+#include "fwd-object.h"
 
 //from gauges.c
 
@@ -82,7 +80,7 @@ extern const rgb_array_t player_rgb_normal;
 class rgb_array_wrapper
 {
 public:
-	constexpr const rgb &operator[](std::size_t i) const
+	const rgb &operator[](std::size_t i) const
 	{
 		return player_rgb_normal[i];
 	}
@@ -105,8 +103,8 @@ constexpr rgb_array_wrapper player_rgb{};
 // window user is one of the WBU_ constants.  If rear_view_flag is
 // set, show a rear view.  If label is non-NULL, print the label at
 // the top of the window.
-void do_cockpit_window_view(int win, vobjptridx_t viewer, int rear_view_flag, int user, const char *label);
-void do_cockpit_window_view(int win, int rear_view_flag, int user, const char *label);
+void do_cockpit_window_view(int win, vobjptr_t viewer, int rear_view_flag, int user, const char *label);
+void do_cockpit_window_view(int win, int user);
 #endif
 
 #define GAUGE_HUD_NUMMODES 4

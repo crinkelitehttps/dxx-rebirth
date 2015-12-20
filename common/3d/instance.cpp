@@ -16,12 +16,20 @@
 #include "3d.h"
 #include "globvars.h"
 
+namespace dcx {
+
 #define MAX_INSTANCE_DEPTH	5
+
+namespace {
 
 struct instance_context {
 	vms_matrix m;
 	vms_vector p;
-} instance_stack[MAX_INSTANCE_DEPTH];
+};
+
+}
+
+static array<instance_context, MAX_INSTANCE_DEPTH> instance_stack;
 
 int instance_depth = 0;
 
@@ -75,3 +83,4 @@ void g3_done_instance()
 }
 
 
+}

@@ -19,6 +19,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 
 #include <algorithm>
+#include <stdexcept>
 #include <stdlib.h>
 #include <stdio.h>
 #include <fcntl.h>
@@ -49,6 +50,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 using std::max;
 
+namespace dsx {
+
 #define SOF_USED				1 		// Set if this sample is used
 #define SOF_PLAYING			2		// Set if this sample is playing on a channel
 #define SOF_LINK_TO_OBJ		4		// Sound is linked to a moving object. If object dies, then finishes play and quits.
@@ -77,10 +80,12 @@ struct sound_object
 		} pos;
 		struct {
 			objnum_t			objnum;				// Used if SOF_LINK_TO_OBJ field is used
-			short			objsignature;
+			object_signature_t			objsignature;
 		} obj;
 	} link_type;
 };
+
+constexpr tt::integral_constant<int, -1> RAIIdigi_sound::invalid_channel;
 
 #define MAX_SOUND_OBJECTS 150
 typedef array<sound_object, MAX_SOUND_OBJECTS> sound_objects_t;
@@ -129,7 +134,7 @@ static int digi_unxlat_sound(int soundno)
 	throw std::invalid_argument("sound not loaded");
 }
 
-static void digi_get_sound_loc(const vms_matrix &listener, const vms_vector &listener_pos, segnum_t listener_seg, const vms_vector &sound_pos, segnum_t sound_seg, fix max_volume, int *volume, int *pan, vm_distance max_distance)
+static void digi_get_sound_loc(const vms_matrix &listener, const vms_vector &listener_pos, const vcsegptridx_t listener_seg, const vms_vector &sound_pos, segnum_t sound_seg, fix max_volume, int *volume, int *pan, vm_distance max_distance)
 {
 
 	vms_vector	vector_to_sound;
@@ -188,16 +193,10 @@ void digi_play_sample( int soundno, fix max_volume )
 	digi_start_sound( soundno, max_volume, 0xffff/2, 0, -1, -1, sound_object_none);
 }
 
-void digi_play_sample_3d( int soundno, int angle, int volume, int no_dups )
+void digi_play_sample_3d(int soundno, int angle, int volume)
 {
-
-	no_dups = 1;
-
 	if ( Newdemo_state == ND_STATE_RECORDING )		{
-		if ( no_dups )
 			newdemo_record_sound_3d_once( soundno, angle, volume );
-		else
-			newdemo_record_sound_3d( soundno, angle, volume );
 	}
 
 	soundno = digi_xlat_sound(soundno);
@@ -290,8 +289,10 @@ static void digi_unpause_looping_sound()
 	digi_play_sample_looping_sub();
 }
 
+#if defined(DXX_BUILD_DESCENT_II)
 //hack to not start object when loading level
 int Dont_start_sound_objects = 0;
+#endif
 
 static void digi_start_sound_object(sound_object &s)
 {
@@ -301,8 +302,10 @@ static void digi_start_sound_object(sound_object &s)
 	if ( s.volume <= 0 )
 		return;
 
+#if defined(DXX_BUILD_DESCENT_II)
 	if ( Dont_start_sound_objects )
 		return;
+#endif
 
 	// only use up to half the sound channels for "permanent" sounts
 	if ((s.flags & SOF_PERMANENT) && (N_active_sound_objects >= max(1, digi_max_channels / 4)))
@@ -321,7 +324,7 @@ static void digi_start_sound_object(sound_object &s)
 		N_active_sound_objects++;
 }
 
-static int digi_link_sound_common(cobjptr_t viewer, sound_object &so, const vms_vector &pos, int forever, fix max_volume, const vm_distance max_distance, int soundnum, const segnum_t segnum)
+static void digi_link_sound_common(cobjptr_t viewer, sound_object &so, const vms_vector &pos, int forever, fix max_volume, const vm_distance max_distance, int soundnum, const segnum_t segnum)
 {
 	so.signature=next_signature++;
 	if ( forever )
@@ -331,11 +334,13 @@ static int digi_link_sound_common(cobjptr_t viewer, sound_object &so, const vms_
 	so.max_distance = max_distance;
 	so.volume = 0;
 	so.pan = 0;
+#if defined(DXX_BUILD_DESCENT_II)
 	if (Dont_start_sound_objects) {		//started at level start
 		so.flags |= SOF_PERMANENT;
 		so.channel =  -1;
 	}
 	else
+#endif
 	{
 		digi_get_sound_loc(viewer->orient, viewer->pos, viewer->segnum,
                        pos, segnum, so.max_volume,
@@ -345,20 +350,12 @@ static int digi_link_sound_common(cobjptr_t viewer, sound_object &so, const vms_
 		// just cancel it and be done with it.
 		if ( (so.channel < 0) && (!(so.flags & SOF_PLAY_FOREVER)) )    {
 			so.flags = 0;
-			return -1;
+			return;
 		}
 	}
-	return so.signature;
 }
 
-//sounds longer than this get their 3d aspects updated
-#if defined(DXX_BUILD_DESCENT_I)
-#define SOUND_3D_THRESHHOLD  (digi_sample_rate * 3 / 2)	//1.5 seconds
-#elif defined(DXX_BUILD_DESCENT_II)
-#define SOUND_3D_THRESHHOLD  (GameArg.SndDigiSampleRate * 3 / 2)	//1.5 seconds
-#endif
-
-int digi_link_sound_to_object3( int org_soundnum, const vcobjptridx_t objnum, int forever, fix max_volume, const vm_distance max_distance, int loop_start, int loop_end )
+void digi_link_sound_to_object3( int org_soundnum, const vcobjptridx_t objnum, int forever, fix max_volume, const vm_distance max_distance, int loop_start, int loop_end )
 {
 	const vcobjptr_t viewer{Viewer};
 	int volume,pan;
@@ -366,19 +363,22 @@ int digi_link_sound_to_object3( int org_soundnum, const vcobjptridx_t objnum, in
 
 	soundnum = digi_xlat_sound(org_soundnum);
 
-	if ( max_volume < 0 ) return -1;
+	if (max_volume < 0)
+		return;
 //	if ( max_volume > F1_0 ) max_volume = F1_0;
 
-	if (soundnum < 0 ) return -1;
+	if (soundnum < 0)
+		return;
 	if (GameSounds[soundnum].data==NULL) {
 		Int3();
-		return -1;
+		return;
 	}
-	if ( !forever ) { 		// && GameSounds[soundnum - SOUND_OFFSET].length < SOUND_3D_THRESHHOLD)	{
+	if (!forever)
+	{
 		// Hack to keep sounds from building up...
 		digi_get_sound_loc( viewer->orient, viewer->pos, viewer->segnum, objnum->pos, objnum->segnum, max_volume,&volume, &pan, max_distance );
-		digi_play_sample_3d( org_soundnum, pan, volume, 0 );
-		return -1;
+		digi_play_sample_3d(org_soundnum, pan, volume);
+		return;
 	}
 
 	if ( Newdemo_state == ND_STATE_RECORDING )		{
@@ -387,27 +387,27 @@ int digi_link_sound_to_object3( int org_soundnum, const vcobjptridx_t objnum, in
 
 	auto f = find_sound_object_flags0();
 	if (f.first == f.second)
-		return -1;
+		return;
 	auto &so = *f.first;
 	so.flags = SOF_USED | SOF_LINK_TO_OBJ;
 	so.link_type.obj.objnum = objnum;
 	so.link_type.obj.objsignature = objnum->signature;
 	so.loop_start = loop_start;
 	so.loop_end = loop_end;
-	return digi_link_sound_common(viewer, so, objnum->pos, forever, max_volume, max_distance, soundnum, objnum->segnum);
+	digi_link_sound_common(viewer, so, objnum->pos, forever, max_volume, max_distance, soundnum, objnum->segnum);
 }
 
-int digi_link_sound_to_object2(int org_soundnum, const vcobjptridx_t objnum, int forever, fix max_volume, const vm_distance max_distance)
+void digi_link_sound_to_object2(int org_soundnum, const vcobjptridx_t objnum, int forever, fix max_volume, const vm_distance max_distance)
 {
-	return digi_link_sound_to_object3( org_soundnum, objnum, forever, max_volume, max_distance, -1, -1 );
+	digi_link_sound_to_object3( org_soundnum, objnum, forever, max_volume, max_distance, -1, -1 );
 }
 
-int digi_link_sound_to_object( int soundnum, const vcobjptridx_t objnum, int forever, fix max_volume )
+void digi_link_sound_to_object( int soundnum, const vcobjptridx_t objnum, int forever, fix max_volume )
 {
-	return digi_link_sound_to_object2( soundnum, objnum, forever, max_volume, vm_distance{256*F1_0});
+	digi_link_sound_to_object2( soundnum, objnum, forever, max_volume, vm_distance{256*F1_0});
 }
 
-static int digi_link_sound_to_pos2(int org_soundnum, segnum_t segnum, short sidenum, const vms_vector &pos, int forever, fix max_volume, const vm_distance max_distance)
+static void digi_link_sound_to_pos2(int org_soundnum, const vcsegptridx_t segnum, short sidenum, const vms_vector &pos, int forever, fix max_volume, const vm_distance max_distance)
 {
 	const vcobjptr_t viewer{Viewer};
 	int volume, pan;
@@ -415,40 +415,39 @@ static int digi_link_sound_to_pos2(int org_soundnum, segnum_t segnum, short side
 
 	soundnum = digi_xlat_sound(org_soundnum);
 
-	if ( max_volume < 0 ) return -1;
+	if (max_volume < 0)
+		return;
 //	if ( max_volume > F1_0 ) max_volume = F1_0;
 
-	if (soundnum < 0 ) return -1;
+	if (soundnum < 0)
+		return;
 	if (GameSounds[soundnum].data==NULL) {
 		Int3();
-		return -1;
+		return;
 	}
-
-	if ((segnum<0)||(segnum>Highest_segment_index))
-		return -1;
-
-	if ( !forever ) { 	//&& GameSounds[soundnum - SOUND_OFFSET].length < SOUND_3D_THRESHHOLD)	{
+	if (!forever)
+	{
 		// Hack to keep sounds from building up...
 		digi_get_sound_loc( viewer->orient, viewer->pos, viewer->segnum, pos, segnum, max_volume, &volume, &pan, max_distance );
-		digi_play_sample_3d( org_soundnum, pan, volume, 0 );
-		return -1;
+		digi_play_sample_3d(org_soundnum, pan, volume);
+		return;
 	}
 
 	auto f = find_sound_object_flags0();
 	if (f.first == f.second)
-		return -1;
+		return;
 	auto &so = *f.first;
 	so.flags = SOF_USED | SOF_LINK_TO_POS;
 	so.link_type.pos.segnum = segnum;
 	so.link_type.pos.sidenum = sidenum;
 	so.link_type.pos.position = pos;
 	so.loop_start = so.loop_end = -1;
-	return digi_link_sound_common(viewer, so, pos, forever, max_volume, max_distance, soundnum, segnum);
+	digi_link_sound_common(viewer, so, pos, forever, max_volume, max_distance, soundnum, segnum);
 }
 
-int digi_link_sound_to_pos( int soundnum, segnum_t segnum, short sidenum, const vms_vector &pos, int forever, fix max_volume )
+void digi_link_sound_to_pos(int soundnum, const vcsegptridx_t segnum, short sidenum, const vms_vector &pos, int forever, fix max_volume)
 {
-	return digi_link_sound_to_pos2( soundnum, segnum, sidenum, pos, forever, max_volume, vm_distance{F1_0 * 256});
+	digi_link_sound_to_pos2( soundnum, segnum, sidenum, pos, forever, max_volume, vm_distance{F1_0 * 256});
 }
 
 static void digi_kill_sound(sound_object &s)
@@ -558,20 +557,14 @@ void digi_sync_sounds()
                                 &s.volume, &s.pan, s.max_distance );
 
 			} else if ( s.flags & SOF_LINK_TO_OBJ )	{
-				object * objp;
-
-
-				if ( Newdemo_state == ND_STATE_PLAYBACK )	{
-					int objnum;
-					objnum = newdemo_find_object( s.link_type.obj.objsignature );
-					if ( objnum > -1 )	{
-						objp = &Objects[objnum];
-					} else {
-						objp = &Objects[0];
-					}
-				} else {
-					objp = &Objects[s.link_type.obj.objnum];
-				}
+				const auto objp = [&s]{
+					if (Newdemo_state != ND_STATE_PLAYBACK)
+						return vcobjptr(s.link_type.obj.objnum);
+					auto objnum = newdemo_find_object(s.link_type.obj.objsignature);
+					if (objnum != object_none)
+						return static_cast<vcobjptr_t>(objnum);
+					return vcobjptr(object_first);
+				}();
 
 				if ((objp->type==OBJ_NONE) || (objp->signature!=s.link_type.obj.objsignature))	{
 					// The object that this is linked to is dead, so just end this sound if it is looping.
@@ -774,3 +767,4 @@ void digi_start_sound_queued( short soundnum, fix volume )
 	SoundQ_process();
 }
 
+}

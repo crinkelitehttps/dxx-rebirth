@@ -23,14 +23,16 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _ROBOT_H
-#define _ROBOT_H
+#pragma once
 
 #include "vecmat.h"
 #include "game.h"
 
 #ifdef __cplusplus
 #include "pack.h"
+#include "aistruct.h"
+#include "polyobj.h"
+#include "weapon_id.h"
 
 #define MAX_GUNS 8      //should be multiple of 4 for ubyte array
 
@@ -61,6 +63,7 @@ struct jointlist
 	short offset;
 };
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #if defined(DXX_BUILD_DESCENT_II)
 //robot info flags
 #define RIF_BIG_RADIUS  1   //pad the radius to fix robots firing through walls
@@ -71,35 +74,27 @@ struct jointlist
 struct robot_info : prohibit_void_ptr<robot_info>
 {
 	int     model_num;                  // which polygon model?
-#if defined(DXX_BUILD_DESCENT_I)
-	int			n_guns;								// how many different gun positions
-#endif
 	array<vms_vector, MAX_GUNS>  gun_points;   // where each gun model is
 	array<uint8_t, MAX_GUNS>   gun_submodels;    // which submodel is each gun in?
+	uint16_t score_value;						//	Score from this robot.
 	short   exp1_vclip_num;
 	short   exp1_sound_num;
 	short   exp2_vclip_num;
 	short   exp2_sound_num;
-#if defined(DXX_BUILD_DESCENT_I)
-	short			weapon_type;
-#elif defined(DXX_BUILD_DESCENT_II)
-	sbyte   weapon_type;
-	sbyte   weapon_type2;   //  Secondary weapon number, -1 means none, otherwise gun #0 fires this weapon.
-	sbyte   n_guns;         // how many different gun positions
-#endif
+	weapon_id_type weapon_type;
+	uint8_t   n_guns;         // how many different gun positions
 	sbyte   contains_id;    //  ID of powerup this robot can contain.
 
 	sbyte   contains_count; //  Max number of things this instance can contain.
 	sbyte   contains_prob;  //  Probability that this instance will contain something in N/16
 	sbyte   contains_type;  //  Type of thing contained, robot or powerup, in bitmaps.tbl, !0=robot, 0=powerup
 #if defined(DXX_BUILD_DESCENT_I)
-	int			score_value;						//	Score from this robot.
 #elif defined(DXX_BUILD_DESCENT_II)
 	sbyte   kamikaze;       //  !0 means commits suicide when hits you, strength thereof. 0 means no.
 
-	short   score_value;    //  Score from this robot.
 	sbyte   badass;         //  Dies with badass explosion, and strength thereof, 0 means NO.
 	sbyte   energy_drain;   //  Points of energy drained at each collision.
+	weapon_id_type   weapon_type2;   //  Secondary weapon number, -1 means none, otherwise gun #0 fires this weapon.
 #endif
 	fix     lighting;       // should this be here or with polygon model?
 	fix     strength;       // Initial shields of robot
@@ -139,11 +134,10 @@ struct robot_info : prohibit_void_ptr<robot_info>
 
 	//boss_flag, companion, thief, & pursuit probably should also be bits in the flags byte.
 	ubyte   flags;          // misc properties
-	ubyte   pad[3];         // alignment
 
 	ubyte   deathroll_sound;    // if has deathroll, what sound?
 	ubyte   glow;               // apply this light to robot itself. stored as 4:4 fixed-point
-	ubyte   behavior;           //  Default behavior.
+	ai_behavior behavior;           //  Default behavior.
 	ubyte   aim;                //  255 = perfect, less = more likely to miss.  0 != random, would look stupid.  0=45 degree spread.  Specify in bitmaps.tbl in range 0.0..1.0
 #endif
 	//animation info
@@ -151,7 +145,7 @@ struct robot_info : prohibit_void_ptr<robot_info>
 	int     always_0xabcd;      // debugging
 };
 
-const int weapon_none = -1;
+const auto weapon_none = weapon_id_type::unspecified;
 
 #if defined(DXX_BUILD_DESCENT_I)
 #define	MAX_ROBOT_TYPES	30				// maximum number of robot types
@@ -180,30 +174,27 @@ static inline int robot_is_thief(const robot_info *robptr)
 #endif
 
 #define ROBOT_NAME_LENGTH   16
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 extern char Robot_names[MAX_ROBOT_TYPES][ROBOT_NAME_LENGTH];
 
 //the array of robots types
 extern array<robot_info, MAX_ROBOT_TYPES> Robot_info;     // Robot info for AI system, loaded from bitmaps.tbl.
-#endif
 
 //how many kinds of robots
 extern unsigned N_robot_types;      // Number of robot types.  We used to assume this was the same as N_polygon_models.
 
 //test data for one robot
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #if defined(DXX_BUILD_DESCENT_I)
 #define MAX_ROBOT_JOINTS 600
 #elif defined(DXX_BUILD_DESCENT_II)
 #define MAX_ROBOT_JOINTS 1600
 #endif
 extern array<jointpos, MAX_ROBOT_JOINTS> Robot_joints;
-#endif
 extern unsigned N_robot_joints;
 
 //given an object and a gun number, return position in 3-space of gun
 //fills in gun_point
 void calc_gun_point(vms_vector &gun_point,vcobjptr_t obj,int gun_num);
+#endif
 
 //  Tells joint positions for a gun to be in a specified state.
 //  A gun can have associated with it any number of joints.  In order to tell whether a gun is a certain
@@ -235,8 +226,10 @@ void robot_info_read(PHYSFS_File *fp, robot_info &r);
  * reads n jointpos structs from a PHYSFS_file
  */
 void jointpos_read(PHYSFS_file *fp, jointpos &jp);
+#if 0
 void jointpos_write(PHYSFS_file *fp, const jointpos &jp);
-
 #endif
+void robot_set_angles(robot_info *r,polymodel *pm, array<array<vms_angvec, MAX_SUBMODELS>, N_ANIM_STATES> &angs);
+weapon_id_type get_robot_weapon(const robot_info &ri, const unsigned gun_num);
 
 #endif

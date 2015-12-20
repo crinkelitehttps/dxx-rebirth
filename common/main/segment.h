@@ -42,14 +42,18 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "pack.h"
 
 #include "compiler-type_traits.h"
-#include "fwdsegment.h"
+#include "fwd-segment.h"
 
+namespace dcx {
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 // Returns true if segnum references a child, else returns false.
 // Note that -1 means no connection, -2 means a connection to the outside world.
 static inline bool IS_CHILD(segnum_t s)
 {
 	return s != segment_none && s != segment_exit;
 }
+#endif
 
 //Structure for storing u,v,light values.
 //NOTE: this structure should be the same as the one in 3d.h
@@ -144,6 +148,11 @@ struct side
 	array<vms_vector, 2> normals;  // 2 normals, if quadrilateral, both the same.
 };
 
+}
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+
 struct segment {
 #ifdef EDITOR
 	segnum_t   segnum;     // segment number, not sure what it means
@@ -153,7 +162,9 @@ struct segment {
 	array<segnum_t, MAX_SIDES_PER_SEGMENT>   children;    // indices of 6 children segments, front, left, top, right, bottom, back
 	//      If bit n (1 << n) is set, then side #n in segment has had light subtracted from original (editor-computed) value.
 	ubyte light_subtracted;
-	array<side, MAX_SIDES_PER_SEGMENT>    sides;       // 6 sides
+#if defined(DXX_BUILD_DESCENT_II)
+	uint8_t slide_textures;
+#endif
 	array<int, MAX_VERTICES_PER_SEGMENT>     verts;    // vertex ids of 4 front and 4 back vertices
 	ubyte   special;    // what type of center this is
 	sbyte   matcen_num; // which center segment is associated with.
@@ -164,7 +175,13 @@ struct segment {
 	ubyte   s2_flags;
 #endif
 	fix     static_light;
+	array<side, MAX_SIDES_PER_SEGMENT>    sides;       // 6 sides
 };
+
+}
+#endif
+
+namespace dcx {
 
 struct count_segment_array_t : public count_array_t<segnum_t, MAX_SEGMENTS> {};
 
@@ -181,37 +198,22 @@ struct group
 	}
 };
 
-struct segment_array_t : public array<segment, MAX_SEGMENTS>
-{
-	unsigned highest;
+}
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #define Highest_segment_index Segments.highest
-	typedef array<segment, MAX_SEGMENTS> array_t;
-	template <typename T>
-		typename tt::enable_if<tt::is_integral<T>::value, reference>::type operator[](T n)
-		{
-			return array_t::operator[](n);
-		}
-	template <typename T>
-		typename tt::enable_if<tt::is_integral<T>::value, const_reference>::type operator[](T n) const
-		{
-			return array_t::operator[](n);
-		}
-	template <typename T>
-		typename tt::enable_if<!tt::is_integral<T>::value, reference>::type operator[](T) const = delete;
-	segment_array_t() = default;
-	segment_array_t(const segment_array_t &) = delete;
-	segment_array_t &operator=(const segment_array_t &) = delete;
-};
+
+DEFINE_VALPTRIDX_SUBTYPE(seg, segment, segnum_t, Segments);
+#endif
+
+namespace dcx {
 
 // Globals from mglobal.c
 struct vertex : vms_vector
 {
 	vertex() = default;
 	vertex(const fix &a, const fix &b, const fix &c) :
-		/* gcc 4.7 and later support brace initializing the base class
-		 * gcc 4.6 requires the explicit temporary
-		 */
-		vms_vector(vms_vector{a, b, c})
+		vms_vector{a, b, c}
 	{
 	}
 	explicit vertex(const vms_vector &v) :
@@ -220,8 +222,9 @@ struct vertex : vms_vector
 	}
 };
 
-DEFINE_VALPTRIDX_SUBTYPE(seg, segment, segnum_t, Segments);
+}
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 struct side::illegal_type : std::runtime_error
 {
 	csegptr_t m_segment;
@@ -252,6 +255,8 @@ void side::set_type(unsigned t)
 	}
 }
 
+namespace dsx {
+
 #if defined(DXX_BUILD_DESCENT_II)
 // New stuff, 10/14/95: For shooting out lights and monitors.
 // Light cast upon vert_light vertices in segnum:sidenum by some light
@@ -259,7 +264,7 @@ struct delta_light : prohibit_void_ptr<delta_light>
 {
 	segnum_t   segnum;
 	sbyte   sidenum;
-	ubyte   vert_light[4];
+	array<ubyte, 4>   vert_light;
 };
 
 // Light at segnum:sidenum casts light on count sides beginning at index (in array Delta_lights)
@@ -270,6 +275,11 @@ struct dl_index {
 	uint16_t index;
 };
 #endif
+
+}
+#endif
+
+namespace dcx {
 
 template <typename T, unsigned bits>
 class visited_segment_mask_t
@@ -328,7 +338,7 @@ public:
 	}
 	void clear()
 	{
-		a.fill(0);
+		a = {};
 	}
 };
 
@@ -341,11 +351,11 @@ class visited_segment_bitarray_t : public visited_segment_mask_t<bool, 1>
 			tmpl_maskproxy_t<R>(byte, shift)
 		{
 		}
-		dxx_explicit_operator_bool operator bool() const
+		explicit operator bool() const
 		{
 			return !!(this->m_byte & this->mask());
 		}
-		operator int() const DXX_CXX11_EXPLICIT_DELETE;
+		operator int() const = delete;
 	};
 	struct bitproxy_t : public tmpl_bitproxy_t<array_t::reference>
 	{
@@ -361,7 +371,7 @@ class visited_segment_bitarray_t : public visited_segment_mask_t<bool, 1>
 				this->m_byte &= ~this->mask();
 			return *this;
 		}
-		bitproxy_t& operator=(int) DXX_CXX11_EXPLICIT_DELETE;
+		bitproxy_t& operator=(int) = delete;
 	};
 	typedef tmpl_bitproxy_t<array_t::const_reference> const_bitproxy_t;
 public:
@@ -387,7 +397,7 @@ class visited_segment_multibit_array_t : public visited_segment_mask_t<unsigned,
 			visited_segment_mask_t<unsigned, bits>::template tmpl_maskproxy_t<R>(byte, shift)
 		{
 		}
-		dxx_explicit_operator_bool operator bool() const
+		explicit operator bool() const
 		{
 			return !!(this->m_byte & this->mask());
 		}
@@ -420,4 +430,6 @@ public:
 		return this->template make_maskproxy<const_bitproxy_t>(this->a, segnum);
 	}
 };
+
+}
 #endif

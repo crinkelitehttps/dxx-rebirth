@@ -23,18 +23,18 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-#ifndef _SLEW_H
-#define _SLEW_H
+#pragma once
 
 #ifdef __cplusplus
-#include "fwdvalptridx.h"
+#include "fwd-object.h"
 
 //from slew.c
 
 #if 1   //ndef RELEASE  //kill error on RELEASE build
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 void slew_init(vobjptr_t obj);                // say this is slew obj
+#endif
 int slew_stop(void);                            // Stops object
 void slew_reset_orient();                   // Resets orientation
 int slew_frame(int dont_check_keys);        // Does slew frame
@@ -49,5 +49,3 @@ int slew_frame(int dont_check_keys);        // Does slew frame
 #endif
 
 #endif
-
-#endif /* _SLEW_H */

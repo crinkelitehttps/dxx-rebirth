@@ -111,11 +111,11 @@ int SaveGameData()
 			Perm_player_segnum = segment_none;
 
 		if (Perm_player_segnum!=segment_none) {
-			if (get_seg_masks(Perm_player_position, Perm_player_segnum, 0, __FILE__, __LINE__).centermask == 0)
+			if (get_seg_masks(Perm_player_position, vcsegptr(Perm_player_segnum), 0).centermask == 0)
 			{
 				ConsoleObject->pos = Perm_player_position;
-				obj_relink(ConsoleObject-Objects,Perm_player_segnum);
 				ConsoleObject->orient = Perm_player_orient;
+				obj_relink(vobjptridx(ConsoleObject), vsegptridx(Perm_player_segnum));
 			}
 			else
 				Perm_player_segnum=segment_none;		//position was bogus
@@ -127,13 +127,14 @@ int SaveGameData()
 				save_segnum = 0;
 
 			ConsoleObject->pos = save_pos;
-			auto found_save_segnum = find_point_seg(save_pos,save_segnum);
+			const auto &&save_segp = vsegptridx(save_segnum);
+			auto found_save_segnum = find_point_seg(save_pos, save_segp);
 			if (found_save_segnum == segment_none) {
-				compute_segment_center(save_pos, &(Segments[save_segnum]));
 				found_save_segnum = save_segnum;
+				compute_segment_center(save_pos, save_segp);
 			}
 
-			obj_relink(ConsoleObject-Objects,found_save_segnum);
+			obj_relink(vobjptridx(ConsoleObject), found_save_segnum);
 			ConsoleObject->orient = save_orient;
 		}
 		if (saved_flag)

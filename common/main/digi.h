@@ -23,17 +23,21 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-
-#ifndef _DIGI_H
-#define _DIGI_H
+#pragma once
 
 #include "pstypes.h"
 #include "vecmat.h"
 
 #ifdef __cplusplus
+#include "dxxsconf.h"
 #include "segnum.h"
-#include "fwdvalptridx.h"
+#include "fwd-object.h"
+#include "fwd-segment.h"
+#include "compiler-exchange.h"
+#include "compiler-type_traits.h"
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 
 struct sound_object;
 struct digi_sound
@@ -54,19 +58,21 @@ extern void digi_close();
 // Volume is max at F1_0.
 extern void digi_play_sample( int sndnum, fix max_volume );
 extern void digi_play_sample_once( int sndnum, fix max_volume );
-int digi_link_sound_to_object( int soundnum, vcobjptridx_t objnum, int forever, fix max_volume );
-int digi_link_sound_to_pos( int soundnum, segnum_t segnum, short sidenum, const vms_vector &pos, int forever, fix max_volume );
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+void digi_link_sound_to_object( int soundnum, vcobjptridx_t objnum, int forever, fix max_volume );
+void digi_kill_sound_linked_to_segment(segnum_t segnum, int sidenum, int soundnum);
+void digi_link_sound_to_pos( int soundnum, vcsegptridx_t segnum, short sidenum, const vms_vector &pos, int forever, fix max_volume );
 // Same as above, but you pass the max distance sound can be heard.  The old way uses f1_0*256 for max_distance.
-int digi_link_sound_to_object2(int soundnum, vcobjptridx_t objnum, int forever, fix max_volume, vm_distance max_distance);
+void digi_link_sound_to_object2(int soundnum, vcobjptridx_t objnum, int forever, fix max_volume, vm_distance max_distance);
 
-int digi_link_sound_to_object3(int org_soundnum, vcobjptridx_t objnum, int forever, fix max_volume, vm_distance max_distance, int loop_start, int loop_end);
+void digi_link_sound_to_object3(int org_soundnum, vcobjptridx_t objnum, int forever, fix max_volume, vm_distance max_distance, int loop_start, int loop_end);
+void digi_kill_sound_linked_to_object(vcobjptridx_t);
+#endif
 
-extern void digi_play_sample_3d( int soundno, int angle, int volume, int no_dups ); // Volume from 0-0x7fff
+void digi_play_sample_3d(int soundno, int angle, int volume); // Volume from 0-0x7fff
 
 extern void digi_init_sounds();
 extern void digi_sync_sounds();
-void digi_kill_sound_linked_to_segment( segnum_t segnum, int sidenum, int soundnum );
-void digi_kill_sound_linked_to_object(vcobjptridx_t);
 
 extern void digi_set_digi_volume( int dvolume );
 
@@ -90,7 +96,6 @@ extern void digi_end_sound( int channel );
 extern void digi_set_channel_pan( int channel, int pan );
 extern void digi_set_channel_volume( int channel, int volume );
 extern int digi_is_channel_playing(int channel);
-extern void digi_debug();
 
 extern void digi_play_sample_looping( int soundno, fix max_volume,int loop_start, int loop_end );
 extern void digi_change_looping_volume( fix volume );
@@ -121,10 +126,13 @@ extern void digi_start_sound_queued( short soundnum, fix volume );
 #define SOUND_MAX_VOLUME F1_0 / 2
 
 extern int digi_volume;
+#if defined(DXX_BUILD_DESCENT_I)
 extern int digi_sample_rate;
-extern int SoundQ_channel;
+#elif defined(DXX_BUILD_DESCENT_II)
 extern int Dont_start_sound_objects;
-void digi_select_system(int);
+#endif
+extern int SoundQ_channel;
+void digi_select_system();
 
 #ifdef _WIN32
 // Windows native-MIDI stuff.
@@ -138,6 +146,35 @@ void digi_end_soundobj(sound_object &);
 void SoundQ_end();
 int verify_sound_channel_free( int channel );
 
-#endif
+class RAIIdigi_sound
+{
+	static constexpr auto invalid_channel = tt::integral_constant<int, -1>{};
+	int channel;
+	static void stop(int channel)
+	{
+		if (channel != invalid_channel)
+			digi_stop_sound(channel);
+	}
+public:
+	RAIIdigi_sound() :
+		channel(invalid_channel)
+	{
+	}
+	~RAIIdigi_sound()
+	{
+		stop(channel);
+	}
+	void reset(int c = invalid_channel)
+	{
+		stop(exchange(channel, c));
+	}
+	operator int() const = delete;
+	explicit operator bool() const
+	{
+		return channel != invalid_channel;
+	}
+};
 
+}
+#endif
 #endif

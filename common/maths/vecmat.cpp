@@ -19,6 +19,8 @@
 #include "vecmat.h"
 #include "dxxerror.h"
 
+namespace dcx {
+
 //#define USE_ISQRT 1
 
 const vms_matrix vmd_identity_matrix = IDENTITY_MATRIX;
@@ -36,7 +38,7 @@ vms_vector &vm_vec_add(vms_vector &dest,const vms_vector &src0,const vms_vector 
 
 //subs two vectors, fills in dest, returns ptr to dest
 //ok for dest to equal either source, but should use vm_vec_sub2() if so
-vms_vector &vm_vec_sub(vms_vector &dest,const vms_vector &src0,const vms_vector &src1)
+vms_vector &_vm_vec_sub(vms_vector &dest,const vms_vector &src0,const vms_vector &src1)
 {
 	dest.x = src0.x - src1.x;
 	dest.y = src0.y - src1.y;
@@ -377,8 +379,8 @@ fixang vm_vec_delta_ang(const vms_vector &v0,const vms_vector &v1,const vms_vect
 {
 	vms_vector t0,t1;
 
-	vm_vec_copy_normalize(t0,v0);
-	vm_vec_copy_normalize(t1,v1);
+	if (!vm_vec_copy_normalize(t0,v0) || !vm_vec_copy_normalize(t1,v1))
+		return 0;
 
 	return vm_vec_delta_ang_norm(t0,t1,fvec);
 }
@@ -394,53 +396,53 @@ fixang vm_vec_delta_ang_norm(const vms_vector &v0,const vms_vector &v1,const vms
 	return a;
 }
 
-static void sincos_2_matrix(vms_matrix &m, fix sinp, fix cosp, fix sinb, fix cosb, fix sinh, fix cosh)
+static void sincos_2_matrix(vms_matrix &m, const fixang bank, const fix_sincos_result p, const fix_sincos_result h)
 {
-	fix sbsh,cbch,cbsh,sbch;
+#define DXX_S2M_DECL(V)	\
+	const auto &sin##V = V.sin;	\
+	const auto &cos##V = V.cos
+	DXX_S2M_DECL(p);
+	DXX_S2M_DECL(h);
+	m.fvec.y = -sinp;								//m6
+	m.fvec.x = fixmul(sinh,cosp);				//m3
+	m.fvec.z = fixmul(cosh,cosp);				//m9
+	const auto &&b = fix_sincos(bank);
+	DXX_S2M_DECL(b);
+#undef DXX_S2M_DECL
+	m.rvec.y = fixmul(sinb,cosp);				//m4
+	m.uvec.y = fixmul(cosb,cosp);				//m5
 
-	sbsh = fixmul(sinb,sinh);
-	cbch = fixmul(cosb,cosh);
-	cbsh = fixmul(cosb,sinh);
-	sbch = fixmul(sinb,cosh);
-
+	const auto cbch = fixmul(cosb,cosh);
+	const auto sbsh = fixmul(sinb,sinh);
 	m.rvec.x = cbch + fixmul(sinp,sbsh);		//m1
 	m.uvec.z = sbsh + fixmul(sinp,cbch);		//m8
 
+	const auto sbch = fixmul(sinb,cosh);
+	const auto cbsh = fixmul(cosb,sinh);
 	m.uvec.x = fixmul(sinp,cbsh) - sbch;		//m2
 	m.rvec.z = fixmul(sinp,sbch) - cbsh;		//m7
-
-	m.fvec.x = fixmul(sinh,cosp);				//m3
-	m.rvec.y = fixmul(sinb,cosp);				//m4
-	m.uvec.y = fixmul(cosb,cosp);				//m5
-	m.fvec.z = fixmul(cosh,cosp);				//m9
-
-	m.fvec.y = -sinp;								//m6
 }
 
 //computes a matrix from a set of three angles.  returns ptr to matrix
 void vm_angles_2_matrix(vms_matrix &m,const vms_angvec &a)
 {
-	fix sinp,cosp,sinb,cosb,sinh,cosh;
-	fix_sincos(a.p,&sinp,&cosp);
-	fix_sincos(a.b,&sinb,&cosb);
-	fix_sincos(a.h,&sinh,&cosh);
-	sincos_2_matrix(m, sinp, cosp, sinb, cosb, sinh, cosh);
+	const auto al = a;
+	sincos_2_matrix(m, al.b, fix_sincos(al.p), fix_sincos(al.h));
 }
 
+#ifdef EDITOR
 //computes a matrix from a forward vector and an angle
 void vm_vec_ang_2_matrix(vms_matrix &m,const vms_vector &v,fixang a)
 {
-	fix sinb,cosb,sinp,cosp,sinh,cosh;
-
-	fix_sincos(a,&sinb,&cosb);
-
+	fix sinp,cosp,sinh,cosh;
 	sinp = -v.y;
 	cosp = fix_sqrt(f1_0 - fixmul(sinp,sinp));
 
 	sinh = fixdiv(v.x,cosp);
 	cosh = fixdiv(v.z,cosp);
-	sincos_2_matrix(m, sinp, cosp, sinb, cosb, sinh, cosh);
+	sincos_2_matrix(m, a, {sinp, cosp}, {sinh, cosh});
 }
+#endif
 
 //computes a matrix from one or more vectors. The forward vector is required,
 //with the other two being optional.  If both up & right vectors are passed,
@@ -519,10 +521,8 @@ void vm_vec_rotate(vms_vector &dest,const vms_vector &src,const vms_matrix &m)
 
 //mulitply 2 matrices, fill in dest.  returns ptr to dest
 //dest CANNOT equal either source
-void vm_matrix_x_matrix(vms_matrix &dest,const vms_matrix &src0,const vms_matrix &src1)
+void _vm_matrix_x_matrix(vms_matrix &dest,const vms_matrix &src0,const vms_matrix &src1)
 {
-	Assert(&dest!=&src0 && &dest!=&src1);
-
 	dest.rvec.x = vm_vec_dot3(src0.rvec.x,src0.uvec.x,src0.fvec.x, src1.rvec);
 	dest.uvec.x = vm_vec_dot3(src0.rvec.x,src0.uvec.x,src0.fvec.x, src1.uvec);
 	dest.fvec.x = vm_vec_dot3(src0.rvec.x,src0.uvec.x,src0.fvec.x, src1.fvec);
@@ -539,14 +539,16 @@ void vm_matrix_x_matrix(vms_matrix &dest,const vms_matrix &src0,const vms_matrix
 //extract angles from a matrix 
 void vm_extract_angles_matrix(vms_angvec &a,const vms_matrix &m)
 {
-	fix sinh,cosh,cosp;
+	fix cosp;
 
 	if (m.fvec.x==0 && m.fvec.z==0)		//zero head
 		a.h = 0;
 	else
 		a.h = fix_atan2(m.fvec.z,m.fvec.x);
 
-	fix_sincos(a.h,&sinh,&cosh);
+	const auto &&ah = fix_sincos(a.h);
+	const auto &sinh = ah.sin;
+	const auto &cosh = ah.cos;
 
 	if (abs(sinh) > abs(cosh))				//sine is larger, so use it
 		cosp = fixdiv(m.fvec.x,sinh);
@@ -668,4 +670,6 @@ void vms_matrix_from_quaternion(vms_matrix * m, const vms_quaternion * q)
 	tmp2 = fixmul(q->x * 2, q->w * 2);
 	m->fvec.y = fixmul(fixmul(fl2f(2.0), (tmp1 + tmp2)), invs);
 	m->uvec.z = fixmul(fixmul(fl2f(2.0), (tmp1 - tmp2)), invs);
+}
+
 }

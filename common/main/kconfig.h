@@ -23,21 +23,18 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#pragma once
 
-#ifndef _KCONFIG_H
-#define _KCONFIG_H
-
-#include "key.h"
 #include "joy.h"
-#include "mouse.h"
 #include "dxxsconf.h"
 
 #ifdef __cplusplus
 #include <vector>
+#include "fwd-event.h"
 #include "compiler-array.h"
+#include "compiler-type_traits.h"
 
-struct d_event;
-
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 struct control_info {
 	template <typename T>
 	struct ramp_controls_t
@@ -53,7 +50,13 @@ struct control_info {
 			key_bank_left,
 			key_bank_right;
 	};
-	struct state_controls_t : public ramp_controls_t<ubyte>
+	struct fire_controls_t
+	{
+		uint8_t fire_primary, fire_secondary, fire_flare, drop_bomb;
+	};
+	struct state_controls_t :
+		public fire_controls_t,
+		public ramp_controls_t<ubyte>
 	{
 		ubyte btn_slide_left, btn_slide_right,
 			btn_slide_up, btn_slide_down,
@@ -62,7 +65,6 @@ struct control_info {
 			accelerate, reverse,
 			cruise_plus, cruise_minus, cruise_off,
 			rear_view,
-			fire_primary, fire_secondary, fire_flare, drop_bomb,
 			automap,
 			cycle_primary, cycle_secondary, select_weapon;
 #if defined(DXX_BUILD_DESCENT_II)
@@ -72,9 +74,16 @@ struct control_info {
 	};
 	ramp_controls_t<float> down_time; // to scale movement depending on how long the key is pressed
 	fix pitch_time, vertical_thrust_time, heading_time, sideways_thrust_time, bank_time, forward_thrust_time;
+        fix excess_pitch_time, excess_vertical_thrust_time, excess_heading_time, excess_sideways_thrust_time, excess_bank_time, excess_forward_thrust_time;
 	state_controls_t state; // to scale movement for keys only we need them to be separate from joystick/mouse buttons
-	fix joy_axis[JOY_MAX_AXES], raw_joy_axis[JOY_MAX_AXES], mouse_axis[3], raw_mouse_axis[3];
+	array<fix, 3> mouse_axis, raw_mouse_axis;
+#if MAX_AXES_PER_JOYSTICK
+	array<fix, JOY_MAX_AXES> joy_axis, raw_joy_axis;
+#endif
 };
+
+extern control_info Controls;
+#endif
 
 #define CONTROL_USING_JOYSTICK	1
 #define CONTROL_USING_MOUSE		2
@@ -87,9 +96,19 @@ struct control_info {
 #define MAX_CONTROLS        60		// there are actually 48, so this leaves room for more
 #endif
 
-extern control_info Controls;
 extern void kconfig_read_controls(const d_event &event, int automap_flag);
-extern void kconfig(int n, const char *title);
+
+enum class kconfig_type
+{
+	keyboard,
+#if MAX_JOYSTICKS
+	joystick,
+#endif
+	mouse,
+	rebirth,
+};
+
+void kconfig(kconfig_type n);
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 extern const array<array<ubyte, MAX_CONTROLS>, 3> DefaultKeySettings;
@@ -104,15 +123,14 @@ extern void reset_cruise(void);
 extern fix Cruise_speed;
 
 
+#if MAX_JOYSTICKS
 template <std::size_t N>
-struct joystick_text_length
+struct joystick_text_length : tt::integral_constant<std::size_t, (N >= 10) ? (joystick_text_length<N / 10>::value + 1) : 1>
 {
-	enum { value = ((N >= 10) ? (joystick_text_length<N / 10>::value + 1) : 1) };
 };
 template <>
-struct joystick_text_length<0>
+struct joystick_text_length<0> : tt::integral_constant<std::size_t, 1>
 {
-	enum { value = 1 };
 };
 
 template <std::size_t N>
@@ -129,16 +147,19 @@ public:
 	reference operator[](size_type s) { return text.at(s); }
 };
 
+#if MAX_AXES_PER_JOYSTICK
 class joyaxis_text_t : public joystick_text_t<sizeof("J A") + joystick_text_length<MAX_JOYSTICKS>::value + joystick_text_length<MAX_AXES_PER_JOYSTICK>::value>
 {
 };
-
-class joybutton_text_t : public joystick_text_t<sizeof("J H ") + joystick_text_length<MAX_JOYSTICKS>::value + joystick_text_length<MAX_BUTTONS_PER_JOYSTICK>::value>
-{
-};
-
-extern joybutton_text_t joybutton_text;
 extern joyaxis_text_t joyaxis_text;
 #endif
 
-#endif /* _KCONFIG_H */
+#if MAX_BUTTONS_PER_JOYSTICK || MAX_HATS_PER_JOYSTICK
+class joybutton_text_t : public joystick_text_t<sizeof("J H ") + joystick_text_length<MAX_JOYSTICKS>::value + joystick_text_length<MAX_HATS_PER_JOYSTICK>::value>
+{
+};
+extern joybutton_text_t joybutton_text;
+#endif
+
+#endif
+#endif

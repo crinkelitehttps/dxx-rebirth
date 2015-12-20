@@ -23,142 +23,25 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _PLAYER_H
-#define _PLAYER_H
+#pragma once
+
+#include "fwd-player.h"
 
 #include <physfs.h>
 #include "vecmat.h"
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #include "weapon.h"
-#endif
 
 #ifdef __cplusplus
 #include <algorithm>
-#include <cctype>
 #include "pack.h"
 #include "dxxsconf.h"
 #include "compiler-array.h"
 #include "compiler-static_assert.h"
 #include "objnum.h"
-
-#define MAX_PLAYERS 8u
-#define MAX_MULTI_PLAYERS MAX_PLAYERS+3
-#define MULTI_PNUM_UNDEF 0xcc
-
-// Initial player stat values
-#define INITIAL_ENERGY  i2f(100)    // 100% energy to start
-#define INITIAL_SHIELDS i2f(100)    // 100% shields to start
-
-#define MAX_ENERGY      i2f(200)    // go up to 200
-#define MAX_SHIELDS     i2f(200)
-
-#define INITIAL_LIVES               3   // start off with 3 lives
-
-// Values for special flags
-#define PLAYER_FLAGS_INVULNERABLE   1       // Player is invincible
-#define PLAYER_FLAGS_BLUE_KEY       2       // Player has blue key
-#define PLAYER_FLAGS_RED_KEY        4       // Player has red key
-#define PLAYER_FLAGS_GOLD_KEY       8       // Player has gold key
-#if defined(DXX_BUILD_DESCENT_II)
-#define PLAYER_FLAGS_FLAG           16      // Player has his team's flag
-#endif
-#define PLAYER_FLAGS_MAP_ALL        64      // Player can see unvisited areas on map
-#if defined(DXX_BUILD_DESCENT_II)
-#define PLAYER_FLAGS_AMMO_RACK      128     // Player has ammo rack
-#define PLAYER_FLAGS_CONVERTER      256     // Player has energy->shield converter
-#endif
-#define PLAYER_FLAGS_QUAD_LASERS    1024    // Player shoots 4 at once
-#define PLAYER_FLAGS_CLOAKED        2048    // Player is cloaked for awhile
-#if defined(DXX_BUILD_DESCENT_II)
-#define PLAYER_FLAGS_AFTERBURNER    4096    // Player's afterburner is engaged
-#define PLAYER_FLAGS_HEADLIGHT      8192    // Player has headlight boost
-#define PLAYER_FLAGS_HEADLIGHT_ON   16384   // is headlight on or off?
-
-#define AFTERBURNER_MAX_TIME    (F1_0*5)    // Max time afterburner can be on.
-#endif
-#define CALLSIGN_LEN                8       // so can use as filename (was: 12)
-
-// Amount of time player is cloaked.
-#define CLOAK_TIME_MAX          (F1_0*30)
-#define INVULNERABLE_TIME_MAX   (F1_0*30)
-
-#if defined(DXX_BUILD_DESCENT_I)
-#define PLAYER_STRUCT_VERSION 	16		//increment this every time player struct changes
-#elif defined(DXX_BUILD_DESCENT_II)
-#define PLAYER_STRUCT_VERSION   17  // increment this every time player struct changes
-
-// defines for teams
-#define TEAM_BLUE   0
-#define TEAM_RED    1
-#endif
+#include "player-callsign.h"
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
-
-struct callsign_t
-{
-	static const std::size_t array_length = CALLSIGN_LEN + 1;
-	operator const void *() const = delete;
-	typedef array<char, array_length> array_t;
-	typedef char elements_t[array_length];
-	array_t a;
-	static char lower_predicate(char c)
-	{
-		return std::tolower(static_cast<unsigned>(c));
-	}
-	callsign_t &zero_terminate(array_t::iterator i)
-	{
-		std::fill(i, end(a), 0);
-		return *this;
-	}
-	callsign_t &copy(const char *s, std::size_t N)
-	{
-		return zero_terminate(std::copy_n(s, std::min(a.size() - 1, N), begin(a)));
-	}
-	callsign_t &copy_lower(const char *s, std::size_t N)
-	{
-		return zero_terminate(std::transform(s, std::next(s, std::min(a.size() - 1, N)), begin(a), lower_predicate));
-	}
-	void lower()
-	{
-		auto ba = begin(a);
-		std::transform(ba, std::prev(end(a)), ba, lower_predicate);
-		a.back() = 0;
-	}
-	elements_t &buffer() __attribute_warn_unused_result
-	{
-		return *reinterpret_cast<elements_t *>(a.data());
-	}
-	template <std::size_t N>
-		callsign_t &operator=(const char (&s)[N])
-		{
-			static_assert(N <= array_length, "string too long");
-			return copy(s, N);
-		}
-	template <std::size_t N>
-		void copy_lower(const char (&s)[N])
-		{
-			static_assert(N <= array_length, "string too long");
-			return copy_lower(s, N);
-		}
-	void fill(char c) { a.fill(c); }
-	const char &operator[](std::size_t i) const
-	{
-		return a[i];
-	}
-	operator const char *() const
-	{
-		return &a[0];
-	};
-	bool operator==(const callsign_t &r) const
-	{
-		return a == r.a;
-	}
-	bool operator!=(const callsign_t &r) const
-	{
-		return !(*this == r);
-	}
-};
-static_assert(sizeof(callsign_t) == CALLSIGN_LEN + 1, "callsign_t too big");
+#include "player-flags.h"
 
 // When this structure changes, increment the constant
 // SAVE_FILE_VERSION in playsave.c
@@ -172,23 +55,9 @@ struct player : public prohibit_void_ptr<player>
 	//  -- make sure you're 4 byte aligned now!
 
 	// Game data
-	uint    flags;                  // Powerup flags, see below...
-	fix     energy;                 // Amount of energy remaining.
-	fix     shields;                // shields remaining (protection)
 	ubyte   lives;                  // Lives remaining, 0 = game over.
 	sbyte   level;                  // Current level player is playing. (must be signed for secret levels)
-	ubyte   laser_level;            // Current level of the laser.
 	sbyte   starting_level;         // What level the player started on.
-	objnum_t   killer_objnum;          // Who killed me.... (-1 if no one)
-#if defined(DXX_BUILD_DESCENT_I)
-	ubyte		primary_weapon_flags;					//	bit set indicates the player has this weapon.
-	ubyte		secondary_weapon_flags;					//	bit set indicates the player has this weapon.
-#elif defined(DXX_BUILD_DESCENT_II)
-	ushort  primary_weapon_flags;   // bit set indicates the player has this weapon.
-	ushort  secondary_weapon_flags; // bit set indicates the player has this weapon.
-#endif
-	ushort  vulcan_ammo;
-	ushort  secondary_ammo[MAX_SECONDARY_WEAPONS]; // How much ammo of each type.
 
 	// Statistics...
 	int     last_score;             // Score at beginning of current level.
@@ -196,8 +65,6 @@ struct player : public prohibit_void_ptr<player>
 	fix     time_level;             // Level time played
 	fix     time_total;             // Game time played (high word = seconds)
 
-	fix64   cloak_time;             // Time cloaked
-	fix64   invulnerable_time;      // Time invulnerable
 
 	short   KillGoalCount;          // Num of players killed this level
 	short   net_killed_total;       // Number of times killed total
@@ -210,7 +77,6 @@ struct player : public prohibit_void_ptr<player>
 	ushort  hostages_total;         // Total number of hostages.
 	ubyte   hostages_on_board;      // Number of hostages on ship.
 	ubyte   hostages_level;         // Number of hostages on this level.
-	fix     homing_object_dist;     // Distance of nearest homing object.
 	sbyte   hours_level;            // Hours played (since time_total can only go up to 9 hours)
 	sbyte   hours_total;            // Hours played (since time_total can only go up to 9 hours)
 };
@@ -284,14 +150,20 @@ struct player_rw
 	sbyte   hours_total;            // Hours played (since time_total can only go up to 9 hours)
 } __pack__;
 #if defined(DXX_BUILD_DESCENT_I)
-typedef char player_rw_padding_check[sizeof(player_rw) == 116 ? 1 : -1];
+static_assert(sizeof(player_rw) == 116, "wrong size player_rw");
 #elif defined(DXX_BUILD_DESCENT_II)
-typedef char player_rw_padding_check[sizeof(player_rw) == 142 ? 1 : -1];
-#endif
+static_assert(sizeof(player_rw) == 142, "wrong size player_rw");
 #endif
 
-#define N_PLAYER_GUNS 8
-#define N_PLAYER_SHIP_TEXTURES 32
+#define get_local_player()	(Players[Player_num])
+#define get_local_plrobj()	(*vobjptr(get_local_player().objnum))
+#define get_local_player_energy()	(get_local_plrobj().ctype.player_info.energy)
+#define get_local_player_vulcan_ammo()	(get_local_plrobj().ctype.player_info.vulcan_ammo)
+#define get_local_player_shields()	(get_local_plrobj().shields)
+#define get_local_player_flags()	(get_local_plrobj().ctype.player_info.powerup_flags)
+#define get_local_player_secondary_ammo()	(get_local_plrobj().ctype.player_info.secondary_ammo)
+#define get_local_player_cloak_time()	(get_local_plrobj().ctype.player_info.cloak_time)
+#define get_local_player_invulnerable_time()	(get_local_plrobj().ctype.player_info.invulnerable_time)
 
 struct player_ship
 {
@@ -301,37 +173,12 @@ struct player_ship
 	fix     max_thrust,reverse_thrust,brakes;       //low_thrust
 	fix     wiggle;
 	fix     max_rotthrust;
-	vms_vector gun_points[N_PLAYER_GUNS];
+	array<vms_vector, N_PLAYER_GUNS> gun_points;
 }
 #if defined(DXX_BUILD_DESCENT_I)
 __pack__
 #endif
 ;
-
-typedef unsigned playernum_t;
-typedef array<playernum_t, MAX_PLAYERS> playernum_array_t;
-
-extern unsigned N_players;   // Number of players ( >1 means a net game, eh?)
-extern playernum_t Player_num;  // The player number who is on the console.
-
-#if defined(DXX_BUILD_DESCENT_I)
-#define DXX_PLAYER_HEADER_ADD_EXTRA_PLAYERS	0
-#elif defined(DXX_BUILD_DESCENT_II)
-#define DXX_PLAYER_HEADER_ADD_EXTRA_PLAYERS	4
-#endif
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
-extern array<player, MAX_PLAYERS + DXX_PLAYER_HEADER_ADD_EXTRA_PLAYERS> Players;   // Misc player info
-void player_rw_swap(player_rw *p, int swap);
-#endif
-
-extern struct object *Guided_missile[MAX_PLAYERS];
-extern int Guided_missile_sig[MAX_PLAYERS];
-
-/*
- * reads a player_ship structure from a PHYSFS_file
- */
-void player_ship_read(player_ship *ps, PHYSFS_file *fp);
-
 #endif
 
 #endif

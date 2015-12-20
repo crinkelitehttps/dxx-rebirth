@@ -25,17 +25,23 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
-#include "kconfig.h"
-#include "mission.h"
-#include "weapon.h"
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #if defined(DXX_BUILD_DESCENT_I)
 #include "pstypes.h"
 #include "player.h"
 #elif defined(DXX_BUILD_DESCENT_II)
 #include "escort.h"
+
+enum class MissileViewMode : uint8_t
+{
+	None,
+	EnabledSelfOnly,
+	EnabledSelfAndAllies,
+};
 #endif
 
 #ifdef __cplusplus
+#include <cstdint>
 
 #define N_SAVE_SLOTS    10
 #define GAME_NAME_LEN   25      // +1 for terminating zero = 26
@@ -61,15 +67,40 @@ void plyr_save_stats();
 struct hli
 {
 	char	Shortname[9];
-	ubyte	LevelNum;
+	uint8_t LevelNum;
 };
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+#include "kconfig.h"
 #include "multi.h"
+#include "fwd-weapon.h"
 
-struct player_config
+enum class FiringAutoselectMode : uint8_t
+{
+	Immediate,
+	Never,
+	Delayed,
+};
+
+enum class HudType : uint8_t
+{
+	Standard,
+	Alternate1,
+	Alternate2,
+	Hidden,
+};
+
+enum class RespawnPress : uint8_t
+{
+	Any,
+	Fire,
+};
+
+struct player_config : prohibit_void_ptr<player_config>
 {
 	ubyte ControlType;
+	HudType HudMode;
+	RespawnPress RespawnMode;
 	array<ubyte, MAX_PRIMARY_WEAPONS + 1> PrimaryOrder;
 	array<ubyte, MAX_SECONDARY_WEAPONS + 1> SecondaryOrder;
 	array<array<ubyte, MAX_CONTROLS>, 3> KeySettings;
@@ -81,8 +112,11 @@ struct player_config
 	array<int, 5> KeyboardSens;
 	array<int, 6> JoystickSens;
 	array<int, 6> JoystickDead;
+	array<int, 6> JoystickLinear;
+	array<int, 6> JoystickSpeed;
 	ubyte MouseFlightSim;
 	array<int, 6> MouseSens;
+        array<int, 6> MouseOverrun;
 	int MouseFSDead;
 	int MouseFSIndicator;
 	array<cockpit_mode_t, 2> CockpitMode; // 0 saves the "real" cockpit, 1 also saves letterbox and rear. Used to properly switch between modes and restore the real one.
@@ -96,12 +130,11 @@ struct player_config
 	array<int, 4> ReticleRGBA;
 	int ReticleSize;
 #if defined(DXX_BUILD_DESCENT_II)
-	int MissileViewEnabled;
+	MissileViewMode MissileViewEnabled;
 	int HeadlightActiveDefault;
 	int GuidedInBigWindow;
 	ntstring<GUIDEBOT_NAME_LEN> GuidebotName, GuidebotNameReal;
 #endif
-	int HudMode;
 	uint32_t TrackerUID1;
 	uint32_t TrackerUID2;
 #if defined(DXX_BUILD_DESCENT_II)
@@ -116,9 +149,22 @@ struct player_config
 	ubyte BombGauge;
 #endif
 	ubyte AutomapFreeFlight;
-	ubyte NoFireAutoselect;
+	FiringAutoselectMode NoFireAutoselect;
 	ubyte CycleAutoselectOnly;
-	int AlphaEffects;
+	uint8_t CloakInvulTimer;
+	union {
+		/* For now, manage all these choices in a single variable, but
+		 * give them separate names to make them easier to find.
+		 */
+		int AlphaEffects;
+		int AlphaBlendMineExplosion;
+		int AlphaBlendMarkers;
+		int AlphaBlendFireballs;
+		int AlphaBlendPowerups;
+		int AlphaBlendLasers;
+		int AlphaBlendWeapons;
+		int AlphaBlendEClips;
+	};
 	int DynLightColor;
 };
 #endif
@@ -142,8 +188,11 @@ void set_highest_level(int levelnum);
 // gets the player's highest level from the file for this mission
 int get_highest_level(void);
 
+namespace dsx {
 struct netgame_info;
 void read_netgame_profile(struct netgame_info *ng);
 void write_netgame_profile(struct netgame_info *ng);
+}
 
+#endif
 #endif

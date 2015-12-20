@@ -23,48 +23,57 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#pragma once
 
-#ifndef _CONFIG_H
-#define _CONFIG_H
-
-#include "player.h"
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+#include "player-callsign.h"
 #include "mission.h"
+#endif
 
 #ifdef __cplusplus
 #include "pack.h"
 #include "compiler-array.h"
 #include "ntstring.h"
 
+namespace dcx {
+struct CCfg : prohibit_void_ptr<CCfg>
+{
+	bool VSync;
+	bool Grabinput;
+	bool WindowMode;
+	int TexFilt;
+};
+
+extern struct CCfg CGameCfg;
+}
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 struct Cfg : prohibit_void_ptr<Cfg>
 {
-	ubyte DigiVolume;
-	ubyte MusicVolume;
-	int ReverseStereo;
-	int OrigTrackOrder;
 	int MusicType;
 	int CMLevelMusicPlayOrder;
-	int CMLevelMusicTrack[2];
-	ntstring<PATH_MAX - 1> CMLevelMusicPath;
-	array<ntstring<PATH_MAX - 1>, 5> CMMiscMusic;
 	int GammaLevel;
-	callsign_t LastPlayer;
-	char LastMission[MISSION_NAME_LEN+1];
 	int ResolutionX;
 	int ResolutionY;
 	int AspectX;
 	int AspectY;
-	int WindowMode;
-	int TexFilt;
-	int VSync;
-	int Multisample;
-	int FPSIndicator;
-	int Grabinput;
+	uint8_t DigiVolume;
+	uint8_t MusicVolume;
+	bool Multisample;
+	bool FPSIndicator;
+	bool ReverseStereo;
+	bool OrigTrackOrder;
 #ifdef DXX_BUILD_DESCENT_II
+	bool MovieSubtitles;
 	int MovieTexFilt;
-	int MovieSubtitles;
 #endif
+	callsign_t LastPlayer;
+	array<int, 2> CMLevelMusicTrack;
+	ntstring<MISSION_NAME_LEN> LastMission;
+	ntstring<PATH_MAX - 1> CMLevelMusicPath;
+	array<ntstring<PATH_MAX - 1>, 5> CMMiscMusic;
 };
-
 extern struct Cfg GameCfg;
 
 //#ifdef USE_SDLMIXER
@@ -75,7 +84,7 @@ extern struct Cfg GameCfg;
 
 extern int ReadConfigFile(void);
 extern int WriteConfigFile(void);
-
+}
 #endif
 
 #endif

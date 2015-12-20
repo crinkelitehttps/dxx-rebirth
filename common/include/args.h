@@ -28,8 +28,21 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #ifdef __cplusplus
 #include <cstdint>
 
-bool InitArgs(int argc, char **argv);
-extern void args_exit();
+#ifdef OGL
+// GL Sync methods
+typedef enum {
+	SYNC_GL_NONE=0,
+	SYNC_GL_FENCE,
+	SYNC_GL_FENCE_SLEEP,
+	SYNC_GL_FINISH_AFTER_SWAP,
+	SYNC_GL_FINISH_BEFORE_SWAP,
+	SYNC_GL_AUTO
+} SyncGLMethod;
+
+#define OGL_SYNC_METHOD_DEFAULT		SYNC_GL_AUTO
+#define OGL_SYNC_WAIT_DEFAULT		2		/* milliseconds */
+
+#endif
 
 // Struct that keeps all variables used by FindArg
 // Prefixes are:
@@ -41,83 +54,100 @@ extern void args_exit();
 //   Mpl - Multiplayer Options
 //   Edi - Editor Options
 //   Dbg - Debugging/Undocumented Options
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+#include <string>
 #include "dxxsconf.h"
+#include "pack.h"
 #include "compiler-type_traits.h"
 
-struct Arg
+namespace dcx {
+struct CArg : prohibit_void_ptr<CArg>
 {
-	int SysShowCmdHelp;
-	int SysNoNiceFPS;
-	int SysMaxFPS;
-	int SysNoHogDir;
-	const char *SysHogDir;
-	int SysUsePlayersDir;
-	int SysLowMem;
-	const char *SysPilot;
-	const char *SysRecordDemoNameTemplate;
-	bool SysAutoRecordDemo;
-	int SysWindow;
-	int SysNoBorders;
-	int SysAutoDemo;
-#ifdef DXX_BUILD_DESCENT_I
-	int SysNoTitles;
+	bool CtlNoCursor;
+	bool CtlNoMouse;
+	bool CtlNoStickyKeys;
+	bool DbgForbidConsoleGrab;
+	bool DbgShowMemInfo;
+	bool DbgSafelog;
+#if defined(__unix__)
+	bool SysNoHogDir;
 #endif
-#ifdef DXX_BUILD_DESCENT_II
-	int SysNoMovies;
-#endif
-	int CtlNoCursor;
-	int CtlNoMouse;
-	int CtlNoJoystick;
-	int CtlNoStickyKeys;
-	int SndNoSound;
-	int SndNoMusic;
+	bool SysShowCmdHelp;
+	bool SndNoSound;
 #ifdef USE_SDLMIXER
 	bool SndDisableSdlMixer;
 #else
 	static constexpr tt::true_type SndDisableSdlMixer{};
 #endif
-#ifdef DXX_BUILD_DESCENT_II
-	int SndDigiSampleRate;
-	int GfxSkipHiresMovie;
-	int GfxSkipHiresGFX;
+#if MAX_JOYSTICKS
+	bool CtlNoJoystick;
+#else
+	static constexpr tt::true_type CtlNoJoystick{};
 #endif
-	int GfxSkipHiresFNT;
 #ifdef OGL
-	int OglFixedFont;
+	bool DbgUseOldTextureMerge;
+	bool DbgGlIntensity4Ok;
+	bool DbgGlReadPixelsOk;
+	bool DbgGlGetTexLevelParamOk;
+	bool DbgGlLuminance4Alpha4Ok;
+	bool DbgGlRGBA2Ok;
 #endif
-	const char *MplUdpHostAddr;
+	uint8_t DbgBpp;
+	int DbgVerbose;
+	int SysMaxFPS;
+	std::string SysMissionDir;
+};
+extern CArg CGameArg;
+}
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+struct Arg : prohibit_void_ptr<Arg>
+{
+	std::string SysHogDir;
+	std::string SysPilot;
+	std::string SysRecordDemoNameTemplate;
+	bool SysNoNiceFPS;
+	bool SysUsePlayersDir;
+	bool SysLowMem;
+	bool SysAutoRecordDemo;
+	bool SysWindow;
+	bool SysNoBorders;
+	bool SysNoTitles;
+	bool SysAutoDemo;
+	bool SndNoMusic;
+	bool GfxSkipHiresFNT;
+#ifdef DXX_BUILD_DESCENT_I
+	bool EdiNoBm;
+#endif
+#ifdef DXX_BUILD_DESCENT_II
+	bool SysNoMovies;
+	bool GfxSkipHiresMovie;
+	bool GfxSkipHiresGFX;
+	int SndDigiSampleRate;
+#endif
+#ifdef OGL
+	bool OglFixedFont;
+	SyncGLMethod OglSyncMethod;
+	int OglSyncWait;
+#endif
+	std::string MplUdpHostAddr;
 	uint16_t MplUdpHostPort;
 	uint16_t MplUdpMyPort;
 #ifdef USE_TRACKER
 	const char *MplTrackerHost;
 #endif
-#ifdef DXX_BUILD_DESCENT_I
-	int EdiNoBm;
-#endif
 #ifdef DXX_BUILD_DESCENT_II
-	const char *EdiAutoLoad;
-	int EdiSaveHoardData;
-	int EdiMacData; // also used for some read routines in non-editor build
+	std::string EdiAutoLoad;
+	bool EdiSaveHoardData;
+	bool EdiMacData; // also used for some read routines in non-editor build
 #endif
-	int DbgVerbose;
-	int DbgSafelog;
-	int DbgNoRun;
-	int DbgForbidConsoleGrab;
-	int DbgRenderStats;
-	const char *DbgAltTex;
-	const char *DbgTexMap;
-	int DbgShowMemInfo;
-	int DbgNoDoubleBuffer;
-	int DbgNoCompressPigBitmap;
-	int DbgBpp;
+	bool DbgNoRun;
+	bool DbgRenderStats;
+	std::string DbgAltTex;
+	std::string DbgTexMap;
+	bool DbgNoDoubleBuffer;
+	bool DbgNoCompressPigBitmap;
 #ifdef OGL
-	int DbgUseOldTextureMerge;
-	int DbgGlIntensity4Ok;
-	int DbgGlLuminance4Alpha4Ok;
-	int DbgGlRGBA2Ok;
-	int DbgGlReadPixelsOk;
-	int DbgGlGetTexLevelParamOk;
 #else
 	int DbgSdlHWSurface;
 	int DbgSdlASyncBlit;
@@ -126,12 +156,15 @@ struct Arg
 
 extern struct Arg GameArg;
 
+bool InitArgs(int argc, char **argv);
+
 static inline const char *PLAYER_DIRECTORY_STRING(const char *s, const char *f) __attribute_format_arg(2);
 static inline const char *PLAYER_DIRECTORY_STRING(const char *s, const char *)
 {
 	return (GameArg.SysUsePlayersDir) ? s : (s + sizeof("Players/") - 1);
 }
 #define PLAYER_DIRECTORY_STRING(S)	((PLAYER_DIRECTORY_STRING)("Players/" S, S))
+}
 #endif
 
 #endif

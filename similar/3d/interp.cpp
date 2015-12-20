@@ -11,6 +11,7 @@
  *
  */
 
+#include <stdexcept>
 #include <stdlib.h>
 #include "dxxsconf.h"
 #include "dxxerror.h"
@@ -22,6 +23,8 @@
 #include "byteutil.h"
 #include "u_mem.h"
 
+namespace dcx {
+
 static const unsigned OP_EOF = 0;   //eof
 static const unsigned OP_DEFPOINTS = 1;   //defpoints
 static const unsigned OP_FLATPOLY = 2;   //flat-shaded polygon
@@ -32,35 +35,26 @@ static const unsigned OP_SUBCALL = 6;   //call a subobject
 static const unsigned OP_DEFP_START = 7;   //defpoints with start
 static const unsigned OP_GLOW = 8;   //glow value for next poly
 
-static int16_t init_model_sub(uint8_t *p, int16_t);
-
 #ifdef EDITOR
 int g3d_interp_outline;
 #endif
 
+}
+
+namespace dsx {
+
+static int16_t init_model_sub(uint8_t *p, int16_t);
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(WORDS_BIGENDIAN)
 static inline int16_t *wp(uint8_t *p)
 {
 	return reinterpret_cast<int16_t *>(p);
 }
+#endif
 
 static inline const int16_t *wp(const uint8_t *p)
 {
 	return reinterpret_cast<const int16_t *>(p);
-}
-
-static inline fix *fp(uint8_t *p)
-{
-	return reinterpret_cast<fix *>(p);
-}
-
-static inline const fix *fp(const uint8_t *p)
-{
-	return reinterpret_cast<const fix *>(p);
-}
-
-static inline vms_vector *vp(uint8_t *p)
-{
-	return reinterpret_cast<vms_vector *>(p);
 }
 
 static inline const vms_vector *vp(const uint8_t *p)
@@ -169,6 +163,7 @@ public:
 	}
 	void op_flatpoly(const uint8_t *const p, const uint_fast32_t nv)
 	{
+		(void)nv;	// only used for Assert
 		Assert( nv < MAX_POINTS_PER_POLY );
 		if (g3_check_normal_facing(*vp(p+4),*vp(p+16)) > 0) {
 #if defined(DXX_BUILD_DESCENT_I)
@@ -342,7 +337,7 @@ class g3_draw_morphing_model_state :
 	static constexpr const glow_values_t *glow_values = nullptr;
 	const vms_vector *const new_points;
 	polygon_model_points &Interp_point_list;
-	static constexpr glow_num_stub glow_num{};
+	static constexpr auto glow_num = glow_num_stub{};
 public:
 	g3_draw_morphing_model_state(grs_bitmap **mbitmaps, const submodel_angles aangles, g3s_lrgb mlight, const vms_vector *npoints, polygon_model_points &plist) :
 		model_bitmaps(mbitmaps), anim_angles(aangles),
@@ -400,7 +395,7 @@ public:
 		array<g3s_uvl, 3> uvl_list;
 		array<g3s_lrgb, 3> lrgb_list;
 		for (unsigned i = 0; i < 3; ++i)
-			uvl_list[i] = ((g3s_uvl *) (p+30+((nv&~1)+1)*2))[i];
+			uvl_list[i] = (reinterpret_cast<const g3s_uvl *>(p+30+((nv&~1)+1)*2))[i];
 		lrgb_list.fill(light);
 		array<cg3s_point *, 3> point_list;
 		unsigned i;
@@ -473,6 +468,8 @@ public:
 		Assert(nv > 2);		//must have 3 or more points
 #if defined(DXX_BUILD_DESCENT_I)
 		*wp(p+28) = (short)gr_find_closest_color_15bpp(w(p+28));
+#elif defined(DXX_BUILD_DESCENT_II)
+		(void)p;
 #endif
 	}
 	void op_tmappoly(const uint8_t *const p, const uint_fast32_t nv)
@@ -562,6 +559,16 @@ static P iterate_polymodel(P p, State &state)
 }
 
 #ifdef WORDS_BIGENDIAN
+static inline fix *fp(uint8_t *p)
+{
+	return reinterpret_cast<fix *>(p);
+}
+
+static inline vms_vector *vp(uint8_t *p)
+{
+	return reinterpret_cast<vms_vector *>(p);
+}
+
 static void short_swap(short *s)
 {
 	*s = SWAPSHORT(*s);
@@ -577,7 +584,7 @@ static void fix_swap(fix *f)
 	fix_swap(*f);
 }
 
-void vms_vector_swap(vms_vector &v)
+static void vms_vector_swap(vms_vector &v)
 {
 	fix_swap(v.x);
 	fix_swap(v.y);
@@ -780,4 +787,6 @@ int16_t g3_init_polygon_model(void *model_ptr)
 	#endif
 
 	return init_model_sub(reinterpret_cast<uint8_t *>(model_ptr), -1);
+}
+
 }

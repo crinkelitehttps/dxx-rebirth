@@ -23,29 +23,21 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-#ifndef _MULTIBOT_H
-#define _MULTIBOT_H
+#pragma once
 
 #include "pstypes.h"
 
 #ifdef __cplusplus
-#include "player.h"	// playernum_t
+#include "fwd-player.h"	// playernum_t
+#include "fwd-vecmat.h"
 
-struct vms_vector;
+static const std::size_t MAX_ROBOTS_CONTROLLED = 5;
+static const std::size_t HANDS_OFF_PERIOD = MAX_ROBOTS_CONTROLLED; // i.e. one slow above max
+
+extern array<objnum_t, MAX_ROBOTS_CONTROLLED> robot_controlled;
+extern array<int, MAX_ROBOTS_CONTROLLED> robot_agitation, robot_fired;
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
-#if defined(DXX_BUILD_DESCENT_I)
-static const std::size_t MAX_ROBOTS_CONTROLLED = 3;
-#elif defined(DXX_BUILD_DESCENT_II)
-static const std::size_t MAX_ROBOTS_CONTROLLED = 5;
-#endif
-
-extern objnum_t robot_controlled[MAX_ROBOTS_CONTROLLED];
-extern int robot_agitation[MAX_ROBOTS_CONTROLLED];
-extern int robot_fired[MAX_ROBOTS_CONTROLLED];
-#endif
-
 int multi_can_move_robot(vobjptridx_t objnum, int agitation);
 void multi_send_robot_position(vobjptridx_t objnum, int fired);
 void multi_send_robot_fire(vobjptridx_t objnum, int gun_num, const vms_vector &fire);
@@ -57,7 +49,14 @@ void multi_send_boss_cloak(objnum_t bossobjnum);
 void multi_send_boss_start_gate(objnum_t bossobjnum);
 void multi_send_boss_stop_gate(objnum_t bossobjnum);
 void multi_send_boss_create_robot(objnum_t bossobjnum, int robot_type, vobjptridx_t objnum);
+int multi_explode_robot_sub(vobjptridx_t botnum);
+void multi_drop_robot_powerups(vobjptridx_t objnum);
 int multi_send_robot_frame(int sent);
+void multi_robot_request_change(vobjptridx_t robot, int playernum);
+#if defined(DXX_BUILD_DESCENT_II)
+void multi_send_thief_frame();
+#endif
+#endif
 
 void multi_do_robot_explode(const ubyte *buf);
 void multi_do_robot_position(playernum_t pnum, const ubyte *buf);
@@ -72,15 +71,7 @@ void multi_do_boss_start_gate(const ubyte *buf);
 void multi_do_boss_stop_gate(const ubyte *buf);
 void multi_do_boss_create_robot(playernum_t pnum, const ubyte *buf);
 
-int multi_explode_robot_sub(vobjptridx_t botnum);
-
-void multi_drop_robot_powerups(vobjptridx_t objnum);
-
 void multi_strip_robots(int playernum);
 void multi_check_robot_timeout(void);
 
-void multi_robot_request_change(vobjptridx_t robot, int playernum);
-
 #endif
-
-#endif /* _MULTIBOT_H */

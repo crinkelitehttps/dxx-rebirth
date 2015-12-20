@@ -23,18 +23,16 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#pragma once
 
-#ifndef _GAMESEQ_H
-#define _GAMESEQ_H
-
-#include "player.h"
-#include "mission.h"
+#include "fwd-player.h"
 
 #ifdef __cplusplus
-#include "fwdobject.h"
+#include "fwd-object.h"
 
 struct player;
 
+namespace dcx {
 template <std::size_t>
 struct PHYSFSX_gets_line_t;
 
@@ -45,10 +43,11 @@ const unsigned LEVEL_NAME_LEN = 36;       //make sure this is multiple of 4!
 // 0 means not a real level loaded
 extern int Current_level_num, Next_level_num;
 extern PHYSFSX_gets_line_t<LEVEL_NAME_LEN> Current_level_name;
-extern obj_position Player_init[MAX_PLAYERS];
+extern array<obj_position, MAX_PLAYERS> Player_init;
 
 // This is the highest level the player has ever reached
 extern int Player_highest_level;
+}
 
 //
 // New game sequencing functions
@@ -60,18 +59,19 @@ void StartNewGame(int start_level);
 // starts the next level
 void StartNewLevel(int level_num);
 
-// Actually does the work to start new level
-void StartNewLevelSub(int level_num, int page_in_textures, int secret_flag);
-
 void InitPlayerObject();            //make sure player's object set up
+namespace dsx {
 void init_player_stats_game(ubyte pnum);      //clear all stats
+}
 
 // called when the player has finished a level
 // if secret flag is true, advance to secret level, else next normal level
 void PlayerFinishedLevel(int secret_flag);
 
+namespace dsx {
 // called when the player has died
 void DoPlayerDead(void);
+}
 
 #if defined(DXX_BUILD_DESCENT_I)
 static inline void load_level_robots(int level_num)
@@ -79,16 +79,21 @@ static inline void load_level_robots(int level_num)
 	(void)level_num;
 }
 #elif defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 // load just the hxm file
 void load_level_robots(int level_num);
 extern int	First_secret_visit;
+void ExitSecretLevel();
+}
 #endif
 
 // load a level off disk. level numbers start at 1.
 // Secret levels are -1,-2,-3
 void LoadLevel(int level_num, int page_in_textures);
 
+namespace dsx {
 extern void gameseq_remove_unused_players();
+}
 
 extern void update_player_stats();
 
@@ -99,34 +104,38 @@ extern void draw_high_scores(int place);
 extern int add_player_to_high_scores(player *pp);
 extern void input_name (int place);
 extern int reset_high_scores();
-extern void init_player_stats_level(int secret_flag);
 
 void open_message_window(void);
 void close_message_window(void);
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 // create flash for player appearance
 void create_player_appearance_effect(vobjptridx_t player_obj);
+void bash_to_shield(const vobjptr_t i);
+void copy_defaults_to_robot(vobjptr_t objp);
+#endif
 
+namespace dsx {
 // reset stuff so game is semi-normal when playing from editor
 void editor_reset_stuff_on_level();
+}
 
 // Show endlevel bonus scores
 extern void DoEndLevelScoreGlitz(int network);
 
+namespace dcx {
 // stuff for multiplayer
 extern unsigned NumNetPlayerPositions;
 extern fix StartingShields;
 extern int	Do_appearance_effect;
+}
 
-void bash_to_shield(const vobjptr_t i);
 
 int p_secret_level_destroyed(void);
-void ExitSecretLevel(void);
+namespace dsx {
 void do_cloak_invul_secret_stuff(fix64 old_gametime);
 void EnterSecretLevel(void);
-void copy_defaults_to_robot(vobjptr_t objp);
 void init_player_stats_new_ship(ubyte pnum);
+}
 
 #endif
-
-#endif /* _GAMESEQ_H */

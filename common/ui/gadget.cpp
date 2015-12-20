@@ -33,12 +33,27 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "key.h"
 
+namespace dcx {
+
 UI_GADGET * selected_gadget;
+
+constexpr tt::integral_constant<uint8_t, 1> UI_GADGET_BUTTON::s_kind;
+constexpr tt::integral_constant<uint8_t, 2> UI_GADGET_LISTBOX::s_kind;
+constexpr tt::integral_constant<uint8_t, 3> UI_GADGET_SCROLLBAR::s_kind;
+constexpr tt::integral_constant<uint8_t, 4> UI_GADGET_RADIO::s_kind;
+constexpr tt::integral_constant<uint8_t, 5> UI_GADGET_CHECKBOX::s_kind;
+constexpr tt::integral_constant<uint8_t, 6> UI_GADGET_INPUTBOX::s_kind;
+constexpr tt::integral_constant<uint8_t, 7> UI_GADGET_USERBOX::s_kind;
+constexpr tt::integral_constant<uint8_t, 9> UI_GADGET_ICON::s_kind;
+
+namespace {
 
 struct event_gadget : d_event
 {
 	UI_GADGET *gadget;
 };
+
+}
 
 void ui_gadget_add(UI_DIALOG * dlg, short x1, short y1, short x2, short y2, UI_GADGET *gadget)
 {
@@ -353,5 +368,7 @@ void ui_gadget_calc_keys( UI_DIALOG * dlg)
 
 		tmp = tmp->next;
 	} while( tmp != dlg->gadget );
+
+}
 
 }

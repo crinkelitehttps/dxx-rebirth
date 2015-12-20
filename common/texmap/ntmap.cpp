@@ -39,6 +39,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "dxxsconf.h"
 #include "compiler-integer_sequence.h"
 
+namespace dcx {
+
 #ifdef EDITOR
 #define EDITOR_TMAP 1       //if in, include extra stuff
 #endif
@@ -47,7 +49,6 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 // Temporary texture map, interface from Matt's 3d system to Mike's texture mapper.
 
-int	Interpolation_method=0;	// 0 = choose best method
 int     Lighting_on=1;                  // initialize to no lighting
 unsigned	Current_seg_depth;		// HACK INTERFACE: how far away the current segment (& thus texture) is
 
@@ -68,6 +69,7 @@ ubyte tmap_flat_shade_value;
 
 
 #ifndef OGL
+int	Interpolation_method;	// 0 = choose best method
 // -------------------------------------------------------------------------------------
 template <std::size_t... N>
 static inline constexpr const array<fix, 1 + sizeof...(N)> init_fix_recip_table(index_sequence<0, N...>)
@@ -77,7 +79,6 @@ static inline constexpr const array<fix, 1 + sizeof...(N)> init_fix_recip_table(
 }
 
 const array<fix, FIX_RECIP_TABLE_SIZE> fix_recip_table = init_fix_recip_table(make_tree_index_sequence<FIX_RECIP_TABLE_SIZE>());
-#endif
 
 // -------------------------------------------------------------------------------------
 //	Initialize interface variables to assembler.
@@ -96,7 +97,7 @@ void init_interface_vars_to_assembler(void)
 		bytes_per_row = (int) bp->bm_rowsize;
 	}
 
-        write_buffer = (unsigned char *) bp->bm_data;
+	write_buffer = bp->bm_mdata;
 
 	Window_clip_left = 0;
 	Window_clip_right = (int) bp->bm_w-1;
@@ -104,7 +105,6 @@ void init_interface_vars_to_assembler(void)
 	Window_clip_bot = (int) bp->bm_h-1;
 }
 
-#ifndef OGL
 static int Lighting_enabled;
 // -------------------------------------------------------------------------------------
 //                             VARIABLES
@@ -892,3 +892,5 @@ void draw_tmap(const grs_bitmap &rbp,uint_fast32_t nverts,const g3s_point *const
 
 }
 #endif
+
+}

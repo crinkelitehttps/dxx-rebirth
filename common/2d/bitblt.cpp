@@ -39,15 +39,19 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "compiler-array.h"
 #include "compiler-exchange.h"
 
+namespace dcx {
+
 static int gr_bitblt_dest_step_shift = 0;
-static ubyte *gr_bitblt_fade_table=NULL;
 
 static void gr_bm_ubitblt00_rle(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const grs_bitmap &src, grs_bitmap &dest);
+#ifndef OGL
 static void gr_bm_ubitblt00m_rle(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const grs_bitmap &src, grs_bitmap &dest);
 static void gr_bm_ubitblt0x_rle(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const grs_bitmap &src, grs_bitmap &dest);
+#endif
 
 #define gr_linear_movsd(S,D,L)	memcpy(D,S,L)
 
+#ifndef OGL
 static void gr_linear_rep_movsdm(const uint8_t *const src, uint8_t *const dest, const uint_fast32_t num_pixels)
 {
 	auto predicate = [&](uint8_t s, uint8_t d) {
@@ -55,13 +59,7 @@ static void gr_linear_rep_movsdm(const uint8_t *const src, uint8_t *const dest, 
 	};
 	std::transform(src, src + num_pixels, dest, dest, predicate);
 }
-
-static void gr_linear_rep_movsdm_faded(const ubyte * src, ubyte * dest, int num_pixels, ubyte fade_value ) {
-	auto predicate = [&](ubyte s, ubyte d) {
-		return s == 255 ? d : gr_fade_table[fade_value][s];
-	};
-	std::transform(src, src + num_pixels, dest, dest, predicate);
-}
+#endif
 
 static void gr_ubitmap00(unsigned x, unsigned y, const grs_bitmap &bm)
 {
@@ -78,6 +76,7 @@ static void gr_ubitmap00(unsigned x, unsigned y, const grs_bitmap &bm)
 	}
 }
 
+#ifndef OGL
 static void gr_ubitmap00m(unsigned x, unsigned y, const grs_bitmap &bm)
 {
 	int dest_rowsize;
@@ -86,22 +85,16 @@ static void gr_ubitmap00m(unsigned x, unsigned y, const grs_bitmap &bm)
 	auto src = bm.get_bitmap_data();
 
 	const uint_fast32_t bm_h = bm.bm_h;
-	if (gr_bitblt_fade_table==NULL)	{
+	{
 		for (uint_fast32_t y1 = bm_h; y1 --;)
 		{
 			gr_linear_rep_movsdm( src, dest, bm.bm_w );
 			src += bm.bm_rowsize;
 			dest+= dest_rowsize;
 		}
-	} else {
-		for (uint_fast32_t y1 = 0; y1 != bm_h; ++y1)
-		{
-			gr_linear_rep_movsdm_faded( src, dest, bm.bm_w, gr_bitblt_fade_table[y1+y] );
-			src += bm.bm_rowsize;
-			dest+= dest_rowsize;
-		}
 	}
 }
+#endif
 
 template <typename F>
 static inline void gr_for_each_bitmap_byte(const uint_fast32_t bx, const uint_fast32_t by, const grs_bitmap &bm, F f)
@@ -116,25 +109,27 @@ static inline void gr_for_each_bitmap_byte(const uint_fast32_t bx, const uint_fa
 
 static void gr_ubitmap012(unsigned x, unsigned y, const grs_bitmap &bm)
 {
-	const auto a = [](const grs_bitmap &, const uint8_t *const src, const uint_fast32_t x, const uint_fast32_t y) {
+	const auto a = [](const grs_bitmap &, const uint8_t *const src, const uint_fast32_t px, const uint_fast32_t py) {
 		gr_setcolor(*src);
-		gr_upixel(x, y);
+		gr_upixel(px, py);
 	};
 	gr_for_each_bitmap_byte(x, y, bm, a);
 }
 
+#ifndef OGL
 static void gr_ubitmap012m(unsigned x, unsigned y, const grs_bitmap &bm)
 {
-	const auto a = [](const grs_bitmap &, const uint8_t *const src, const uint_fast32_t x, const uint_fast32_t y) {
+	const auto a = [](const grs_bitmap &, const uint8_t *const src, const uint_fast32_t px, const uint_fast32_t py) {
 		const uint8_t c = *src;
 		if (c != 255)
 		{
 			gr_setcolor(c);
-			gr_upixel(x, y);
+			gr_upixel(px, py);
 		}
 	};
 	gr_for_each_bitmap_byte(x, y, bm, a);
 }
+#endif
 
 static void gr_ubitmapGENERIC(unsigned x, unsigned y, const grs_bitmap &bm)
 {
@@ -150,6 +145,7 @@ static void gr_ubitmapGENERIC(unsigned x, unsigned y, const grs_bitmap &bm)
 	}
 }
 
+#ifndef OGL
 static void gr_ubitmapGENERICm(unsigned x, unsigned y, const grs_bitmap &bm)
 {
 	ubyte c;
@@ -168,13 +164,15 @@ static void gr_ubitmapGENERICm(unsigned x, unsigned y, const grs_bitmap &bm)
 		}
 	}
 }
+#endif
 
 void gr_ubitmap(grs_bitmap &bm)
-{   int source, dest;
+{
+	int dest;
 	const unsigned x = 0;
 	const unsigned y = 0;
 
-	source = bm.bm_type;
+	const auto source = bm.get_type();
 	dest = TYPE;
 
 	if (source==BM_LINEAR) {
@@ -200,9 +198,10 @@ void gr_ubitmap(grs_bitmap &bm)
 	}
 }
 
+#ifndef OGL
 void gr_ubitmapm(unsigned x, unsigned y, grs_bitmap &bm)
 {
-	auto source = bm.bm_type;
+	const auto source = bm.get_type();
 	auto dest = TYPE;
 	if (source==BM_LINEAR) {
 		switch( dest )
@@ -253,17 +252,10 @@ static void gr_bm_ubitblt00m(const unsigned w, const uint_fast32_t h, unsigned d
 
 	// No interlacing, copy the whole buffer.
 
-	if (gr_bitblt_fade_table==NULL)	{
+	{
 		for (auto i = h; i; --i)
 		{
 			gr_linear_rep_movsdm( sbits, dbits, w );
-			sbits += src.bm_rowsize;
-			dbits += dest.bm_rowsize;
-		}
-	} else {
-		for (uint_fast32_t i = 0; i != h; ++i)
-		{
-			gr_linear_rep_movsdm_faded( sbits, dbits, w, gr_bitblt_fade_table[dy+i] );
 			sbits += src.bm_rowsize;
 			dbits += dest.bm_rowsize;
 		}
@@ -272,7 +264,7 @@ static void gr_bm_ubitblt00m(const unsigned w, const uint_fast32_t h, unsigned d
 
 void gr_bm_ubitblt(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const grs_bitmap &src, grs_bitmap &dest)
 {
-	if ( (src.bm_type == BM_LINEAR) && (dest.bm_type == BM_LINEAR ))
+	if (src.get_type() == BM_LINEAR && dest.get_type() == BM_LINEAR)
 	{
 		if ( src.bm_flags & BM_FLAG_RLE )
 			gr_bm_ubitblt00_rle( w, h, dx, dy, sx, sy, src, dest );
@@ -282,22 +274,23 @@ void gr_bm_ubitblt(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const
 	}
 
 #ifdef OGL
-	if ( (src.bm_type == BM_LINEAR) && (dest.bm_type == BM_OGL ))
+	if (src.get_type() == BM_LINEAR && dest.get_type() == BM_OGL)
 	{
 		ogl_ubitblt(w, h, dx, dy, sx, sy, src, dest);
 		return;
 	}
-	if ( (src.bm_type == BM_OGL) && (dest.bm_type == BM_LINEAR ))
+	if (src.get_type() == BM_OGL && dest.get_type() == BM_LINEAR)
 	{
 		return;
 	}
-	if ( (src.bm_type == BM_OGL) && (dest.bm_type == BM_OGL ))
+	if (src.get_type() == BM_OGL && dest.get_type() == BM_OGL)
 	{
 		return;
 	}
 #endif
 
-	if ( (src.bm_flags & BM_FLAG_RLE ) && (src.bm_type == BM_LINEAR) )	{
+	if ((src.bm_flags & BM_FLAG_RLE) && src.get_type() == BM_LINEAR)
+	{
 		gr_bm_ubitblt0x_rle(w, h, dx, dy, sx, sy, src, dest);
 	 	return;
 	}
@@ -306,6 +299,7 @@ void gr_bm_ubitblt(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const
 		for (uint_fast32_t x1 = 0; x1 != w; ++x1)
 			gr_bm_pixel(dest, dx+x1, dy+y1, gr_gpixel(src,sx+x1,sy+y1) );
 }
+#endif
 
 // Clipped bitmap ...
 void gr_bitmap(unsigned x, unsigned y, grs_bitmap &bm)
@@ -339,6 +333,7 @@ void gr_bitmap(unsigned x, unsigned y, grs_bitmap &bm)
 #endif
 }
 
+#ifndef OGL
 void gr_bitmapm(unsigned x, unsigned y, const grs_bitmap &bm)
 {
 	int dx1=x, dx2=x+bm.bm_w-1;
@@ -354,7 +349,7 @@ void gr_bitmapm(unsigned x, unsigned y, const grs_bitmap &bm)
 
 	// Draw bitmap bm[x,y] into (dx1,dy1)-(dx2,dy2)
 
-	if ( (bm.bm_type == BM_LINEAR) && (grd_curcanv->cv_bitmap.bm_type == BM_LINEAR ))
+	if (bm.get_type() == BM_LINEAR && grd_curcanv->cv_bitmap.get_type() == BM_LINEAR)
 	{
 		if ( bm.bm_flags & BM_FLAG_RLE )
 			gr_bm_ubitblt00m_rle(dx2-dx1+1,dy2-dy1+1, dx1, dy1, sx, sy, bm, grd_curcanv->cv_bitmap );
@@ -370,16 +365,16 @@ void gr_bm_ubitbltm(unsigned w, unsigned h, unsigned dx, unsigned dy, unsigned s
 	ubyte c;
 
 #ifdef OGL
-	if ( (src.bm_type == BM_LINEAR) && (dest.bm_type == BM_OGL ))
+	if (src.get_type() == BM_LINEAR && dest.get_type() == BM_OGL)
 	{
 		ogl_ubitblt(w, h, dx, dy, sx, sy, src, dest);
 		return;
 	}
-	if ( (src.bm_type == BM_OGL) && (dest.bm_type == BM_LINEAR ))
+	if (src.get_type() == BM_OGL && dest.get_type() == BM_LINEAR)
 	{
 		return;
 	}
-	if ( (src.bm_type == BM_OGL) && (dest.bm_type == BM_OGL ))
+	if (src.get_type() == BM_OGL && dest.get_type() == BM_OGL)
 	{
 		return;
 	}
@@ -389,6 +384,7 @@ void gr_bm_ubitbltm(unsigned w, unsigned h, unsigned dx, unsigned dy, unsigned s
 			if ((c=gr_gpixel(src,sx+x1,sy+y1))!=255)
 				gr_bm_pixel(dest, dx+x1, dy+y1,c  );
 }
+#endif
 
 static void gr_bm_ubitblt00_rle(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const grs_bitmap &src, grs_bitmap &dest)
 {
@@ -399,20 +395,21 @@ static void gr_bm_ubitblt00_rle(unsigned w, unsigned h, int dx, int dy, int sx, 
 		data_offset = 2;
 	auto sbits = &src.get_bitmap_data()[4 + (src.bm_h*data_offset)];
 	for (uint_fast32_t i = 0; i != sy; ++i)
-		sbits += (int)(INTEL_SHORT(src.bm_data[4+(i*data_offset)]));
+		sbits += src.bm_data[4+(i*data_offset)];
 	auto dbits = &dest.get_bitmap_data()[(dest.bm_rowsize * dy) + dx];
 	// No interlacing, copy the whole buffer.
 	for (uint_fast32_t i = 0; i != h; ++i)
 	{
 		gr_rle_expand_scanline( dbits, sbits, sx, sx+w-1 );
 		if ( src.bm_flags & BM_FLAG_RLE_BIG )
-			sbits += (int)INTEL_SHORT(*((short *)&(src.bm_data[4+((i+sy)*data_offset)])));
+			sbits += GET_INTEL_SHORT(&src.bm_data[4 + ((i + sy) * data_offset)]);
 		else
 			sbits += (int)(src.bm_data[4+i+sy]);
 		dbits += dest.bm_rowsize << gr_bitblt_dest_step_shift;
 	}
 }
 
+#ifndef OGL
 static void gr_bm_ubitblt00m_rle(unsigned w, unsigned h, int dx, int dy, int sx, int sy, const grs_bitmap &src, grs_bitmap &dest)
 {
 	int data_offset;
@@ -422,14 +419,14 @@ static void gr_bm_ubitblt00m_rle(unsigned w, unsigned h, int dx, int dy, int sx,
 		data_offset = 2;
 	auto sbits = &src.get_bitmap_data()[4 + (src.bm_h*data_offset)];
 	for (uint_fast32_t i = 0; i != sy; ++i)
-		sbits += (int)(INTEL_SHORT(src.bm_data[4+(i*data_offset)]));
+		sbits += src.bm_data[4+(i*data_offset)];
 	auto dbits = &dest.get_bitmap_data()[(dest.bm_rowsize * dy) + dx];
 	// No interlacing, copy the whole buffer.
 	for (uint_fast32_t i = 0; i != h; ++i)
 	{
 		gr_rle_expand_scanline_masked( dbits, sbits, sx, sx+w-1 );
 		if ( src.bm_flags & BM_FLAG_RLE_BIG )
-			sbits += (int)INTEL_SHORT(*((short *)&(src.bm_data[4+((i+sy)*data_offset)])));
+			sbits += GET_INTEL_SHORT(&src.bm_data[4 + ((i + sy) * data_offset)]);
 		else
 			sbits += (int)(src.bm_data[4+i+sy]);
 		dbits += dest.bm_rowsize << gr_bitblt_dest_step_shift;
@@ -446,17 +443,18 @@ static void gr_bm_ubitblt0x_rle(unsigned w, unsigned h, int dx, int dy, int sx, 
 		data_offset = 2;
 	auto sbits = &src.bm_data[4 + (src.bm_h*data_offset)];
 	for (uint_fast32_t i = 0; i != sy; ++i)
-		sbits += (int)(INTEL_SHORT(src.bm_data[4+(i*data_offset)]));
+		sbits += src.bm_data[4 + (i * data_offset)];
 
 	for (uint_fast32_t y1 = 0; y1 != h; ++y1)
 	{
 		gr_rle_expand_scanline_generic(dest, dx, dy+y1, sbits, sx, sx+w-1);
 		if ( src.bm_flags & BM_FLAG_RLE_BIG )
-			sbits += (int)INTEL_SHORT(*((short *)&(src.bm_data[4+((y1+sy)*data_offset)])));
+			sbits += GET_INTEL_SHORT(&src.bm_data[4 + ((y1 + sy) * data_offset)]);
 		else
 			sbits += (int)src.bm_data[4+y1+sy];
 	}
 }
+#endif
 
 // rescalling bitmaps, 10/14/99 Jan Bobrowski jb@wizard.ae.krakow.pl
 
@@ -504,14 +502,15 @@ void show_fullscr(grs_bitmap &bm)
 {
 	auto &scr = grd_curcanv->cv_bitmap;
 #ifdef OGL
-	if(bm.bm_type == BM_LINEAR && scr.bm_type == BM_OGL &&
-		bm.bm_w <= grd_curscreen->sc_w && bm.bm_h <= grd_curscreen->sc_h) // only scale with OGL if bitmap is not bigger than screen size
+	if (bm.get_type() == BM_LINEAR && scr.get_type() == BM_OGL &&
+		bm.bm_w <= grd_curscreen->get_screen_width() && bm.bm_h <= grd_curscreen->get_screen_height()) // only scale with OGL if bitmap is not bigger than screen size
 	{
 		ogl_ubitmapm_cs(0,0,-1,-1,bm,-1,F1_0);//use opengl to scale, faster and saves ram. -MPM
 		return;
 	}
 #endif
-	if(scr.bm_type != BM_LINEAR) {
+	if (scr.get_type() != BM_LINEAR)
+	{
 		grs_bitmap_ptr p = gr_create_bitmap(scr.bm_w, scr.bm_h);
 		auto &tmp = *p.get();
 		gr_bitmap_scale_to(bm, tmp);
@@ -573,4 +572,6 @@ void gr_bitblt_find_transparent_area(const grs_bitmap &bm, unsigned &minx, unsig
 				check(x, y, bm.bm_data[i++]);
 	}
 	Assert (count);
+}
+
 }

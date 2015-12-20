@@ -45,7 +45,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gamefont.h"
 #include "gameseq.h"
 #include "dxxerror.h"
-#include "polyobj.h"
+#include "robot.h"
 #include "textures.h"
 #include "screens.h"
 #include "multi.h"
@@ -97,6 +97,8 @@ static int rescale_y(int y)
 	return y * GHEIGHT / 200;
 }
 
+namespace {
+
 struct title_screen : ignore_window_pointer_t
 {
 	grs_bitmap title_bm;
@@ -104,7 +106,9 @@ struct title_screen : ignore_window_pointer_t
 	int allow_keys;
 };
 
-static window_event_result title_handler(window *wind,const d_event &event, title_screen *ts)
+}
+
+static window_event_result title_handler(window *, const d_event &event, title_screen *ts)
 {
 	switch (event.type)
 	{
@@ -149,7 +153,7 @@ static window_event_result title_handler(window *wind,const d_event &event, titl
 	return window_event_result::ignored;
 }
 
-static int show_title_screen(const char * filename, int allow_keys, int from_hog_only )
+static void show_title_screen(const char * filename, int allow_keys, int from_hog_only )
 {
 	window *wind;
 	int pcx_error;
@@ -180,40 +184,42 @@ static int show_title_screen(const char * filename, int allow_keys, int from_hog
 	if (!wind)
 	{
 		gr_free_bitmap_data(ts->title_bm);
-		return 0;
+		return;
 	}
 
 	while (window_exists(wind))
 		event_process();
-
-	return 0;
 }
 
 #if defined(DXX_BUILD_DESCENT_II)
 int intro_played = 0;
 #endif
 
+static void show_first_found_title_screen(const char *oem, const char *share, const char *macshare)
+{
+	const char *filename = oem;
+	if ((PHYSFSX_exists(filename, 1)) ||
+		(filename = share, PHYSFSX_exists(filename, 1)) ||
+		(filename = macshare, PHYSFSX_exists(filename, 1))
+		)
+		show_title_screen(filename, 1, 1);
+}
+
 void show_titles(void)
 {
-#if defined(DXX_BUILD_DESCENT_I)
-	char    publisher[PATH_MAX];
-
-	songs_play_song( SONG_TITLE, 1 );
-
 	if (GameArg.SysNoTitles)
 		return;
+#if defined(DXX_BUILD_DESCENT_I)
+	songs_play_song( SONG_TITLE, 1 );
 
-	strcpy(publisher, "macplay.pcx");	// Mac Shareware
-	if (!PHYSFSX_exists(publisher,1))
-		strcpy(publisher, "mplaycd.pcx");	// Mac Registered
-	if (!PHYSFSX_exists(publisher,1))
-		strcpy(publisher, "iplogo1.pcx");	// PC. Only down here because it's lowres ;-)
-
-	show_title_screen( publisher, 1, 1 );
+	show_first_found_title_screen(
+		"macplay.pcx",	// Mac Shareware
+		"mplaycd.pcx",	// Mac Registered
+		"iplogo1.pcx"	// PC. Only down here because it's lowres ;-)
+	);
 	show_title_screen( (((SWIDTH>=640&&SHEIGHT>=480) && PHYSFSX_exists("logoh.pcx",1))?"logoh.pcx":"logo.pcx"), 1, 1 );
 	show_title_screen( (((SWIDTH>=640&&SHEIGHT>=480) && PHYSFSX_exists("descenth.pcx",1))?"descenth.pcx":"descent.pcx"), 1, 1 );
 #elif defined(DXX_BUILD_DESCENT_II)
-	char filename[PATH_MAX];
 	int played=MOVIE_NOT_PLAYED;    //default is not played
 	int song_playing = 0;
 
@@ -225,6 +231,7 @@ void show_titles(void)
 		played = PlayMovie(NULL, "pre_i.mve",0);
 
 		if (!played) {
+			char filename[12];
 			strcpy(filename,HIRESMODE?"pre_i1b.pcx":"pre_i1.pcx");
 
 			while (PHYSFSX_exists(filename,0))
@@ -251,21 +258,17 @@ void show_titles(void)
 			song_playing = 1;
 			con_printf( CON_DEBUG, "\nShowing logo screens..." );
 
-			strcpy(filename, HIRESMODE?"iplogo1b.pcx":"iplogo1.pcx"); // OEM
-			if (! PHYSFSX_exists(filename,1))
-				strcpy(filename, "iplogo1.pcx"); // SHAREWARE
-			if (! PHYSFSX_exists(filename,1))
-				strcpy(filename, "mplogo.pcx"); // MAC SHAREWARE
-			if (PHYSFSX_exists(filename,1))
-				show_title_screen(filename, 1, 1);
-
-			strcpy(filename, HIRESMODE?"logob.pcx":"logo.pcx"); // OEM
-			if (! PHYSFSX_exists(filename,1))
-				strcpy(filename, "logo.pcx"); // SHAREWARE
-			if (! PHYSFSX_exists(filename,1))
-				strcpy(filename, "plogo.pcx"); // MAC SHAREWARE
-			if (PHYSFSX_exists(filename,1))
-				show_title_screen(filename, 1, 1);
+			const auto hiresmode = HIRESMODE;
+			show_first_found_title_screen(
+				hiresmode ? "iplogo1b.pcx" : "iplogo1.pcx", // OEM
+				"iplogo1.pcx", // SHAREWARE
+				"mplogo.pcx" // MAC SHAREWARE
+				);
+			show_first_found_title_screen(
+				hiresmode ? "logob.pcx" : "logo.pcx", // OEM
+				"logo.pcx", // SHAREWARE
+				"plogo.pcx" // MAC SHAREWARE
+				);
 		}
 	}
 
@@ -281,8 +284,8 @@ void show_titles(void)
 
 		if (!played)
 		{
+			char filename[12];
 			strcpy(filename,HIRESMODE?"oem1b.pcx":"oem1.pcx");
-
 			while (PHYSFSX_exists(filename,0))
 			{
 				show_title_screen( filename, 1, 0 );
@@ -297,7 +300,7 @@ void show_titles(void)
 		songs_play_song( SONG_TITLE, 1);
 	}
 	con_printf( CON_DEBUG, "\nShowing logo screen..." );
-	strcpy(filename, HIRESMODE?"descentb.pcx":"descent.pcx");
+	const char *filename = HIRESMODE?"descentb.pcx":"descent.pcx";
 	if (PHYSFSX_exists(filename,1))
 		show_title_screen(filename, 1, 1);
 #endif
@@ -305,36 +308,32 @@ void show_titles(void)
 
 void show_order_form()
 {
-#if defined(DXX_BUILD_DESCENT_I)
-	char    exit_screen[PATH_MAX];
-
 	if (GameArg.SysNoTitles)
 		return;
 
-	strcpy(exit_screen, "warning.pcx");	// D1 Registered
-	if (! PHYSFSX_exists(exit_screen,1))
-		strcpy(exit_screen, "apple.pcx");	// D1 Mac OEM Demo
-	if (! PHYSFSX_exists(exit_screen,1))
-		strcpy(exit_screen, "order01.pcx"); // D1 Demo
-	show_title_screen(exit_screen, 1, 1);
+#if defined(DXX_BUILD_DESCENT_I)
+	show_first_found_title_screen(
+		"warning.pcx",	// D1 Registered
+		"apple.pcx",	// D1 Mac OEM Demo
+		"order01.pcx"	// D1 Demo
+	);
 #elif defined(DXX_BUILD_DESCENT_II)
 #ifndef EDITOR
-	char    exit_screen[PATH_MAX];
-
 	key_flush();
-
-	strcpy(exit_screen, HIRESMODE?"ordrd2ob.pcx":"ordrd2o.pcx"); // OEM
-	if (! PHYSFSX_exists(exit_screen,1))
-		strcpy(exit_screen, HIRESMODE?"orderd2b.pcx":"orderd2.pcx"); // SHAREWARE, prefer mac if hires
-	if (! PHYSFSX_exists(exit_screen,1))
-		strcpy(exit_screen, HIRESMODE?"orderd2.pcx":"orderd2b.pcx"); // SHAREWARE, have to rescale
-	if (! PHYSFSX_exists(exit_screen,1))
-		strcpy(exit_screen, HIRESMODE?"warningb.pcx":"warning.pcx"); // D1
-	if (! PHYSFSX_exists(exit_screen,1))
-		return; // D2 registered
-
-	show_title_screen(exit_screen,1,0);
-
+	const auto hiresmode = HIRESMODE;
+	/*
+	 * If D2 registered, all checks fail and nothing is shown.
+	 */
+	const char *exit_screen = hiresmode ? "ordrd2ob.pcx" : "ordrd2o.pcx"; // OEM
+	if ((PHYSFSX_exists(exit_screen, 1)) ||
+		// SHAREWARE, prefer mac if hires
+		(exit_screen = hiresmode ? "orderd2b.pcx" : "orderd2.pcx", PHYSFSX_exists(exit_screen, 1)) ||
+		// SHAREWARE, have to rescale
+		(exit_screen = hiresmode ? "orderd2.pcx" : "orderd2b.pcx", PHYSFSX_exists(exit_screen, 1)) ||
+		// D1
+		(exit_screen = hiresmode ? "warningb.pcx" : "warning.pcx", PHYSFSX_exists(exit_screen, 1))
+		)
+		show_title_screen(exit_screen,1,0);
 #endif
 #endif
 }
@@ -358,8 +357,9 @@ struct briefing_screen {
 #if defined(DXX_BUILD_DESCENT_II)
 #define MAX_BRIEFING_SCREENS 60
 
-static array<briefing_screen, MAX_BRIEFING_SCREENS> Briefing_screens =
- {{"brief03.pcx",0,3,8,8,257,177}}; // default=0!!!
+static array<briefing_screen, MAX_BRIEFING_SCREENS> Briefing_screens{{
+	{"brief03.pcx",0,3,8,8,257,177}
+}}; // default=0!!!
 #endif
 
 static const briefing_screen D1_Briefing_screens_full[] = {
@@ -464,7 +464,7 @@ struct briefing : ignore_window_pointer_t
 	char	background_name[PATH_MAX];
 #if defined(DXX_BUILD_DESCENT_II)
 	int		got_z;
-	int		hum_channel, printing_channel;
+	RAIIdigi_sound		hum_channel, printing_channel;
 	MVESTREAM_ptr_t pMovie;
 #endif
 	std::unique_ptr<char[]>	text;
@@ -505,7 +505,6 @@ static void briefing_init(briefing *br, short level_num)
 	gr_init_bitmap_data(br->background);
 	strncpy(br->background_name, DEFAULT_BRIEFING_BKG, sizeof(br->background_name));
 #if defined(DXX_BUILD_DESCENT_II)
-	br->hum_channel = br->printing_channel = -1;
 	br->robot_playing = 0;
 #endif
 	br->robot_num = 0;
@@ -662,7 +661,7 @@ static int check_text_pos(briefing *br)
 static void put_char_delay(briefing *br, char ch)
 {
 	char str[2];
-	int	w, h, aw;
+	int	w;
 
 	str[0] = ch; str[1] = '\0';
 	if (br->delay_count && (timer_query() < br->start_time + br->delay_count))
@@ -680,12 +679,12 @@ static void put_char_delay(briefing *br, char ch)
 	br->streamcount++;
 
 	br->prev_ch = ch;
-	gr_get_string_size(str, &w, &h, &aw );
+	gr_get_string_size(str, &w, nullptr, nullptr);
 	br->text_x += w;
 
 #if defined(DXX_BUILD_DESCENT_II)
 	if (!EMULATING_D1 && !br->chattering) {
-		br->printing_channel  = digi_start_sound( digi_xlat_sound(SOUND_BRIEFING_PRINTING), F1_0, 0xFFFF/2, 1, -1, -1, sound_object_none);
+		br->printing_channel.reset(digi_start_sound(digi_xlat_sound(SOUND_BRIEFING_PRINTING), F1_0, 0xFFFF/2, 1, -1, -1, sound_object_none));
 		br->chattering=1;
 	}
 #endif
@@ -842,9 +841,7 @@ static int briefing_process_char(briefing *br)
 		} else if (ch == 'S') {
 #if defined(DXX_BUILD_DESCENT_II)
 			br->chattering = 0;
-			if (br->printing_channel >- 1)
-				digi_stop_sound(br->printing_channel);
-			br->printing_channel =- 1;
+			br->printing_channel.reset();
 #endif
 
 			br->new_screen = 1;
@@ -858,9 +855,7 @@ static int briefing_process_char(briefing *br)
 			}
 
 			br->chattering = 0;
-			if (br->printing_channel >- 1)
-				digi_stop_sound(br->printing_channel);
-			br->printing_channel =- 1;
+			br->printing_channel.reset();
 #endif
 
 			br->new_page = 1;
@@ -875,8 +870,9 @@ static int briefing_process_char(briefing *br)
 		} else if (ch == '$' || ch == ';') // Print a $/;
 			put_char_delay(br, ch);
 	} else if (ch == '\t') {		//	Tab
-		if (br->text_x - br->screen->text_ulx < FSPACX(br->tab_stop))
-			br->text_x = br->screen->text_ulx + FSPACX(br->tab_stop);
+		const auto &&fspacx = FSPACX();
+		if (br->text_x - br->screen->text_ulx < fspacx(br->tab_stop))
+			br->text_x = br->screen->text_ulx + fspacx(br->tab_stop);
 	} else if ((ch == ';') && (br->prev_ch == 10)) {
 		while (*br->message++ != 10)
 			;
@@ -976,10 +972,7 @@ static void flash_cursor(briefing *br, int cursor_flag)
 	if (cursor_flag == 0)
 		return;
 
-	if ((timer_query() % (F1_0/2) ) > (F1_0/4))
-		gr_set_fontcolor(Briefing_text_colors[Current_color], -1);
-	else
-		gr_set_fontcolor(Erase_color, -1);
+	gr_set_fontcolor((timer_query() % (F1_0 / 2)) > F1_0 / 4 ? Briefing_text_colors[Current_color] : Erase_color, -1);
 
 	gr_string(br->text_x, br->text_y, "_" );
 }
@@ -1311,8 +1304,7 @@ static void free_briefing_screen(briefing *br)
 #endif
 	br->robot_canv.reset();
 #if defined(DXX_BUILD_DESCENT_II)
-	if (br->printing_channel>-1)
-		digi_stop_sound( br->printing_channel );
+	br->printing_channel.reset();
 #endif
 	if (EMULATING_D1)
 		br->screen.reset();
@@ -1384,7 +1376,7 @@ static int new_briefing_screen(briefing *br, int first)
 		return 0;	// finished
 
 	br->message = get_briefing_message(br, EMULATING_D1 ? Briefing_screens[br->cur_screen].message_num : br->cur_screen);
-	br->printing_channel = -1;
+	br->printing_channel.reset();
 	br->dumb_adjust = 0;
 	br->line_adjustment = 1;
 	br->chattering = 0;
@@ -1407,8 +1399,8 @@ static int new_briefing_screen(briefing *br, int first)
 	br->prev_ch = -1;
 
 #if defined(DXX_BUILD_DESCENT_II)
-	if ((songs_is_playing() == -1) && (br->hum_channel == -1))
-		br->hum_channel  = digi_start_sound( digi_xlat_sound(SOUND_BRIEFING_HUM), F1_0/2, 0xFFFF/2, 1, -1, -1, sound_object_none);
+	if (songs_is_playing() == -1 && !br->hum_channel)
+		br->hum_channel.reset(digi_start_sound(digi_xlat_sound(SOUND_BRIEFING_HUM), F1_0/2, 0xFFFF/2, 1, -1, -1, sound_object_none));
 #endif
 
 	return 1;
@@ -1416,7 +1408,7 @@ static int new_briefing_screen(briefing *br, int first)
 
 
 //-----------------------------------------------------------------------------
-static window_event_result briefing_handler(window *wind,const d_event &event, briefing *br)
+static window_event_result briefing_handler(window *, const d_event &event, briefing *br)
 {
 	switch (event.type)
 	{
@@ -1524,11 +1516,7 @@ static window_event_result briefing_handler(window *wind,const d_event &event, b
 		case EVENT_WINDOW_CLOSE:
 			free_briefing_screen(br);
 #if defined(DXX_BUILD_DESCENT_II)
-			if (br->hum_channel>-1)
-			{
-				digi_stop_sound( br->hum_channel );
-				br->hum_channel = -1;
-			}
+			br->hum_channel.reset();
 #endif
 			break;
 

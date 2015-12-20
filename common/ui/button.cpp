@@ -36,6 +36,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "mouse.h"
 #include "key.h"
 
+namespace dcx {
+
 #define Middle(x) ((2*(x)+1)/4)
 
 #define BUTTON_EXTRA_WIDTH  15
@@ -45,16 +47,11 @@ int ui_button_any_drawn = 0;
 
 void ui_get_button_size( const char * text, int * width, int * height )
 {
-	int avg;
-
-	gr_get_string_size(text, width, height, &avg  );
-
+	gr_get_string_size(text, width, height, nullptr);
 	*width += BUTTON_EXTRA_WIDTH*2;
 	*width += 6;
-
 	*height += BUTTON_EXTRA_HEIGHT*2;
 	*height += 6;
-
 }
 
 
@@ -205,4 +202,6 @@ window_event_result ui_button_do(UI_DIALOG *dlg, UI_GADGET_BUTTON * button,const
 	}
 	
 	return rval;
+}
+
 }

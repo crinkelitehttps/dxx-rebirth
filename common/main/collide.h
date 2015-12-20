@@ -23,17 +23,20 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#pragma once
 
-#ifndef _COLLIDE_H
-#define _COLLIDE_H
-
-#include "playsave.h"
+#include "maths.h"
 
 #ifdef __cplusplus
+#include <cstdint>
+#include "fwd-object.h"
+#include "fwd-segment.h"
+#include "fwd-vecmat.h"
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 void collide_two_objects(vobjptridx_t A, vobjptridx_t B, vms_vector &collision_point);
 void collide_object_with_wall(vobjptridx_t A, fix hitspeed, vsegptridx_t hitseg, short hitwall, const vms_vector &hitpt);
-void apply_damage_to_player(vobjptr_t player, cobjptridx_t killer, fix damage, ubyte possibly_friendly);
+void apply_damage_to_player(vobjptr_t player, cobjptridx_t killer, fix damage, uint8_t possibly_friendly);
 
 // Returns 1 if robot died, else 0.
 int apply_damage_to_robot(vobjptridx_t robot, fix damage, objnum_t killer_objnum);
@@ -50,15 +53,11 @@ void collide_player_and_nasty_robot(vobjptridx_t player, vobjptridx_t robot, con
 
 void net_destroy_controlcen(objptridx_t controlcen);
 void collide_player_and_powerup(vobjptr_t player, vobjptridx_t powerup, const vms_vector &collision_point);
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #if defined(DXX_BUILD_DESCENT_I)
-typedef cobjptr_t _check_effect_blowup_objptr;
-#elif defined(DXX_BUILD_DESCENT_II)
-typedef vcobjptr_t _check_effect_blowup_objptr;
+#define check_effect_blowup(seg,side,pnt,blower,force_blowup_flag,remote) check_effect_blowup(seg,side,pnt)
 #endif
-int check_effect_blowup(vsegptridx_t seg,int side,const vms_vector &pnt, _check_effect_blowup_objptr blower, int force_blowup_flag, int remote);
-#endif
-void apply_damage_to_controlcen(vobjptridx_t controlcen, fix damage, objnum_t who);
+int check_effect_blowup(vsegptridx_t seg,int side,const vms_vector &pnt, const laser_parent &blower, int force_blowup_flag, int remote);
+void apply_damage_to_controlcen(vobjptridx_t controlcen, fix damage, vcobjptr_t who);
 void bump_one_object(vobjptr_t obj0, const vms_vector &hit_dir, fix damage);
 void drop_player_eggs(vobjptridx_t playerobj);
 
@@ -68,7 +67,6 @@ void do_final_boss_hacks(void);
 int check_volatile_wall(vobjptridx_t obj,vsegptridx_t seg,int sidenum);
 extern int	Final_boss_is_dead;
 #endif
-
 #endif
 
-#endif /* _COLLIDE_H */
+#endif

@@ -22,8 +22,11 @@
 #include "sounds.h"
 #include "config.h"
 #include "args.h"
+#include "piggy.h"
 
 #include "compiler-range_for.h"
+
+namespace dsx {
 
 //changed on 980905 by adb to increase number of concurrent sounds
 #define MAX_SOUND_SLOTS 32
@@ -351,18 +354,4 @@ void digi_audio_end_sound(int channel)
 	SoundSlots[channel].persistent = 0;
 }
 
-#ifndef NDEBUG
-void digi_audio_debug()
-{
-	int n_voices = 0;
-
-	if (!digi_initialised)
-		return;
-
-	for (int i = 0; i < digi_max_channels; i++)
-	{
-		if (digi_is_channel_playing(i))
-			n_voices++;
-	}
 }
-#endif

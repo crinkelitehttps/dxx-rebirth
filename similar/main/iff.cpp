@@ -37,6 +37,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "dxxerror.h"
 #include "makesig.h"
 #include "physfsx.h"
+#include "gr.h"
 
 #include "dxxsconf.h"
 #include "compiler-range_for.h"
@@ -387,7 +388,7 @@ static int iff_parse_ilbm_pbm(PHYSFS_file *ifile,long form_type,iff_bitmap_heade
 
 						bmheader->w = prev_bm->bm_w;
 						bmheader->h = prev_bm->bm_h;
-						bmheader->type = prev_bm->bm_type;
+						bmheader->type = prev_bm->get_type();
 
 						MALLOC(bmheader->raw_data, uint8_t[], bmheader->w * bmheader->h);
 
@@ -601,19 +602,6 @@ int iff_read_bitmap(const char *ifilename,grs_bitmap &bm,int bitmap_type,palette
 
 	bm.bm_data = nullptr;
 	ret = iff_parse_bitmap(ifile, bm, bitmap_type, palette, nullptr);
-	return ret;
-}
-
-//like iff_read_bitmap(), but reads into a bitmap that already exists,
-//without allocating memory for the bitmap.
-int iff_read_into_bitmap(const char *ifilename, grs_bitmap *bm, palette_array_t *palette)
-{
-	int ret;			//return code
-	auto ifile = PHYSFSX_openReadBuffered(ifilename);
-	if (!ifile)
-		return IFF_NO_FILE;
-
-	ret = iff_parse_bitmap(ifile, *bm, bm->bm_type, palette, nullptr);
 	return ret;
 }
 

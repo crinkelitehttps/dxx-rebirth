@@ -24,9 +24,11 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "ogl_init.h"
 #endif
 
+namespace dcx {
+
 unsigned char gr_ugpixel(const grs_bitmap &bitmap, int x, int y)
 {
-	switch (bitmap.bm_type)
+	switch (bitmap.get_type())
 	{
 		case BM_LINEAR:
 			return bitmap.bm_data[ bitmap.bm_rowsize*y + x ];
@@ -44,4 +46,6 @@ unsigned char gr_gpixel(const grs_bitmap &bitmap, int x, int y)
 	if (x < 0 || y < 0 || x>=bitmap.bm_w || y>=bitmap.bm_h)
 		return 0;
 	return gr_ugpixel(bitmap, x, y);
+}
+
 }

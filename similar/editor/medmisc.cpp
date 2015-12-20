@@ -36,7 +36,6 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "mouse.h"
 #include "func.h"
 #include "inferno.h"
-#include "ogl_init.h"
 #include "editor/editor.h"
 #include "editor/esegment.h"
 #include "editor/medmisc.h"
@@ -49,6 +48,12 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "meddraw.h"		// For draw_World
 #include "game.h"
 #include "kdefs.h"
+
+#ifdef OGL
+#include "ogl_init.h"
+#endif
+
+#include "compiler-range_for.h"
 
 //return 2d distance, i.e, sqrt(x*x + y*y)
 #ifdef __WATCOMC__
@@ -126,7 +131,7 @@ int ToggleLockstep()
         //else
         //    diagnostic_message("Lock mode ON");
 
-      Cursegp = &Segments[ConsoleObject->segnum];
+		Cursegp = segptridx(ConsoleObject->segnum);
 		med_create_new_segment_from_cursegp();
 		set_view_target_from_segment(Cursegp);
 		Update_flags = UF_ED_STATE_CHANGED;
@@ -140,7 +145,7 @@ int medlisp_delete_segment(void)
         if (Lock_view_to_cursegp)
             set_view_target_from_segment(Cursegp);
 		  autosave_mine(mine_filename);
-		  strcpy(undo_status[Autosave_count], "Delete Segment UNDONE.");
+		undo_status[Autosave_count] = "Delete Segment UNDONE.";
         Update_flags |= UF_WORLD_CHANGED;
         mine_changed = 1;
         diagnostic_message("Segment deleted.");
@@ -371,7 +376,7 @@ int AttachSegment()
 		Curside = WBACK;
 		Update_flags |= UF_WORLD_CHANGED;
 	   autosave_mine(mine_filename);
-	   strcpy(undo_status[Autosave_count], "Attach Segment UNDONE.\n");
+		undo_status[Autosave_count] = "Attach Segment UNDONE.";
 		mine_changed = 1;
 		warn_if_concave_segment(Cursegp);
       }
@@ -416,30 +421,15 @@ int ExchangeMarkandCurseg()
 	// If Markedsegp != Cursegp, and Markedsegp->segnum != -1, exchange Markedsegp and Cursegp
 	if (Markedsegp)
 		if (Markedsegp->segnum != segment_none) {
-			segment *tempsegp;
-			int     tempside;
-			tempsegp = Markedsegp;  Markedsegp = Cursegp;   Cursegp = tempsegp;
-			tempside = Markedside;  Markedside = Curside;   Curside = tempside;
+			using std::swap;
+			swap(Markedsegp, Cursegp);
+			swap(Markedside, Curside);
 			med_create_new_segment_from_cursegp();
 			Update_flags |= UF_ED_STATE_CHANGED;
 			mine_changed = 1;
 		}
 	return 1;
 }
-
-int medlisp_add_segment()
-{
-	AttachSegment();
-//segment *ocursegp = Cursegp;
-//	med_attach_segment(Cursegp, &New_segment, Curside, WFRONT); // Used to be WBACK instead of Curside
-//med_propagate_tmaps_to_segments(ocursegp,Cursegp);
-//	set_view_target_from_segment(Cursegp);
-////	while (!vm_angvec_make(&Seg_orientation,0,0,0));
-//	Curside = WBACK;
-
-	return 1;
-}
-
 
 int ClearSelectedList(void)
 {
@@ -465,19 +455,17 @@ int ClearFoundList(void)
 // ---------------------------------------------------------------------------------------------------
 void set_view_target_from_segment(const vsegptr_t sp)
 {
-	vms_vector	tv = ZERO_VECTOR;
 	if (Funky_chase_mode)
 		{
 		//set_chase_matrix(sp);
 		}
 	else {
-		for (int v=0; v<MAX_VERTICES_PER_SEGMENT; v++)
-			vm_vec_add2(tv,Vertices[sp->verts[v]]);
+		vms_vector tv{};
+		range_for (const auto &v, sp->verts)
+			vm_vec_add2(tv, Vertices[v]);
 
 		vm_vec_scale(tv,F1_0/MAX_VERTICES_PER_SEGMENT);
-
 		Ed_view_target = tv;
-
 	}
 	Update_flags |= UF_VIEWPOINT_MOVED;
 

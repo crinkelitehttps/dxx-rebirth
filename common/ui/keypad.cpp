@@ -34,6 +34,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "compiler-make_unique.h"
 #include "compiler-range_for.h"
 
+namespace dcx {
+
 #define MAX_NUM_PADS 20
 
 static array<std::unique_ptr<UI_GADGET_BUTTON>, 17> Pad;
@@ -42,8 +44,7 @@ static int active_pad;
 
 static int desc_x, desc_y;
 
-static int HotKey[17];
-static int HotKey1[17];
+static array<int, 17> HotKey, HotKey1;
 
 int ui_pad_get_current()
 {
@@ -169,8 +170,8 @@ void ui_pad_activate(UI_DIALOG &dlg, uint_fast32_t x, uint_fast32_t y)
 	const auto fh = [=](uint_fast32_t h) {
 		return bh * h;
 	};
-	const auto ui_add_pad_gadget = [&dlg, &font](uint_fast32_t n, uint_fast32_t x, uint_fast32_t y, uint_fast32_t w, uint_fast32_t h) {
-		Pad[n] = ui_create_pad_gadget(dlg, x, y, w, h, font);
+	const auto ui_add_pad_gadget = [&dlg, &font](uint_fast32_t n, uint_fast32_t gx, uint_fast32_t gy, uint_fast32_t w, uint_fast32_t h) {
+		Pad[n] = ui_create_pad_gadget(dlg, gx, gy, w, h, font);
 	};
 
 	int w,h,row,col, n;
@@ -462,10 +463,10 @@ void ui_pad_read( int n, const char * filename )
 		functionnumber = func_get_index(buffer);
 		if (functionnumber==-1)
 		{
-			Error( "Unknown function, %s, in %s\n", static_cast<const char *>(buffer), filename );
+			UserError( "Unknown function, %s, in %s\n", static_cast<const char *>(buffer), filename );
 		} else if (keycode==-1)
 		{
-			Error( "Unknown keystroke, %s, in %s\n", static_cast<const char *>(text), filename );
+			UserError( "Unknown keystroke, %s, in %s\n", static_cast<const char *>(text), filename );
 			//ui_messagebox( -2, -2, 1, buffer, "Ok" );
 
 		} else {
@@ -474,4 +475,6 @@ void ui_pad_read( int n, const char * filename )
 			kpn.numkeys++;
 		}
 	}
+}
+
 }

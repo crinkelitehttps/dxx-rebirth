@@ -31,107 +31,95 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "window.h"
 #include "u_mem.h"
 #include "physfsx.h"
+#include "physfs_list.h"
 
 #include "compiler-make_unique.h"
+
+namespace dcx {
 
 static int file_sort_func(char **e0, char **e1)
 {
 	return d_stricmp(*e0, *e1);
 }
 
-
-char **file_getdirlist(int *NumDirs, const char *dir)
+static PHYSFSX_counted_list file_getdirlist(const char *dir)
 {
-	char	path[PATH_MAX];
-	char	**list = PHYSFS_enumerateFiles(dir);
-	char	**i, **j = list;
-	char	*test_filename;
-	unsigned		test_max;
-
+	ntstring<PATH_MAX - 1> path;
+	auto dlen = path.copy_if(dir);
+	if (!dlen || !path.copy_if(dlen, "/"))
+		return nullptr;
+	++ dlen;
+	PHYSFSX_counted_list list{PHYSFS_enumerateFiles(dir)};
 	if (!list)
-		return NULL;
-
-	strcpy(path, dir);
-	if (*path)
-		strncat(path, "/", PATH_MAX - strlen(dir));
-
-	test_filename = path + strlen(path);
-	test_max = PATH_MAX - (test_filename - path);
-
-	for (i = list; *i; i++)
-	{
-		if (strlen(*i) >= test_max)
-			continue;
-
-		strcpy(test_filename, *i);
-		if (PHYSFS_isDirectory(path))
-			*j++ = *i;
-		else
-			free(*i);
-	}
+		return nullptr;
+	const auto predicate = [&](char *i) -> bool {
+		if (path.copy_if(dlen, i) && PHYSFS_isDirectory(path))
+			return false;
+		free(i);
+		return true;
+	};
+	auto j = std::remove_if(list.begin(), list.end(), predicate);
 	*j = NULL;
-
-	*NumDirs = j - list;
-	qsort(list, *NumDirs, sizeof(char *), (int (*)( const void *, const void * ))file_sort_func);
-
+	auto NumDirs = j.get() - list.get();
+	qsort(list.get(), NumDirs, sizeof(char *), (int (*)( const void *, const void * ))file_sort_func);
 	if (*dir)
 	{
 		// Put the 'go to parent directory' sequence '..' first
-		(*NumDirs)++;
-		list = (char **)realloc(list, sizeof(char *)*(*NumDirs + 1));
-		list[*NumDirs] = NULL;	// terminate
-		for (i = list + *NumDirs - 1; i != list; i--)
-			*i = i[-1];
+		++NumDirs;
+		auto r = reinterpret_cast<char **>(realloc(list.get(), sizeof(char *)*(NumDirs + 1)));
+		if (!r)
+			return list;
+		list.release();
+		list.reset(r);
+		std::move_backward(r, r + NumDirs, r + NumDirs + 1);
 		list[0] = d_strdup("..");
 	}
-
+	list.set_count(NumDirs);
 	return list;
 }
 
-char **file_getfilelist(int *NumFiles, const char *filespec, const char *dir)
+static PHYSFSX_counted_list file_getfilelist(const char *filespec, const char *dir)
 {
-	char **list = PHYSFS_enumerateFiles(dir);
-	char **i, **j = list, *ext;
-
+	PHYSFSX_counted_list list{PHYSFS_enumerateFiles(dir)};
 	if (!list)
-		return NULL;
+		return nullptr;
 
 	if (*filespec == '*')
 		filespec++;
 
-	for (i = list; *i; i++)
-	{
-		ext = strrchr(*i, '.');
+	const auto predicate = [&](char *i) -> bool {
+		auto ext = strrchr(i, '.');
 		if (ext && (!d_stricmp(ext, filespec)))
-			*j++ = *i;
-		else
-			free(*i);
-	}
+			return false;
+		free(i);
+		return true;
+	};
+	auto j = std::remove_if(list.begin(), list.end(), predicate);
 	*j = NULL;
-
-
-	*NumFiles = j - list;
-	qsort(list, *NumFiles, sizeof(char *), (int (*)( const void *, const void * ))file_sort_func);
-
+	auto NumFiles = j.get() - list.get();
+	list.set_count(NumFiles);
+	qsort(list.get(), NumFiles, sizeof(char *), (int (*)( const void *, const void * ))file_sort_func);
 	return list;
 }
 
-struct browser
+namespace {
+
+struct ui_file_browser
 {
-	char		view_dir[PATH_MAX];
 	char		*filename;
 	const char		*filespec;
 	const char		*message;
-	char		**filename_list;
-	char		**directory_list;
+	PHYSFSX_counted_list filename_list, directory_list;
 	std::unique_ptr<UI_GADGET_BUTTON> button1, button2, help_button;
 	std::unique_ptr<UI_GADGET_LISTBOX> listbox1, listbox2;
 	std::unique_ptr<UI_GADGET_INPUTBOX> user_file;
-	int			num_files, num_dirs;
-	char		spaces[35];
+	array<char, 35> spaces;
+	char		view_dir[PATH_MAX];
 };
 
-static int browser_handler(UI_DIALOG *dlg,const d_event &event, browser *b)
+}
+
+static int browser_handler(UI_DIALOG *const dlg, const d_event &event, ui_file_browser *const b)
 {
 	int rval = 0;
 
@@ -143,7 +131,7 @@ static int browser_handler(UI_DIALOG *dlg,const d_event &event, browser *b)
 		ui_dprintf_at( dlg, 20, 86,"&Files" );
 		ui_dprintf_at( dlg, 210, 86,"&Dirs" );
 		
-		ui_dputs_at( dlg, 20, 60, b->spaces );
+		ui_dputs_at(dlg, 20, 60, b->spaces.data());
 		ui_dputs_at( dlg, 20, 60, b->view_dir );
 		
 		return 1;
@@ -151,8 +139,8 @@ static int browser_handler(UI_DIALOG *dlg,const d_event &event, browser *b)
 
 	if (GADGET_PRESSED(b->button2.get()))
 	{
-		PHYSFS_freeList(b->filename_list);	b->filename_list = NULL;
-		PHYSFS_freeList(b->directory_list);	b->directory_list = NULL;
+		b->filename_list.reset();
+		b->directory_list.reset();
 		ui_close_dialog(dlg);
 		return 1;
 	}
@@ -226,30 +214,25 @@ static int browser_handler(UI_DIALOG *dlg,const d_event &event, browser *b)
 				b->filename[strlen(b->filename) - 1] = 0;
 			
 			strcpy(b->view_dir, b->filename);
-			
-			
-			PHYSFS_freeList(b->filename_list);
-			b->filename_list = file_getfilelist(&b->num_files, b->filespec, b->view_dir);
+			b->filename_list = file_getfilelist(b->filespec, b->view_dir);
 			if (!b->filename_list)
 			{
-				PHYSFS_freeList(b->directory_list);	b->directory_list = NULL;
+				b->directory_list.reset();
 				ui_close_dialog(dlg);
 				return 1;
 			}
 			
 			ui_inputbox_set_text(b->user_file.get(), b->filespec);
-			
-			PHYSFS_freeList(b->directory_list);
-			b->directory_list = file_getdirlist(&b->num_dirs, b->view_dir);
+			b->directory_list = file_getdirlist(b->view_dir);
 			if (!b->directory_list)
 			{
-				PHYSFS_freeList(b->filename_list); b->filename_list = NULL;
+				b->filename_list.reset();
 				ui_close_dialog(dlg);
 				return 1;
 			}
 			
-			ui_listbox_change(dlg, b->listbox1.get(), b->num_files, b->filename_list);
-			ui_listbox_change(dlg, b->listbox2.get(), b->num_dirs, b->directory_list);
+			ui_listbox_change(dlg, b->listbox1.get(), b->filename_list.get_count(), b->filename_list.get());
+			ui_listbox_change(dlg, b->listbox2.get(), b->directory_list.get_count(), b->directory_list.get());
 			
 			//i = TICKER;
 			//while ( TICKER < i+2 );
@@ -262,14 +245,14 @@ static int browser_handler(UI_DIALOG *dlg,const d_event &event, browser *b)
 	return rval;
 }
 
-int ui_get_filename( char * filename, const char * filespec, const char * message  )
+int ui_get_filename(char (&filename)[PATH_MAX], const char *const filespec, const char *const message)
 {
 	char		InputText[PATH_MAX];
 	char		*p;
 	UI_DIALOG	*dlg;
 	window		*wind;
 	int			rval = 0;
-	auto b = make_unique<browser>();
+	auto b = make_unique<ui_file_browser>();
 	if ((p = strrchr(filename, '/')))
 	{
 		*p++ = 0;
@@ -282,16 +265,16 @@ int ui_get_filename( char * filename, const char * filespec, const char * messag
 		strcpy(InputText, filename);
 	}
 
-	b->filename_list = file_getfilelist(&b->num_files, filespec, b->view_dir);
+	b->filename_list = file_getfilelist(filespec, b->view_dir);
 	if (!b->filename_list)
 	{
 		return 0;
 	}
 	
-	b->directory_list = file_getdirlist(&b->num_dirs, b->view_dir);
+	b->directory_list = file_getdirlist(b->view_dir);
 	if (!b->directory_list)
 	{
-		PHYSFS_freeList(b->filename_list);
+		b->filename_list.reset();
 		return 0;
 	}
 
@@ -304,8 +287,8 @@ int ui_get_filename( char * filename, const char * filespec, const char * messag
 
 	b->user_file  = ui_add_gadget_inputbox<40>(dlg, 60, 30, InputText);
 
-	b->listbox1 = ui_add_gadget_listbox(dlg,  20, 110, 125, 200, b->num_files, b->filename_list);
-	b->listbox2 = ui_add_gadget_listbox(dlg, 210, 110, 100, 200, b->num_dirs, b->directory_list);
+	b->listbox1 = ui_add_gadget_listbox(dlg,  20, 110, 125, 200, b->filename_list.get_count(), b->filename_list.get());
+	b->listbox2 = ui_add_gadget_listbox(dlg, 210, 110, 100, 200, b->directory_list.get_count(), b->directory_list.get());
 
 	b->button1 = ui_add_gadget_button( dlg,     20, 330, 60, 25, "Ok", NULL );
 	b->button2 = ui_add_gadget_button( dlg,    100, 330, 60, 25, "Cancel", NULL );
@@ -333,31 +316,21 @@ int ui_get_filename( char * filename, const char * filespec, const char * messag
 
 	//key_flush();
 
-	if (b->filename_list)
-		PHYSFS_freeList(b->filename_list);
-	if (b->directory_list)
-		PHYSFS_freeList(b->directory_list);
-	
-	rval = b->filename_list != NULL;
+	rval = static_cast<bool>(b->filename_list);
+	b->filename_list.reset();
+	b->directory_list.reset();
 	return rval;
 }
 
-
-
 int ui_get_file( char * filename, const char * Filespec  )
 {
-	int x, NumFiles;
-	char **list = file_getfilelist(&NumFiles, Filespec, "");
-
+	int x;
+	auto list = file_getfilelist(Filespec, "");
 	if (!list) return 0;
-
-	x = MenuX(-1, -1, NumFiles, list);
-
+	x = MenuX(-1, -1, list.get_count(), list.get());
 	if (x > 0)
 		strcpy(filename, list[x - 1]);
-
-	PHYSFS_freeList(list);
-
 	return (x > 0);
 }
 
+}

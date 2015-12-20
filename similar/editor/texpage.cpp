@@ -37,6 +37,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "textures.h"		// For NumTextures
 #include "dxxerror.h"
 #include "key.h"
+#include "event.h"
 #include "gamesave.h"
 #include "mission.h"
 
@@ -68,11 +69,9 @@ static int TexturePage = 0;
 static grs_subcanvas_ptr TmapnameCanvas;
 static void texpage_print_name(d_fname name)
 {
-	 int w,h,aw;
 	name.back() = 0;
 	
     gr_set_current_canvas( TmapnameCanvas );
-    gr_get_string_size( name, &w, &h, &aw );
     gr_string( 0, 0, name );			  
 }
 
@@ -207,8 +206,8 @@ struct replacement
 	int	n, old;
 };
 
-replacement Replacement_list[MAX_REPLACEMENTS];
 int	Num_replacements=0;
+static array<replacement, MAX_REPLACEMENTS> Replacement_list;
 
 int texpage_do(const d_event &event)
 {
@@ -270,9 +269,9 @@ void do_replacements(void)
 
 		range_for (const auto segnum, highest_valid(Segments))
 		{
-			segment	*segp=&Segments[segnum];
+			const auto &&segp = vsegptr(static_cast<segnum_t>(segnum));
 			for (int sidenum=0; sidenum<MAX_SIDES_PER_SEGMENT; sidenum++) {
-				side	*sidep=&segp->sides[sidenum];
+				const auto sidep = &segp->sides[sidenum];
 				if (sidep->tmap_num == old_tmap_num) {
 					sidep->tmap_num = new_tmap_num;
 				}

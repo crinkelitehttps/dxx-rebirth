@@ -111,8 +111,16 @@ public:
 	/* Must be in this order for move constructor to work properly */
 	std::string path;				// relative file path
 	std::string::const_iterator filename;          // filename without extension
+#if defined(DXX_BUILD_DESCENT_II)
+	enum class descent_version_type : uint8_t
+	{
+		descent2,
+		descent1,
+	};
+#endif
 };
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 struct Mission : Mission_path
 {
 	std::unique_ptr<ubyte[]>	secret_level_table; // originating level no for each secret level 
@@ -128,7 +136,7 @@ struct Mission : Mission_path
 	sbyte	last_secret_level;
 	ubyte	n_secret_levels;
 #if defined(DXX_BUILD_DESCENT_II)
-	ubyte	descent_version;	// descent 1 or descent 2?
+	descent_version_type descent_version;	// descent 1 or descent 2?
 	ubyte	enhanced;	// 0: mission has "name", 1:"xname", 2:"zname"
 	std::unique_ptr<d_fname> alternate_ham_file;
 #endif
@@ -150,14 +158,18 @@ extern Mission_ptr Current_mission; // current mission
 #define Secret_level_names		Current_mission->secret_level_names
 
 #if defined(DXX_BUILD_DESCENT_II)
-#define is_SHAREWARE (Current_mission->builtin_hogsize == SHAREWARE_MISSION_HOGSIZE)
-#define is_MAC_SHARE (Current_mission->builtin_hogsize == MAC_SHARE_MISSION_HOGSIZE)
-#define is_D2_OEM (Current_mission->builtin_hogsize == OEM_MISSION_HOGSIZE)
+/* Wrap in parentheses to avoid precedence problems.  Put constant on
+ * the left to silence clang's overzealous -Wparentheses-equality messages.
+ */
+#define is_SHAREWARE (SHAREWARE_MISSION_HOGSIZE == Current_mission->builtin_hogsize)
+#define is_MAC_SHARE (MAC_SHARE_MISSION_HOGSIZE == Current_mission->builtin_hogsize)
+#define is_D2_OEM (OEM_MISSION_HOGSIZE == Current_mission->builtin_hogsize)
 
-#define EMULATING_D1		(Current_mission->descent_version == 1)
+#define EMULATING_D1		(Mission::descent_version_type::descent1 == Current_mission->descent_version)
 #endif
 #define PLAYING_BUILTIN_MISSION	(Current_mission->builtin_hogsize != 0)
-#define ANARCHY_ONLY_MISSION	(Current_mission->anarchy_only_flag == 1)
+#define ANARCHY_ONLY_MISSION	(1 == Current_mission->anarchy_only_flag)
+#endif
 
 //values for d1 built-in mission
 #define BIMD1_LAST_LEVEL		27

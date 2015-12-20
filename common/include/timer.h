@@ -16,11 +16,21 @@
 #include "maths.h"
 
 #ifdef __cplusplus
+namespace dcx {
 
 fix64 timer_update();
 __attribute_warn_unused_result
 fix64 timer_query();
-void timer_delay(fix seconds);
-void timer_delay2(int fps);
+void timer_delay_ms(unsigned milliseconds);
+static inline void timer_delay(fix seconds)
+{
+	timer_delay_ms(f2i(seconds * 1000));
+}
+void timer_delay_bound(unsigned bound);
+static inline void timer_delay2(int fps)
+{
+	timer_delay_bound(1000u / fps);
+}
 
+}
 #endif

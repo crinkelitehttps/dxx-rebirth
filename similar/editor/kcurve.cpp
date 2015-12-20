@@ -42,7 +42,8 @@ int InitCurve()
 
 int GenerateCurve()
 {
-    if ( (Markedsegp != 0) && !IS_CHILD(Markedsegp->children[Markedside])) {
+	if (Markedsegp != segment_none && !IS_CHILD(Markedsegp->children[Markedside]))
+	{
 		r1scale = r4scale = F1_0*20;
       autosave_mine( mine_filename );
       diagnostic_message("Curve Generated.");
@@ -50,7 +51,7 @@ int GenerateCurve()
       curve = generate_curve(r1scale, r4scale);
 		mine_changed = 1;
         if (curve == 1) {
-            strcpy(undo_status[Autosave_count], "Curve Generation UNDONE.\n");
+			undo_status[Autosave_count] = "Curve Generation UNDONE.";
         }
         if (curve == 0) diagnostic_message("Cannot generate curve -- check Current segment.");
     }

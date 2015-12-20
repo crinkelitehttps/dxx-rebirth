@@ -35,6 +35,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "eswitch.h"
 #include "segment.h"
 #include "dxxerror.h"
+#include "event.h"
 #include "gameseg.h"
 #include "wall.h"
 #include "medwall.h"
@@ -60,6 +61,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 static UI_DIALOG 				*MainWindow = NULL;
 
+namespace {
+
 struct trigger_dialog
 {
 	std::unique_ptr<UI_GADGET_USERBOX> wallViewBox;
@@ -67,6 +70,8 @@ struct trigger_dialog
 	array<std::unique_ptr<UI_GADGET_CHECKBOX>, NUM_TRIGGER_FLAGS> triggerFlag;
 	int old_trigger_num;
 };
+
+}
 
 
 //-----------------------------------------------------------------
@@ -170,13 +175,13 @@ static int bind_matcen_to_trigger() {
 
 	auto link_num = Triggers[trigger_num].num_links;
 	for (int i=0;i<link_num;i++)
-		if (Cursegp-Segments == Triggers[trigger_num].seg[i]) {
+		if (Cursegp == Triggers[trigger_num].seg[i]) {
 			editor_status("Matcen already bound to Markedside.");
 			return 0;
 		}
 
 	// Error checking completed, actual binding begins
-	Triggers[trigger_num].seg[link_num] = Cursegp - Segments;
+	Triggers[trigger_num].seg[link_num] = Cursegp;
 	Triggers[trigger_num].num_links++;
 
 	editor_status("Matcen linked to trigger");
@@ -215,13 +220,14 @@ int bind_wall_to_trigger() {
 
 	auto link_num = Triggers[trigger_num].num_links;
 	for (int i=0;i<link_num;i++)
-		if ((Cursegp-Segments == Triggers[trigger_num].seg[i]) && (Curside == Triggers[trigger_num].side[i])) {
+		if (Cursegp == Triggers[trigger_num].seg[i] && Curside == Triggers[trigger_num].side[i])
+		{
 			editor_status("Curside already bound to Markedside.");
 			return 0;
 		}
 
 	// Error checking completed, actual binding begins
-	Triggers[trigger_num].seg[link_num] = Cursegp - Segments;
+	Triggers[trigger_num].seg[link_num] = Cursegp;
 	Triggers[trigger_num].side[link_num] = Curside;
 	Triggers[trigger_num].num_links++;
 
@@ -356,7 +362,7 @@ int trigger_dialog_handler(UI_DIALOG *dlg,const d_event &event, trigger_dialog *
 		default:
 			break;
 	}
-	short Markedwall, trigger_num;
+	short Markedwall;
 	int keypress = 0;
 	int rval = 0;
 
@@ -379,9 +385,7 @@ int trigger_dialog_handler(UI_DIALOG *dlg,const d_event &event, trigger_dialog *
 	// of the checkboxes that control the wall flags.  
 	//------------------------------------------------------------
 	Markedwall = Markedsegp->sides[Markedside].wall_num;
-	if (Markedwall != wall_none)
-		trigger_num = Walls[Markedwall].trigger;
-	else trigger_num = trigger_none;
+	auto trigger_num = (Markedwall != wall_none) ? Walls[Markedwall].trigger : trigger_none;
 
 	if (t->old_trigger_num != trigger_num)
 	{

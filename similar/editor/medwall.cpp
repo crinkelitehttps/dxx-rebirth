@@ -34,6 +34,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "editor/esegment.h"
 #include "segment.h"
 #include "dxxerror.h"
+#include "event.h"
 #include "gameseg.h"
 #include "textures.h"
 #include "screens.h"
@@ -50,19 +51,20 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "kdefs.h"
 #include "u_mem.h"
 
+#include "compiler-exchange.h"
 #include "compiler-make_unique.h"
 #include "compiler-range_for.h"
 #include "highest_valid.h"
 #include "partial_range.h"
 
-static int wall_add_door_flag(sbyte flag);
 static int wall_add_to_side(const vsegptridx_t segp, int side, sbyte type);
-static int wall_remove_door_flag(sbyte flag);
 
 //-------------------------------------------------------------------------
 // Variables for this module...
 //-------------------------------------------------------------------------
 static UI_DIALOG 				*MainWindow = NULL;
+
+namespace {
 
 struct wall_dialog
 {
@@ -75,8 +77,6 @@ struct wall_dialog
 	int framenum;
 };
 
-static int wall_dialog_handler(UI_DIALOG *dlg,const d_event &event, wall_dialog *wd);
-
 static int Current_door_type=1;
 
 struct count_wall
@@ -85,6 +85,10 @@ struct count_wall
 	segnum_t	segnum;
 	short sidenum;
 };
+
+}
+
+static int wall_dialog_handler(UI_DIALOG *dlg,const d_event &event, wall_dialog *wd);
 
 //---------------------------------------------------------------------
 // Add a wall (removable 2 sided)
@@ -128,7 +132,7 @@ static int wall_assign_door(int door_type)
 
 	Current_door_type = door_type;
 
- 	auto csegp = &Segments[Cursegp->children[Curside]];
+	const auto &&csegp = vsegptr(Cursegp->children[Curside]);
 	auto Connectside = find_connect_side(Cursegp, csegp);
 	
  	Walls[Cursegp->sides[Curside].wall_num].clip_num = door_type;
@@ -166,7 +170,8 @@ int wall_add_closed_wall()
 
 int wall_add_external_wall()
 {
-	if (Cursegp->children[Curside] == -2) {
+	if (Cursegp->children[Curside] == segment_exit)
+	{
 		editor_status( "Wall is already external!" );
 		return 1;
 	}
@@ -184,26 +189,6 @@ int wall_add_external_wall()
 int wall_add_illusion()
 {
 	return wall_add_to_side(Cursegp, Curside, WALL_ILLUSION);
-}
-
-int wall_lock_door()
-{
-	return wall_add_door_flag(WALL_DOOR_LOCKED);
-}
-
-int wall_unlock_door()
-{
-	return wall_remove_door_flag(WALL_DOOR_LOCKED);
-}
-
-int wall_automate_door()
-{
-	return wall_add_door_flag(WALL_DOOR_AUTO);
-}
-	
-int wall_deautomate_door()
-{
-	return wall_remove_door_flag(WALL_DOOR_AUTO);
 }
 
 static int GotoPrevWall() {
@@ -226,7 +211,7 @@ static int GotoPrevWall() {
 		return 0;
 	}
 
-	Cursegp = &Segments[Walls[current_wall].segnum];
+	Cursegp = segptridx(Walls[current_wall].segnum);
 	Curside = Walls[current_wall].sidenum;
 
 	return 1;
@@ -251,7 +236,7 @@ static int GotoNextWall() {
 		return 0;
 	}
 
-	Cursegp = &Segments[Walls[current_wall].segnum];
+	Cursegp = segptridx(Walls[current_wall].segnum);
 	Curside = Walls[current_wall].sidenum;	
 
 	return 1;
@@ -406,10 +391,8 @@ static int wall_dialog_created(UI_DIALOG *const w, wall_dialog *const wd)
 
 void close_wall_window()
 {
-	if ( MainWindow!=NULL )	{
-		ui_close_dialog( MainWindow );
-		MainWindow = NULL;
-	}
+	if (likely(MainWindow))
+		ui_close_dialog(exchange(MainWindow, nullptr));
 }
 
 int wall_dialog_handler(UI_DIALOG *dlg,const d_event &event, wall_dialog *wd)
@@ -420,7 +403,6 @@ int wall_dialog_handler(UI_DIALOG *dlg,const d_event &event, wall_dialog *wd)
 			return wall_dialog_created(dlg, wd);
 		case EVENT_WINDOW_CLOSE:
 			std::default_delete<wall_dialog>()(wd);
-			MainWindow = NULL;
 			return 0;
 		default:
 			break;
@@ -658,7 +640,7 @@ int wall_remove_side(const vsegptridx_t seg, short side)
 {
 	int lower_wallnum;
 	if (IS_CHILD(seg->children[side]) && IS_CHILD(seg->sides[side].wall_num)) {
-		auto csegp = &Segments[seg->children[side]];
+		const auto &&csegp = vsegptr(seg->children[side]);
 		auto Connectside = find_connect_side(seg, csegp);
 
 		remove_trigger(seg, side);
@@ -681,10 +663,13 @@ int wall_remove_side(const vsegptridx_t seg, short side)
 		Num_walls -= 2;
 
 		range_for (const auto s, highest_valid(Segments))
-			if (Segments[s].segnum != segment_none)
+		{
+			const auto &&segp = vsegptr(static_cast<segnum_t>(s));
+			if (segp->segnum != segment_none)
 			for (int w=0;w<MAX_SIDES_PER_SEGMENT;w++)
-				if	(Segments[s].sides[w].wall_num > lower_wallnum+1)
-					Segments[s].sides[w].wall_num -= 2;
+				if (segp->sides[w].wall_num > lower_wallnum+1)
+					segp->sides[w].wall_num -= 2;
+		}
 
 		// Destroy any links to the deleted wall.
 		range_for (auto &t, partial_range(Triggers, Num_triggers))
@@ -794,14 +779,14 @@ int wall_add_to_markedside(sbyte type)
 {
 	if (add_wall(Markedsegp, Markedside)) {
 		int	wall_num, cwall_num;
-		auto csegp = &Segments[Markedsegp->children[Markedside]];
+		const auto &&csegp = vsegptridx(Markedsegp->children[Markedside]);
 		auto Connectside = find_connect_side(Markedsegp, csegp);
 
 		wall_num = Markedsegp->sides[Markedside].wall_num;
 		cwall_num = csegp->sides[Connectside].wall_num;
 
-		Walls[wall_num].segnum = Markedsegp-Segments;
-		Walls[cwall_num].segnum = csegp-Segments;
+		Walls[wall_num].segnum = Markedsegp;
+		Walls[cwall_num].segnum = csegp;
 
 		Walls[wall_num].sidenum = Markedside;
 		Walls[cwall_num].sidenum = Connectside;
@@ -842,56 +827,6 @@ int wall_add_to_markedside(sbyte type)
 	}
 }
 
-
-int wall_add_door_flag(sbyte flag)
-{
-	if (Cursegp->sides[Curside].wall_num == wall_none)
-		{
-		editor_status("Cannot change flag. No wall at Curside.");
-		return 0;
-		}
-
-	if (Walls[Cursegp->sides[Curside].wall_num].type != WALL_DOOR)
-		{
-		editor_status("Cannot change flag. No door at Curside.");
-		return 0;
-		}
-
- 	auto csegp = &Segments[Cursegp->children[Curside]];
-	auto Connectside = find_connect_side(Cursegp, csegp);
-
- 	Walls[Cursegp->sides[Curside].wall_num].flags |= flag;
-  	Walls[csegp->sides[Connectside].wall_num].flags |= flag;
-
-	Update_flags |= UF_ED_STATE_CHANGED;
-	return 1;
-}
-
-int wall_remove_door_flag(sbyte flag)
-{
-	if (Cursegp->sides[Curside].wall_num == wall_none)
-		{
-		editor_status("Cannot change flag. No wall at Curside.");
-		return 0;
-		}
-
-	if (Walls[Cursegp->sides[Curside].wall_num].type != WALL_DOOR)
-		{
-		editor_status("Cannot change flag. No door at Curside.");
-		return 0;
-		}
-
- 	auto csegp = &Segments[Cursegp->children[Curside]];
-	auto Connectside = find_connect_side(Cursegp, csegp);
-
- 	Walls[Cursegp->sides[Curside].wall_num].flags &= ~flag;
-  	Walls[csegp->sides[Connectside].wall_num].flags &= ~flag;
-
-	Update_flags |= UF_ED_STATE_CHANGED;
-	return 1;
-}
-
-
 int bind_wall_to_control_center() {
 
 	int link_num;
@@ -902,13 +837,14 @@ int bind_wall_to_control_center() {
 
 	link_num = ControlCenterTriggers.num_links;
 	for (int i=0;i<link_num;i++)
-		if ((Cursegp-Segments == ControlCenterTriggers.seg[i]) && (Curside == ControlCenterTriggers.side[i])) {
+		if (Cursegp == ControlCenterTriggers.seg[i] && Curside == ControlCenterTriggers.side[i])
+		{
 			editor_status("Curside already bound to Control Center.");
 			return 0;
 		}
 
 	// Error checking completed, actual binding begins
-	ControlCenterTriggers.seg[link_num] = Cursegp - Segments;
+	ControlCenterTriggers.seg[link_num] = Cursegp;
 	ControlCenterTriggers.side[link_num] = Curside;
 	ControlCenterTriggers.num_links++;
 
@@ -985,12 +921,14 @@ int check_walls()
 
 	wall_count = 0;
 	range_for (const auto seg, highest_valid(Segments))
-		if (Segments[seg].segnum != segment_none) {
+	{
+		const auto &&segp = vsegptr(static_cast<segnum_t>(seg));
+		if (segp->segnum != segment_none) {
 			// Check fuelcenters
-			matcen_num = Segments[seg].matcen_num;
+			matcen_num = segp->matcen_num;
 			if (matcen_num == 0)
 				if (RobotCenters[0].segnum != seg) {
-				 	Segments[seg].matcen_num = -1;
+				 	segp->matcen_num = -1;
 				}
 	
 			if (matcen_num > -1)
@@ -999,13 +937,14 @@ int check_walls()
 				}
 	
 			for (int side=0;side<MAX_SIDES_PER_SEGMENT;side++)
-				if (Segments[seg].sides[side].wall_num != wall_none) {
-					CountedWalls[wall_count].wallnum = Segments[seg].sides[side].wall_num;
+				if (segp->sides[side].wall_num != wall_none) {
+					CountedWalls[wall_count].wallnum = segp->sides[side].wall_num;
 					CountedWalls[wall_count].segnum = seg;
 					CountedWalls[wall_count].sidenum = side;
 					wall_count++;
 				}
 		}
+	}
 
 	if (wall_count != Num_walls) {
 		sprintf( Message, "Num_walls is bogus\nDo you wish to correct it?\n");
@@ -1051,8 +990,11 @@ int delete_all_walls()
 	sprintf( Message, "Are you sure that walls are hosed so\n badly that you want them ALL GONE!?\n");
 	if (ui_messagebox( -2, -2, 2, Message, "YES!", "No" )==1) {
 		range_for (const auto seg, highest_valid(Segments))
+		{
+			const auto &&segp = vsegptr(static_cast<segnum_t>(seg));
 			for (int side=0;side<MAX_SIDES_PER_SEGMENT;side++)
-				Segments[seg].sides[side].wall_num = wall_none;
+				segp->sides[side].wall_num = wall_none;
+		}
 		Num_walls=0;
 		Num_triggers=0;
 
@@ -1155,10 +1097,11 @@ void check_wall_validity(void)
 
 	range_for (const auto i, highest_valid(Segments))
 	{
-		if (Segments[i].segnum != segment_none)
+		const auto &&segp = vsegptr(static_cast<segnum_t>(i));
+		if (segp->segnum != segment_none)
 			for (int j=0; j<MAX_SIDES_PER_SEGMENT; j++) {
 				// Check walls
-				auto wall_num = Segments[i].sides[j].wall_num;
+				auto wall_num = segp->sides[j].wall_num;
 				if (wall_num != wall_none) {
 					if (wall_flags[wall_num] != 0) {
 						if (!Validate_walls)

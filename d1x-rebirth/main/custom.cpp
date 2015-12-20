@@ -14,7 +14,7 @@
 #include "pstypes.h"
 #include "piggy.h"
 #include "textures.h"
-#include "polyobj.h"
+#include "robot.h"
 #include "weapon.h"
 #include "digi.h"
 #include "hash.h"
@@ -29,11 +29,15 @@
 
 //#define D2TMAP_CONV // used for testing
 
+namespace {
+
 struct snd_info
 {
 	unsigned int length;
 	ubyte *data;
 };
+
+}
 
 struct DiskBitmapHeader2 
 {
@@ -66,6 +70,8 @@ struct DiskSoundHeader
 	int offset;
 } __pack__;
 
+namespace {
+
 struct custom_info
 {
 	int offset;
@@ -74,8 +80,10 @@ struct custom_info
 	int width, height;
 };
 
-static grs_bitmap BitmapOriginal[MAX_BITMAP_FILES];
-static struct snd_info SoundOriginal[MAX_SOUND_FILES];
+}
+
+static array<grs_bitmap, MAX_BITMAP_FILES> BitmapOriginal;
+static array<snd_info, MAX_SOUND_FILES> SoundOriginal;
 
 static int load_pig1(PHYSFS_file *f, unsigned num_bitmaps, unsigned num_sounds, unsigned &num_custom, std::unique_ptr<custom_info[]> &ci)
 {
@@ -365,9 +373,8 @@ static int read_d2_robot_info(PHYSFS_file *fp, robot_info *ri)
 	ri->exp1_sound_num = PHYSFSX_readShort(fp);
 	ri->exp2_vclip_num = PHYSFSX_readShort(fp);
 	ri->exp2_sound_num = PHYSFSX_readShort(fp);
-	ri->weapon_type = PHYSFSX_readByte(fp);
-	if (ri->weapon_type >= N_weapon_types)
-	    ri->weapon_type = 0;
+	const auto weapon_type = PHYSFSX_readByte(fp);
+	ri->weapon_type = weapon_type < N_weapon_types ? static_cast<weapon_id_type>(weapon_type) : weapon_id_type::LASER_ID_L1;
 	/*ri->weapon_type2 =*/ PHYSFSX_readByte(fp);
 	ri->n_guns = PHYSFSX_readByte(fp);
 	ri->contains_id = PHYSFSX_readByte(fp);
@@ -547,8 +554,8 @@ static void load_hxm(const d_fname &hxmname)
 static void custom_remove()
 {
 	int i;
-	grs_bitmap *bmo = BitmapOriginal;
-	grs_bitmap *bmp = GameBitmaps;
+	auto bmo = begin(BitmapOriginal);
+	auto bmp = begin(GameBitmaps);
 
 	for (i = 0; i < MAX_BITMAP_FILES; bmo++, bmp++, i++)
 		if (bmo->bm_flags & 0x80)

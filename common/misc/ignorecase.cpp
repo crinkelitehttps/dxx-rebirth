@@ -12,7 +12,10 @@
 #include <ctype.h>
 
 #include "physfsx.h"
+#include "physfs_list.h"
 #include "ignorecase.h"
+
+#include "compiler-range_for.h"
 
 /**
  * Please see ignorecase.h for details.
@@ -33,6 +36,8 @@
  *  \author Ryan C. Gordon.
  */
 
+namespace dcx {
+
 /* I'm not screwing around with stricmp vs. strcasecmp... */
 static int caseInsensitiveStringCompare(const char *x, const char *y)
 {
@@ -52,9 +57,9 @@ static int caseInsensitiveStringCompare(const char *x, const char *y)
 
 namespace {
 
-class search_result_t : public PHYSFS_list_t
+class search_result_t : public PHYSFSX_uncounted_list
 {
-	typedef PHYSFS_list_t base_ptr;
+	typedef PHYSFSX_uncounted_list base_ptr;
 public:
 	search_result_t(char *ptr, const char *buf) :
 		base_ptr(PHYSFS_enumerateFiles(ptr ? (*ptr = 0, buf) : "/"))
@@ -68,18 +73,15 @@ public:
 
 static int locateOneElement(char *const sptr, char *const ptr, const char *buf)
 {
-    char **i;
-
     if (PHYSFS_exists(buf))
         return(1);  /* quick rejection: exists in current case. */
 
 	search_result_t rc{ptr, buf};
-
-    for (i = rc.get(); *i != NULL; i++)
+	range_for (const auto i, rc)
     {
-		if (caseInsensitiveStringCompare(*i, sptr) == 0)
+		if (caseInsensitiveStringCompare(i, sptr) == 0)
         {
-			strcpy(sptr, *i); /* found a match. Overwrite with this case. */
+			strcpy(sptr, i); /* found a match. Overwrite with this case. */
             return(1);
         } /* if */
     } /* for */
@@ -115,6 +117,7 @@ int PHYSFSEXT_locateCorrectCase(char *buf)
     return a() ? 0 : -1;
 } /* PHYSFSEXT_locateCorrectCase */
 
+}
 
 #ifdef TEST_PHYSFSEXT_LOCATECORRECTCASE
 #define con_printf(A,B,...)	printf(B "\n", ##__VA_ARGS__)

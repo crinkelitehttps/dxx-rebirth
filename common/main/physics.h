@@ -39,9 +39,11 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 // these global vars are set after a call to do_physics_sim().  Ugly, I know.
 // list of segments went through
-extern int phys_seglist[MAX_FVI_SEGS], n_phys_segs;
+extern unsigned n_phys_segs;
+extern array<segnum_t, MAX_FVI_SEGS> phys_seglist;
 
 // Simulate a physics object for this frame
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 void do_physics_sim(vobjptridx_t obj);
 
 // Applies an instantaneous force on an object, resulting in an instantaneous
@@ -54,6 +56,7 @@ void phys_apply_rot(vobjptr_t obj, const vms_vector &force_vec);
 void set_thrust_from_velocity(vobjptr_t obj);
 void check_and_fix_matrix(vms_matrix &m);
 void physics_turn_towards_vector(const vms_vector &goal_vector, vobjptr_t obj, fix rate);
+#endif
 
 #endif
 

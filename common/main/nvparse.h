@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
+#include "dxxsconf.h"
 #include "compiler-type_traits.h"
 #include "ntstring.h"
 
@@ -47,17 +48,6 @@ template <typename T>
 static inline typename tt::enable_if<tt::is_unsigned<T>::value, bool>::type convert_integer(T &t, const char *value, int base = 10)
 {
 	return convert_integer(strtoul, t, value, base);
-}
-
-template <std::size_t N>
-static inline void convert_string(char (&out)[N], const char *value, const char *eol)
-{
-	assert(*eol == 0);
-	const std::size_t i = std::distance(value, ++ eol);
-	if (i > N)
-		/* Only if not truncated */
-		return;
-	std::copy(value, eol, out);
 }
 
 template <std::size_t N>

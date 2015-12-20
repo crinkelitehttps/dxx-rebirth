@@ -23,6 +23,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#include <algorithm>
 #include <memory>
 #include <stdexcept>
 #include <stdarg.h>
@@ -37,11 +38,11 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gr.h"
 #include "grdef.h"
 #include "dxxerror.h"
-#include "byteutil.h"
 #include "common/2d/bitmap.h"
 #include "makesig.h"
 #include "physfsx.h"
 #include "gamefont.h"
+#include "byteutil.h"
 #include "console.h"
 #include "config.h"
 #include "inferno.h"
@@ -59,13 +60,20 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #define MAX_OPEN_FONTS	50
 
+namespace {
+
+const uint8_t kerndata_terminator = 255;
+
 struct openfont
 {
 	array<char, FILENAME_LEN> filename;
 	// Unowned
 	grs_font *ptr;
-	std::unique_ptr<uint8_t[]> dataptr;
 };
+
+}
+
+namespace dcx {
 
 //list of open fonts, for use (for now) for palette remapping
 static array<openfont, MAX_OPEN_FONTS> open_font;
@@ -75,114 +83,85 @@ static array<openfont, MAX_OPEN_FONTS> open_font;
 static int gr_internal_string_clipped(int x, int y, const char *s );
 static int gr_internal_string_clipped_m(int x, int y, const char *s );
 
-static ubyte *find_kern_entry(const grs_font *font,ubyte first,ubyte second)
+static const uint8_t *find_kern_entry(const grs_font &font, const uint8_t first, const uint8_t second)
 {
-	ubyte *p=font->ft_kerndata;
+	auto p = font.ft_kerndata;
 
-	while (*p!=255)
+	while (*p != kerndata_terminator)
 		if (p[0]==first && p[1]==second)
 			return p;
 		else p+=3;
-
 	return NULL;
-
 }
 
 //takes the character AFTER being offset into font
-#define INFONT(_c) ((_c >= 0) && (_c <= grd_curcanv->cv_font->ft_maxchar-grd_curcanv->cv_font->ft_minchar))
-
-//takes the character BEFORE being offset into current font
-static void get_char_width(ubyte c,ubyte c2,int *width,int *spacing)
+static inline bool INFONT(const unsigned c)
 {
-	int letter;
-
-	letter = c-grd_curcanv->cv_font->ft_minchar;
-
-	if (!INFONT(letter)) {				//not in font, draw as space
-		*width=0;
-		if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-			*spacing = FONTSCALE_X(grd_curcanv->cv_font->ft_w)/2;
-		else
-			*spacing = grd_curcanv->cv_font->ft_w;
-		return;
-	}
-
-	if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-		*width = FONTSCALE_X(grd_curcanv->cv_font->ft_widths[letter]);
-	else
-		*width = grd_curcanv->cv_font->ft_w;
-
-	*spacing = *width;
-
-	if (grd_curcanv->cv_font->ft_flags & FT_KERNED)  {
-		ubyte *p;
-
-		if (!(c2==0 || c2=='\n')) {
-			int letter2 = c2-grd_curcanv->cv_font->ft_minchar;
-
-			if (INFONT(letter2)) {
-
-				p = find_kern_entry(grd_curcanv->cv_font,(ubyte)letter,letter2);
-
-				if (p)
-					*spacing = FONTSCALE_X(p[2]);
-			}
-		}
-	}
+	return c <= grd_curcanv->cv_font->ft_maxchar - grd_curcanv->cv_font->ft_minchar;
 }
 
-// Same as above but works with floats, which is better for string-size measurement while being bad for string composition of course
-static void get_char_width_f(ubyte c,ubyte c2,float *width,float *spacing)
-{
-	int letter;
+namespace {
 
-	letter = c-grd_curcanv->cv_font->ft_minchar;
+template <typename T>
+struct get_char_width_result
+{
+	T width, spacing;
+};
+
+/* Floating form never uses width.  This specialization allows the
+ * compiler to recognize width as dead, shortening
+ * get_char_width<float>.
+ */
+template <>
+struct get_char_width_result<float>
+{
+	float spacing;
+	get_char_width_result(float, float s) :
+		spacing(s)
+	{
+	}
+};
+
+}
+
+//takes the character BEFORE being offset into current font
+template <typename T>
+static get_char_width_result<T> get_char_width(const uint8_t c, const uint8_t c2)
+{
+	const auto &cv_font = *grd_curcanv->cv_font;
+	const unsigned letter = c - cv_font.ft_minchar;
+	const auto ft_flags = cv_font.ft_flags;
+	const auto proportional = ft_flags & FT_PROPORTIONAL;
 
 	if (!INFONT(letter)) {				//not in font, draw as space
-		*width=0;
-		if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-			*spacing = FONTSCALE_X(grd_curcanv->cv_font->ft_w)/2;
-		else
-			*spacing = grd_curcanv->cv_font->ft_w;
-		return;
+		return {0, static_cast<T>(proportional ? FONTSCALE_X(cv_font.ft_w) / 2 : cv_font.ft_w)};
 	}
-
-	if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-		*width = FONTSCALE_X(grd_curcanv->cv_font->ft_widths[letter]);
-	else
-		*width = grd_curcanv->cv_font->ft_w;
-
-	*spacing = *width;
-
-	if (grd_curcanv->cv_font->ft_flags & FT_KERNED)  {
-		ubyte *p;
-
+	const T width = proportional ? FONTSCALE_X(cv_font.ft_widths[letter]) : cv_font.ft_w;
+	if (ft_flags & FT_KERNED) 
+	{
 		if (!(c2==0 || c2=='\n')) {
-			int letter2 = c2-grd_curcanv->cv_font->ft_minchar;
+			const unsigned letter2 = c2 - cv_font.ft_minchar;
 
 			if (INFONT(letter2)) {
-
-				p = find_kern_entry(grd_curcanv->cv_font,(ubyte)letter,letter2);
-
+				const auto p = find_kern_entry(cv_font, letter, letter2);
 				if (p)
-					*spacing = FONTSCALE_X(p[2]);
+					return {width, static_cast<T>(FONTSCALE_X(p[2]))};
 			}
 		}
 	}
+	return {width, width};
 }
 
 static int get_centered_x(const char *s)
 {
-	float w,w2,s2;
-
+	float w;
 	for (w=0;*s!=0 && *s!='\n';s++) {
 		if (*s<=0x06) {
 			if (*s<=0x03)
 				s++;
 			continue;//skip color codes.
 		}
-		get_char_width_f(s[0],s[1],&w2,&s2);
-		w += s2;
+		w += get_char_width<float>(s[0],s[1]).spacing;
 	}
 
 	return ((grd_curcanv->cv_bitmap.bm_w - w) / 2);
@@ -192,7 +171,7 @@ static int get_centered_x(const char *s)
 //note we subtract one from color, since 255 is "transparent" so it'll never be used, and 0 would otherwise end the string.
 //function must already have orig_color var set (or they could be passed as args...)
 //perhaps some sort of recursive orig_color type thing would be better, but that would be way too much trouble for little gain
-int gr_message_color_level=1;
+const int gr_message_color_level=1;
 #define CHECK_EMBEDDED_COLORS() if ((*text_ptr >= 0x01) && (*text_ptr <= 0x02)) { \
 		text_ptr++; \
 		if (*text_ptr){ \
@@ -212,24 +191,24 @@ int gr_message_color_level=1;
 		text_ptr++; \
 	}
 
-static int gr_internal_string0(int x, int y, const char *s )
+template <bool masked_draws_background>
+static int gr_internal_string0_template(int x, int y, const char *s)
 {
-	unsigned char * fp;
-	const char * text_ptr, * next_row, * text_ptr1;
-	int BitMask,bits, width, spacing, letter, underline;
+	const auto &cv_font = *grd_curcanv->cv_font;
+	const auto ft_flags = cv_font.ft_flags;
+	const auto proportional = ft_flags & FT_PROPORTIONAL;
+	const auto cv_font_bg_color = grd_curcanv->cv_font_bg_color;
 	int	skip_lines = 0;
 
-	unsigned int VideoOffset, VideoOffset1;
+	unsigned int VideoOffset1;
 
-        bits=0;
-
+	//to allow easy reseting to default string color with colored strings -MPM
+	const auto orig_color = grd_curcanv->cv_font_fg_color;
 	VideoOffset1 = y * ROWSIZE + x;
-
-	next_row = s;
-
+	auto next_row = s;
 	while (next_row != NULL )
 	{
-		text_ptr1 = next_row;
+		const auto text_ptr1 = next_row;
 		next_row = NULL;
 
 		if (x==0x8000) {			//centered
@@ -237,175 +216,65 @@ static int gr_internal_string0(int x, int y, const char *s )
 			VideoOffset1 = y * ROWSIZE + xx;
 		}
 
-		for (int r=0; r<grd_curcanv->cv_font->ft_h; r++)
+		for (int r=0; r < cv_font.ft_h; ++r)
 		{
+			auto text_ptr = text_ptr1;
 
-			text_ptr = text_ptr1;
+			unsigned VideoOffset = VideoOffset1;
 
-			VideoOffset = VideoOffset1;
-
-			while (*text_ptr)
+			for (; const uint8_t c0 = *text_ptr; ++text_ptr)
 			{
-				if (*text_ptr == '\n' )
+				if (c0 == '\n')
 				{
 					next_row = &text_ptr[1];
 					break;
 				}
 
-				if (*text_ptr == CC_COLOR) {
-					grd_curcanv->cv_font_fg_color = (unsigned char)*(text_ptr+1);
-					text_ptr += 2;
+				if (c0 == CC_COLOR)
+				{
+					grd_curcanv->cv_font_fg_color = static_cast<uint8_t>(*++text_ptr);
 					continue;
 				}
 
-				if (*text_ptr == CC_LSPACING) {
-					skip_lines = *(text_ptr+1) - '0';
-					text_ptr += 2;
+				if (c0 == CC_LSPACING)
+				{
+					skip_lines = *++text_ptr - '0';
 					continue;
 				}
 
-				underline = 0;
-				if (*text_ptr == CC_UNDERLINE )
+				auto underline = unlikely(c0 == CC_UNDERLINE)
+					? ++text_ptr, r == cv_font.ft_baseline + 2 || r == cv_font.ft_baseline + 3
+					: 0;
+
+				const uint8_t c = *text_ptr;
+				const auto &result = get_char_width<int>(c, text_ptr[1]);
+				const auto &width = result.width;
+				const auto &spacing = result.spacing;
+
+				const unsigned letter = c - cv_font.ft_minchar;
+
+				if (masked_draws_background)
 				{
-					if ((r==grd_curcanv->cv_font->ft_baseline+2) || (r==grd_curcanv->cv_font->ft_baseline+3))
-						underline = 1;
-					text_ptr++;
-				}
-
-				get_char_width(text_ptr[0],text_ptr[1],&width,&spacing);
-
-				letter = (unsigned char)*text_ptr - grd_curcanv->cv_font->ft_minchar;
-
-				if (!INFONT(letter)) {	//not in font, draw as space
-					VideoOffset += spacing;
-					text_ptr++;
-					continue;
-				}
-
-				if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-					fp = grd_curcanv->cv_font->ft_chars[letter];
-				else
-					fp = grd_curcanv->cv_font->ft_data + letter * BITS_TO_BYTES(width)*grd_curcanv->cv_font->ft_h;
-
-				if (underline)
-				{
-					std::fill_n(&DATA[VideoOffset], width, grd_curcanv->cv_font_fg_color);
-					VideoOffset += width;
-				}
-				else
-				{
-					fp += BITS_TO_BYTES(width)*r;
-
-					BitMask = 0;
-
-					for (int i=0; i< width; i++ )
-					{
-						if (BitMask==0) {
-							bits = *fp++;
-							BitMask = 0x80;
-						}
-
-						if (bits & BitMask)
-							DATA[VideoOffset++] = (unsigned char) grd_curcanv->cv_font_fg_color;
-						else
-							DATA[VideoOffset++] = (unsigned char) grd_curcanv->cv_font_bg_color;
-						BitMask >>= 1;
-					}
-				}
-
-				VideoOffset += spacing-width;		//for kerning
-
-				text_ptr++;
-			}
-			VideoOffset1 += ROWSIZE; y++;
-		}
-		y += skip_lines;
-		VideoOffset1 += ROWSIZE * skip_lines;
-		skip_lines = 0;
-	}
-	return 0;
-}
-
-static int gr_internal_string0m(int x, int y, const char *s )
-{
-	unsigned char * fp;
-	const char * text_ptr, * next_row, * text_ptr1;
-	int BitMask,bits, width, spacing, letter, underline;
-	int skip_lines = 0;
-
-	unsigned int VideoOffset, VideoOffset1;
-
-	int orig_color=grd_curcanv->cv_font_fg_color;//to allow easy reseting to default string color with colored strings -MPM
-
-        bits = 0;
-
-	VideoOffset1 = y * ROWSIZE + x;
-
-	next_row = s;
-
-	while (next_row != NULL )
-	{
-		text_ptr1 = next_row;
-		next_row = NULL;
-
-		if (x==0x8000) {			//centered
-			int xx = get_centered_x(text_ptr1);
-			VideoOffset1 = y * ROWSIZE + xx;
-		}
-
-		for (int r=0; r<grd_curcanv->cv_font->ft_h; r++)
-		{
-
-			text_ptr = text_ptr1;
-
-			VideoOffset = VideoOffset1;
-
-			while (*text_ptr)
-			{
-				if (*text_ptr == '\n' )
-				{
-					next_row = &text_ptr[1];
-					break;
-				}
-
-				if (*text_ptr == CC_COLOR) {
-					grd_curcanv->cv_font_fg_color = (unsigned char)*(text_ptr+1);
-					text_ptr += 2;
-					continue;
-				}
-
-				if (*text_ptr == CC_LSPACING) {
-					skip_lines = *(text_ptr+1) - '0';
-					text_ptr += 2;
-					continue;
-				}
-
-				underline = 0;
-				if (*text_ptr == CC_UNDERLINE )
-				{
-					if ((r==grd_curcanv->cv_font->ft_baseline+2) || (r==grd_curcanv->cv_font->ft_baseline+3))
-						underline = 1;
-					text_ptr++;
-				}
-
-				get_char_width(text_ptr[0],text_ptr[1],&width,&spacing);
-
-				letter = (unsigned char)*text_ptr-grd_curcanv->cv_font->ft_minchar;
-
-				if (!INFONT(letter) || (unsigned char) *text_ptr <= 0x06)	//not in font, draw as space
-				{
-					CHECK_EMBEDDED_COLORS() else{
+					if (!INFONT(letter)) {	//not in font, draw as space
 						VideoOffset += spacing;
 						text_ptr++;
+						continue;
 					}
-					continue;
+				}
+				else
+				{
+					if (!INFONT(letter) || c <= 0x06)	//not in font, draw as space
+					{
+						CHECK_EMBEDDED_COLORS() else{
+							VideoOffset += spacing;
+							text_ptr++;
+						}
+						continue;
+					}
 				}
 
-				if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-					fp = grd_curcanv->cv_font->ft_chars[letter];
-				else
-					fp = grd_curcanv->cv_font->ft_data + letter * BITS_TO_BYTES(width)*grd_curcanv->cv_font->ft_h;
-
+				if (width)
+				{
 				if (underline)
 				{
 					std::fill_n(&DATA[VideoOffset], width, grd_curcanv->cv_font_fg_color);
@@ -413,29 +282,40 @@ static int gr_internal_string0m(int x, int y, const char *s )
 				}
 				else
 				{
+					auto fp = proportional ? cv_font.ft_chars[letter] : &cv_font.ft_data[letter * BITS_TO_BYTES(width) * cv_font.ft_h];
 					fp += BITS_TO_BYTES(width)*r;
 
-					BitMask = 0;
-
-					for (int i=0; i< width; i++ )
+					const auto cv_font_fg_color = grd_curcanv->cv_font_fg_color;
+					auto data = &DATA[VideoOffset];
+					/* Setting bits=0 is a dead store, but is necessary to
+					 * prevent -Og -Wuninitialized from issuing a bogus
+					 * warning.  -Og does not see that bits_remaining=0
+					 * guarantees that bits will be initialized from *fp before
+					 * it is read.
+					 */
+					uint8_t bits_remaining = 0, bits = 0;
+					for (uint_fast32_t i = width; i--; ++data, --bits_remaining)
 					{
-						if (BitMask==0) {
+						if (!bits_remaining)
+						{
 							bits = *fp++;
-							BitMask = 0x80;
+							bits_remaining = 8;
 						}
 
-						if (bits & BitMask)
-							DATA[VideoOffset++] = (unsigned char) grd_curcanv->cv_font_fg_color;
-						else
-							VideoOffset++;
-						BitMask >>= 1;
+						const auto bit_enabled = (bits & 0x80);
+						bits <<= 1;
+						if (!masked_draws_background)
+						{
+							if (!bit_enabled)
+								continue;
+						}
+						*data = bit_enabled ? cv_font_fg_color : cv_font_bg_color;
 					}
+					VideoOffset += width;
 				}
-				text_ptr++;
-
+				}
 				VideoOffset += spacing-width;
 			}
-
 			VideoOffset1 += ROWSIZE;
 			y++;
 		}
@@ -446,17 +326,27 @@ static int gr_internal_string0m(int x, int y, const char *s )
 	return 0;
 }
 
+static int gr_internal_string0(int x, int y, const char *s )
+{
+	return gr_internal_string0_template<true>(x, y, s);
+}
+
+static int gr_internal_string0m(int x, int y, const char *s )
+{
+	return gr_internal_string0_template<false>(x, y, s);
+}
+
 #ifndef OGL
 
 static int gr_internal_color_string(int x, int y, const char *s )
 {
 //a bitmap for the character
 	grs_bitmap char_bm = {};
-	char_bm.bm_type = BM_LINEAR;
+	char_bm.set_type(BM_LINEAR);
 	char_bm.bm_flags = BM_FLAG_TRANSPARENT;
 	unsigned char * fp;
 	const char *text_ptr, *next_row, *text_ptr1;
-	int width, spacing,letter;
+	int letter;
 	int xx,yy;
 
 	char_bm.bm_h = grd_curcanv->cv_font->ft_h;		//set height for chars of this font
@@ -465,6 +355,7 @@ static int gr_internal_color_string(int x, int y, const char *s )
 
 	yy = y;
 
+	const auto &&fspacy = FSPACY();
 	while (next_row != NULL)
 	{
 		text_ptr1 = next_row;
@@ -482,13 +373,15 @@ static int gr_internal_color_string(int x, int y, const char *s )
 			if (*text_ptr == '\n' )
 			{
 				next_row = &text_ptr[1];
-				yy += grd_curcanv->cv_font->ft_h+FSPACY(1);
+				yy += grd_curcanv->cv_font->ft_h + fspacy(1);
 				break;
 			}
 
 			letter = (unsigned char)*text_ptr - grd_curcanv->cv_font->ft_minchar;
 
-			get_char_width(text_ptr[0],text_ptr[1],&width,&spacing);
+			const auto &result = get_char_width<int>(text_ptr[0], text_ptr[1]);
+			const auto &width = result.width;
+			const auto &spacing = result.spacing;
 
 			if (!INFONT(letter)) {	//not in font, draw as space
 				xx += spacing;
@@ -520,11 +413,8 @@ static int get_font_total_width(const grs_font &font)
 	if (font.ft_flags & FT_PROPORTIONAL)
 	{
 		int w=0;
-		const auto b = &font.ft_widths[0];
-		const auto e = &font.ft_widths[font.ft_maxchar - font.ft_minchar + 1];
-		for (auto i = b; i != e; ++i)
+		range_for (const auto v, unchecked_partial_range(font.ft_widths, static_cast<unsigned>(font.ft_maxchar - font.ft_minchar) + 1))
 		{
-			auto v = *i;
 			if (v < 0)
 				throw std::underflow_error("negative width");
 			w += v;
@@ -706,13 +596,13 @@ static void ogl_init_font(grs_font * font)
 		gr_init_sub_bitmap(font->ft_bitmaps[i],font->ft_parent_bitmap,curx,cury,w,h);
 		curx+=w+gap;
 	}
-	ogl_loadbmtexture_f(font->ft_parent_bitmap, GameCfg.TexFilt);
+	ogl_loadbmtexture_f(font->ft_parent_bitmap, CGameCfg.TexFilt);
 }
 
 static int ogl_internal_string(int x, int y, const char *s )
 {
 	const char * text_ptr, * next_row, * text_ptr1;
-	int width, spacing,letter;
+	int letter;
 	int xx,yy;
 	int orig_color=grd_curcanv->cv_font_fg_color;//to allow easy reseting to default string color with colored strings -MPM
 	int underline;
@@ -721,8 +611,9 @@ static int ogl_internal_string(int x, int y, const char *s )
 
 	yy = y;
 
-	if (grd_curscreen->sc_canvas.cv_bitmap.bm_type != BM_OGL)
+	if (grd_curscreen->sc_canvas.cv_bitmap.get_type() != BM_OGL)
 		Error("carp.\n");
+	const auto &&fspacy = FSPACY();
 	while (next_row != NULL)
 	{
 		text_ptr1 = next_row;
@@ -742,13 +633,14 @@ static int ogl_internal_string(int x, int y, const char *s )
 			if (*text_ptr == '\n' )
 			{
 				next_row = &text_ptr[1];
-				yy += FONTSCALE_Y(grd_curcanv->cv_font->ft_h)+FSPACY(1);
+				yy += FONTSCALE_Y(grd_curcanv->cv_font->ft_h) + fspacy(1);
 				break;
 			}
 
 			letter = (unsigned char)*text_ptr - grd_curcanv->cv_font->ft_minchar;
 
-			get_char_width(text_ptr[0],text_ptr[1],&width,&spacing);
+			const auto &result = get_char_width<int>(text_ptr[0], text_ptr[1]);
+			const auto &spacing = result.spacing;
 
 			underline = 0;
 			if (!INFONT(letter) || (unsigned char)*text_ptr <= 0x06) //not in font, draw as space
@@ -778,7 +670,7 @@ static int ogl_internal_string(int x, int y, const char *s )
 			if (grd_curcanv->cv_font->ft_flags&FT_COLOR)
 				ogl_ubitmapm_cs(xx,yy,FONTSCALE_X(ft_w),FONTSCALE_Y(grd_curcanv->cv_font->ft_h),grd_curcanv->cv_font->ft_bitmaps[letter],-1,F1_0);
 			else{
-				if (grd_curcanv->cv_bitmap.bm_type==BM_OGL)
+				if (grd_curcanv->cv_bitmap.get_type() == BM_OGL)
 					ogl_ubitmapm_cs(xx,yy,ft_w*(FONTSCALE_X(grd_curcanv->cv_font->ft_w)/grd_curcanv->cv_font->ft_w),FONTSCALE_Y(grd_curcanv->cv_font->ft_h),grd_curcanv->cv_font->ft_bitmaps[letter],grd_curcanv->cv_font_fg_color,F1_0);
 				else
 					Error("ogl_internal_string: non-color string to non-ogl dest\n");
@@ -798,43 +690,47 @@ static int gr_internal_color_string(int x, int y, const char *s ){
 }
 #endif //OGL
 
-void gr_string(int x, int y, const char *s )
+void gr_string(const int x, const int y, const char *const s)
 {
-	int w, h, aw;
+	int w, h;
+	gr_get_string_size(s, &w, &h, nullptr);
+	gr_string(x, y, s, w, h);
+}
+
+void gr_string(const int x, const int y, const char *const s, const int w, const int h)
+{
 	int clipped=0;
 
 	Assert(grd_curcanv->cv_font != NULL);
 
+	const auto bm_h = grd_curcanv->cv_bitmap.bm_h;
+	if (y > bm_h)
+		return;
+	const auto bm_w = grd_curcanv->cv_bitmap.bm_w;
 	if ( x == 0x8000 )	{
-		if ( y<0 ) clipped |= 1;
-		gr_get_string_size(s, &w, &h, &aw );
+		if (y + h < 0)
+			return;
 		// for x, since this will be centered, only look at
 		// width.
-		if ( w > grd_curcanv->cv_bitmap.bm_w ) clipped |= 1;
-		if ( (y+h) > grd_curcanv->cv_bitmap.bm_h ) clipped |= 1;
-
-		if ( (y+h) < 0 ) clipped |= 2;
-		if ( y > grd_curcanv->cv_bitmap.bm_h ) clipped |= 2;
-
+		if (w > bm_w)
+			clipped = 1;
 	} else {
-		if ( (x<0) || (y<0) ) clipped |= 1;
-		gr_get_string_size(s, &w, &h, &aw );
-		if ( (x+w) > grd_curcanv->cv_bitmap.bm_w ) clipped |= 1;
-		if ( (y+h) > grd_curcanv->cv_bitmap.bm_h ) clipped |= 1;
-		if ( (x+w) < 0 ) clipped |= 2;
-		if ( (y+h) < 0 ) clipped |= 2;
-		if ( x > grd_curcanv->cv_bitmap.bm_w ) clipped |= 2;
-		if ( y > grd_curcanv->cv_bitmap.bm_h ) clipped |= 2;
+		if (x > bm_w)
+			return;
+		if (x + w < 0 ||
+			y + h < 0)
+			return;
+		if (x < 0 ||
+			x + w > bm_w)
+			clipped = 1;
 	}
+	if (y < 0 ||
+		y + h > bm_h)
+		clipped = 1;
 
 	if ( !clipped )
 	{
 		gr_ustring(x, y, s );
-		return;
-	}
-
-	if ( clipped & 2 )	{
-		// Completely clipped...
 		return;
 	}
 
@@ -889,46 +785,46 @@ void gr_ustring(int x, int y, const char *s )
 	return;
 }
 
-
 void gr_get_string_size(const char *s, int *string_width, int *string_height, int *average_width )
 {
-	int i = 0;
-	float width=0.0,spacing=0.0,longest_width=0.0,string_width_f=0.0,string_height_f=0.0;
-
-	string_height_f = FONTSCALE_Y(grd_curcanv->cv_font->ft_h);
-	string_width_f = 0;
-	*average_width = grd_curcanv->cv_font->ft_w;
-
-	if (s != NULL )
+	float longest_width=0.0,string_width_f=0.0;
+	unsigned lines = 0;
+	const auto &cv_font = *grd_curcanv->cv_font;
+	if (average_width)
+		*average_width = cv_font.ft_w;
+	if (!string_width && !string_height)
+		return;
+	if (s)
 	{
-		string_width_f = 0;
 		while (*s)
 		{
-//			if (*s == '&')
-//				s++;
-			while (*s == '\n')
+			if (*s == '\n')
 			{
-				s++;
-				string_height_f += FONTSCALE_Y(grd_curcanv->cv_font->ft_h)+FSPACY(1);
+				if (longest_width < string_width_f)
+					longest_width = string_width_f;
 				string_width_f = 0;
+				const auto os = s;
+				while (*++s == '\n')
+				{
+				}
+				lines += s - os;
+				if (!*s)
+					break;
 			}
 
-			if (*s == 0) break;
-
-			get_char_width_f(s[0],s[1],&width,&spacing);
-
+			const auto &result = get_char_width<float>(s[0], s[1]);
+			const auto &spacing = result.spacing;
 			string_width_f += spacing;
-
-			if (string_width_f > longest_width)
-				longest_width = string_width_f;
-
-			i++;
 			s++;
 		}
 	}
-	string_width_f = longest_width;
-	*string_width = string_width_f;
-	*string_height = string_height_f;
+	if (string_width)
+		*string_width = std::max(longest_width, string_width_f);
+	if (string_height)
+	{
+		const auto fontscale_y = FONTSCALE_Y(cv_font.ft_h);
+		*string_height = static_cast<int>(static_cast<float>(fontscale_y + (lines * (fontscale_y + FSPACY(1)))));
+	}
 }
 
 
@@ -967,12 +863,10 @@ void gr_close_font(std::unique_ptr<grs_font> font)
 		gr_free_bitmap_data(font->ft_parent_bitmap);
 #endif
 		auto &f = *i;
-		f.dataptr.reset();
 		f.ptr = nullptr;
 	}
 }
 
-#if defined(DXX_BUILD_DESCENT_II)
 //remap a font, re-reading its data & palette
 static void gr_remap_font( grs_font *font, const char * fontname, uint8_t *font_data );
 
@@ -983,21 +877,9 @@ void gr_remap_color_fonts()
 	{
 		auto font = i.ptr;
 		if (font && (font->ft_flags & FT_COLOR))
-			gr_remap_font(font, &i.filename[0], i.dataptr.get());
+			gr_remap_font(font, &i.filename[0], i.ptr->ft_allocdata.get());
 	}
 }
-
-void gr_remap_mono_fonts()
-{
-	con_printf (CON_DEBUG, "gr_remap_mono_fonts ()");
-	range_for (auto &i, open_font)
-	{
-		auto font = i.ptr;
-		if (font && !(font->ft_flags & FT_COLOR))
-			gr_remap_font(font, &i.filename[0], i.dataptr.get());
-	}
-}
-#endif
 
 /*
  * reads a grs_font structure from a PHYSFS_file
@@ -1010,19 +892,20 @@ static void grs_font_read(grs_font *gf, PHYSFS_file *fp)
 	gf->ft_baseline = PHYSFSX_readShort(fp);
 	gf->ft_minchar = PHYSFSX_readByte(fp);
 	gf->ft_maxchar = PHYSFSX_readByte(fp);
-	gf->ft_bytewidth = PHYSFSX_readShort(fp);
-	gf->ft_data = (ubyte *)((size_t)PHYSFSX_readInt(fp) - GRS_FONT_SIZE);
+	PHYSFSX_readShort(fp);
+	gf->ft_data = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(PHYSFSX_readInt(fp)) - GRS_FONT_SIZE);
 	PHYSFSX_readInt(fp);
-	gf->ft_widths = (short *)((size_t)PHYSFSX_readInt(fp) - GRS_FONT_SIZE);
-	gf->ft_kerndata = (ubyte *)((size_t)PHYSFSX_readInt(fp) - GRS_FONT_SIZE);
+	gf->ft_widths = reinterpret_cast<int16_t *>(static_cast<uintptr_t>(PHYSFSX_readInt(fp)) - GRS_FONT_SIZE);
+	gf->ft_kerndata = reinterpret_cast<uint8_t *>(static_cast<uintptr_t>(PHYSFSX_readInt(fp)) - GRS_FONT_SIZE);
 }
 
 grs_font_ptr gr_init_font( const char * fontname )
 {
 	unsigned char * ptr;
-	int nchars;
-	char file_id[4];
-	int datasize;	//size up to (but not including) palette
+	struct {
+		array<char, 4> magic;
+		unsigned datasize;	//size up to (but not including) palette
+	} file_header;
 
 	//find free font slot
 	auto e = end(open_font);
@@ -1040,51 +923,94 @@ grs_font_ptr gr_init_font( const char * fontname )
 		return {};
 	}
 
-	PHYSFS_read(fontfile, file_id, 4, 1);
-	if (memcmp( file_id, "PSFN", 4 )) {
-		con_printf(CON_NORMAL, "File %s is not a font file", fontname);
+	static_assert(sizeof(file_header) == 8, "file header size error");
+	if (PHYSFS_read(fontfile, &file_header, sizeof(file_header), 1) != 1 ||
+		memcmp(file_header.magic.data(), "PSFN", 4) ||
+		(file_header.datasize = INTEL_INT(file_header.datasize)) < GRS_FONT_SIZE)
+	{
+		con_printf(CON_NORMAL, "Invalid header in font file %s", fontname);
 		return {};
 	}
 
-	datasize = PHYSFSX_readInt(fontfile);
-	datasize -= GRS_FONT_SIZE; // subtract the size of the header.
+	file_header.datasize -= GRS_FONT_SIZE; // subtract the size of the header.
+	const auto &datasize = file_header.datasize;
 
 	auto font = make_unique<grs_font>();
 	grs_font_read(font.get(), fontfile);
 
 	auto font_data = make_unique<uint8_t[]>(datasize);
-	PHYSFS_read(fontfile, font_data, 1, datasize);
+	if (PHYSFS_read(fontfile, font_data, 1, datasize) != datasize)
+	{
+		con_printf(CON_URGENT, "Insufficient data in font file %s", fontname);
+		return {};
+	}
 
+	unsigned nchars;
 	nchars = font->ft_maxchar - font->ft_minchar + 1;
 
 	if (font->ft_flags & FT_PROPORTIONAL) {
-
-		font->ft_widths = (short *) &font_data[(size_t)font->ft_widths];
-		font->ft_data = (unsigned char *) &font_data[(size_t)font->ft_data];
+		const auto offset_widths = reinterpret_cast<uintptr_t>(font->ft_widths);
+		auto w = reinterpret_cast<short *>(&font_data[offset_widths]);
+		if (offset_widths >= datasize || offset_widths + (nchars * sizeof(*w)) >= datasize)
+		{
+			con_printf(CON_URGENT, "Missing widths in font file %s", fontname);
+			return {};
+		}
+		font->ft_widths = w;
+		const auto offset_data = reinterpret_cast<uintptr_t>(font->ft_data);
+		if (offset_data >= datasize)
+		{
+			con_printf(CON_URGENT, "Missing data in font file %s", fontname);
+			return {};
+		}
+		font->ft_data = reinterpret_cast<unsigned char *>(&font_data[offset_data]);
 		font->ft_chars = make_unique<uint8_t *[]>(nchars);
 
 		ptr = font->ft_data;
 
-		for (int i=0; i < nchars; i++ ) {
-			font->ft_widths[i] = INTEL_SHORT(font->ft_widths[i]);
-			font->ft_chars[i] = ptr;
-			if (font->ft_flags & FT_COLOR)
-				ptr += font->ft_widths[i] * font->ft_h;
-			else
-				ptr += BITS_TO_BYTES(font->ft_widths[i]) * font->ft_h;
-		}
-
+		const unsigned is_color = font->ft_flags & FT_COLOR;
+		const unsigned ft_h = font->ft_h;
+		std::generate_n(font->ft_chars.get(), nchars, [is_color, ft_h, &w, &ptr]{
+			const unsigned s = INTEL_SHORT(*w);
+			if (words_bigendian)
+				*w = static_cast<uint16_t>(s);
+			++w;
+			const auto r = ptr;
+			ptr += ft_h * (is_color ? s : BITS_TO_BYTES(s));
+			return r;
+		});
 	} else  {
 
 		font->ft_data   = font_data.get();
-		font->ft_chars.reset();
 		font->ft_widths = NULL;
 
 		ptr = font->ft_data + (nchars * font->ft_w * font->ft_h);
 	}
 
 	if (font->ft_flags & FT_KERNED)
-		font->ft_kerndata = (unsigned char *) &font_data[(size_t)font->ft_kerndata];
+	{
+		const auto offset_kerndata = reinterpret_cast<uintptr_t>(font->ft_kerndata);
+		if (datasize <= offset_kerndata)
+		{
+			con_printf(CON_URGENT, "Missing kerndata in font file %s", fontname);
+			return {};
+		}
+		const auto begin_kerndata = reinterpret_cast<const unsigned char *>(&font_data[offset_kerndata]);
+		const auto end_font_data = &font_data[datasize - ((datasize - offset_kerndata + 2) % 3)];
+		for (auto cur_kerndata = begin_kerndata;; cur_kerndata += 3)
+		{
+			if (cur_kerndata == end_font_data)
+			{
+				con_printf(CON_URGENT, "Unterminated kerndata in font file %s", fontname);
+				return {};
+			}
+			if (*cur_kerndata == kerndata_terminator)
+				break;
+		}
+		font->ft_kerndata = begin_kerndata;
+	}
+	else
+		font->ft_kerndata = nullptr;
 
 	if (font->ft_flags & FT_COLOR) {		//remap palette
 		palette_array_t palette;
@@ -1111,11 +1037,10 @@ grs_font_ptr gr_init_font( const char * fontname )
 #endif
 
 	f.ptr = font.get();
-	f.dataptr = move(font_data);
+	f.ptr->ft_allocdata = move(font_data);
 	return grs_font_ptr(font.release());
 }
 
-#if defined(DXX_BUILD_DESCENT_II)
 //remap a font by re-reading its data & palette
 void gr_remap_font( grs_font *font, const char * fontname, uint8_t *font_data )
 {
@@ -1123,9 +1048,6 @@ void gr_remap_font( grs_font *font, const char * fontname, uint8_t *font_data )
 	char file_id[4];
 	int datasize;        //size up to (but not including) palette
 	unsigned char *ptr;
-
-	if (! (font->ft_flags & FT_COLOR))
-		return;
 
 	auto fontfile = PHYSFSX_openReadBuffered(fontname);
 
@@ -1193,7 +1115,6 @@ void gr_remap_font( grs_font *font, const char * fontname, uint8_t *font_data )
 	ogl_init_font(font);
 #endif
 }
-#endif
 
 void gr_set_curfont(const grs_font *n)
 {
@@ -1206,16 +1127,19 @@ void gr_set_fontcolor( int fg_color, int bg_color )
 	grd_curcanv->cv_font_bg_color    = bg_color;
 }
 
-static int gr_internal_string_clipped(int x, int y, const char *s )
+template <bool masked_draws_background>
+static int gr_internal_string_clipped_template(int x, int y, const char *s)
 {
-	unsigned char * fp;
 	const char * text_ptr, * next_row, * text_ptr1;
-	int BitMask,bits, width, spacing, letter, underline;
+	int letter;
 	int x1 = x, last_x;
 
-        bits = 0;
-
 	next_row = s;
+
+	const auto &cv_font = *grd_curcanv->cv_font;
+	const auto ft_flags = cv_font.ft_flags;
+	const auto proportional = ft_flags & FT_PROPORTIONAL;
+	const auto cv_font_bg_color = grd_curcanv->cv_font_bg_color;
 
 	while (next_row != NULL )
 	{
@@ -1228,78 +1152,86 @@ static int gr_internal_string_clipped(int x, int y, const char *s )
 
 		last_x = x;
 
-		for (int r=0; r<grd_curcanv->cv_font->ft_h; r++) {
+		for (int r=0; r < cv_font.ft_h; r++) {
 			text_ptr = text_ptr1;
 			x = last_x;
 
-			while (*text_ptr)	{
-				if (*text_ptr == '\n' )	{
+			for (; const uint8_t c0 = *text_ptr; ++text_ptr)
+			{
+				if (c0 == '\n')
+				{
 					next_row = &text_ptr[1];
 					break;
 				}
-
-				if (*text_ptr == CC_COLOR) {
-					grd_curcanv->cv_font_fg_color = (unsigned char)*(text_ptr+1);
-					text_ptr += 2;
-					continue;
-				}
-
-				if (*text_ptr == CC_LSPACING) {
-					Int3();	//	Warning: skip lines not supported for clipped strings.
-					text_ptr += 2;
-					continue;
-				}
-
-				underline = 0;
-				if (*text_ptr == CC_UNDERLINE )
+				if (c0 == CC_COLOR)
 				{
-					if ((r==grd_curcanv->cv_font->ft_baseline+2) || (r==grd_curcanv->cv_font->ft_baseline+3))
-						underline = 1;
-					text_ptr++;
+					grd_curcanv->cv_font_fg_color = static_cast<uint8_t>(*++text_ptr);
+					continue;
 				}
 
-				get_char_width(text_ptr[0],text_ptr[1],&width,&spacing);
+				if (c0 == CC_LSPACING)
+				{
+					Int3();	//	Warning: skip lines not supported for clipped strings.
+					text_ptr += 1;
+					continue;
+				}
 
-				letter = (unsigned char)*text_ptr-grd_curcanv->cv_font->ft_minchar;
+				const auto underline = unlikely(c0 == CC_UNDERLINE)
+					? ++text_ptr, r == cv_font.ft_baseline + 2 || r == cv_font.ft_baseline + 3
+					: 0;
+				const uint8_t c = *text_ptr;
+				const auto &result = get_char_width<int>(c, text_ptr[1]);
+				const auto &width = result.width;
+				const auto &spacing = result.spacing;
+
+				letter = c - cv_font.ft_minchar;
 
 				if (!INFONT(letter)) {	//not in font, draw as space
 					x += spacing;
-					text_ptr++;
 					continue;
 				}
-
-				if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-					fp = grd_curcanv->cv_font->ft_chars[letter];
-				else
-					fp = grd_curcanv->cv_font->ft_data + letter * BITS_TO_BYTES(width)*grd_curcanv->cv_font->ft_h;
-
+				const auto cv_font_fg_color = grd_curcanv->cv_font_fg_color;
+				gr_setcolor(cv_font_fg_color);
+				if (width)
+				{
 				if (underline)	{
-					for (int i=0; i< width; i++ ) {
-						gr_setcolor(grd_curcanv->cv_font_fg_color);
+					for (uint_fast32_t i = width; i--;)
+					{
 						gr_pixel( x++, y );
 					}
 				} else {
+					auto fp = proportional ? cv_font.ft_chars[letter] : cv_font.ft_data + letter * BITS_TO_BYTES(width) * cv_font.ft_h;
 					fp += BITS_TO_BYTES(width)*r;
 
-					BitMask = 0;
+					/* Setting bits=0 is a dead store, but is necessary to
+					 * prevent -Og -Wuninitialized from issuing a bogus
+					 * warning.  -Og does not see that bits_remaining=0
+					 * guarantees that bits will be initialized from *fp before
+					 * it is read.
+					 */
+					uint8_t bits_remaining = 0, bits = 0;
 
-					for (int i=0; i< width; i++ ) {
-						if (BitMask==0) {
+					for (uint_fast32_t i = width; i--; ++x, --bits_remaining)
+					{
+						if (!bits_remaining)
+						{
 							bits = *fp++;
-							BitMask = 0x80;
+							bits_remaining = 8;
 						}
-						if (bits & BitMask)
-							gr_setcolor(grd_curcanv->cv_font_fg_color);
+						const auto bit_enabled = (bits & 0x80);
+						bits <<= 1;
+						if (masked_draws_background)
+							gr_setcolor(bit_enabled ? cv_font_fg_color : cv_font_bg_color);
 						else
-							gr_setcolor(grd_curcanv->cv_font_bg_color);
-						gr_pixel( x++, y );
-						BitMask >>= 1;
+						{
+							if (!bit_enabled)
+								continue;
+						}
+						gr_pixel(x, y);
 					}
 				}
-
+				}
 				x += spacing-width;		//for kerning
-
-				text_ptr++;
 			}
 			y++;
 		}
@@ -1309,103 +1241,12 @@ static int gr_internal_string_clipped(int x, int y, const char *s )
 
 static int gr_internal_string_clipped_m(int x, int y, const char *s )
 {
-	unsigned char * fp;
-	const char * text_ptr, * next_row, * text_ptr1;
-	int BitMask,bits, width, spacing, letter, underline;
-	int x1 = x, last_x;
+	return gr_internal_string_clipped_template<true>(x, y, s);
+}
 
-        bits = 0;
+static int gr_internal_string_clipped(int x, int y, const char *s )
+{
+	return gr_internal_string_clipped_template<false>(x, y, s);
+}
 
-	next_row = s;
-
-	while (next_row != NULL )
-	{
-		text_ptr1 = next_row;
-		next_row = NULL;
-
-		x = x1;
-		if (x==0x8000)			//centered
-			x = get_centered_x(text_ptr1);
-
-		last_x = x;
-
-		for (int r=0; r<grd_curcanv->cv_font->ft_h; r++) {
-			x = last_x;
-
-			text_ptr = text_ptr1;
-
-			while (*text_ptr)	{
-				if (*text_ptr == '\n' )	{
-					next_row = &text_ptr[1];
-					break;
-				}
-
-				if (*text_ptr == CC_COLOR) {
-					grd_curcanv->cv_font_fg_color = (unsigned char)*(text_ptr+1);
-					text_ptr += 2;
-					continue;
-				}
-
-				if (*text_ptr == CC_LSPACING) {
-					Int3();	//	Warning: skip lines not supported for clipped strings.
-					text_ptr += 2;
-					continue;
-				}
-
-				underline = 0;
-				if (*text_ptr == CC_UNDERLINE )
-				{
-					if ((r==grd_curcanv->cv_font->ft_baseline+2) || (r==grd_curcanv->cv_font->ft_baseline+3))
-						underline = 1;
-					text_ptr++;
-				}
-
-				get_char_width(text_ptr[0],text_ptr[1],&width,&spacing);
-
-				letter = (unsigned char)*text_ptr-grd_curcanv->cv_font->ft_minchar;
-
-				if (!INFONT(letter)) {	//not in font, draw as space
-					x += spacing;
-					text_ptr++;
-					continue;
-				}
-
-				if (grd_curcanv->cv_font->ft_flags & FT_PROPORTIONAL)
-					fp = grd_curcanv->cv_font->ft_chars[letter];
-				else
-					fp = grd_curcanv->cv_font->ft_data + letter * BITS_TO_BYTES(width)*grd_curcanv->cv_font->ft_h;
-
-				if (underline)	{
-					for (int i=0; i< width; i++ ) {
-						gr_setcolor(grd_curcanv->cv_font_fg_color);
-						gr_pixel( x++, y );
-					}
-				} else {
-					fp += BITS_TO_BYTES(width)*r;
-
-					BitMask = 0;
-
-					for (int i=0; i< width; i++ ) {
-						if (BitMask==0) {
-							bits = *fp++;
-							BitMask = 0x80;
-						}
-						if (bits & BitMask)	{
-							gr_setcolor(grd_curcanv->cv_font_fg_color);
-							gr_pixel( x++, y );
-						} else {
-							x++;
-						}
-						BitMask >>= 1;
-					}
-				}
-
-				x += spacing-width;		//for kerning
-
-				text_ptr++;
-			}
-			y++;
-		}
-	}
-	return 0;
 }

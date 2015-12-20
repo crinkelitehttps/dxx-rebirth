@@ -38,6 +38,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "compiler-range_for.h"
 #include "partial_range.h"
 
+namespace dcx {
+
 static int pcx_encode_byte(ubyte byt, ubyte cnt, PHYSFS_file *fid);
 static int pcx_encode_line(const uint8_t *inBuff, uint_fast32_t inLen, PHYSFS_file *fp);
 
@@ -90,7 +92,11 @@ static int PCXHeader_read_n(PCXHeader *ph, int n, PHYSFS_file *fp)
 	return i;
 }
 
+}
+
 #if defined(DXX_BUILD_DESCENT_I)
+namespace dsx {
+
 int bald_guy_load(const char * filename, grs_bitmap * bmp,int bitmap_type ,palette_array_t &palette )
 {
 	PCXHeader header;
@@ -146,7 +152,7 @@ int bald_guy_load(const char * filename, grs_bitmap * bmp,int bitmap_type ,palet
 		}
 		bmp->bm_w = bmp->bm_rowsize = xsize;
 		bmp->bm_h = ysize;
-		bmp->bm_type = bitmap_type;
+		bmp->set_type(bitmap_type);
 	}
 	
 	for (row=0; row< ysize ; row++)      {
@@ -176,7 +182,11 @@ int bald_guy_load(const char * filename, grs_bitmap * bmp,int bitmap_type ,palet
 	copy_diminish_palette(palette, p);
 	return PCX_ERROR_NONE;
 }
+
+}
 #endif
+
+namespace dcx {
 
 struct PCX_PHYSFS_file
 {
@@ -226,7 +236,8 @@ static int pcx_read_bitmap_file(struct PCX_PHYSFS_file *const pcxphysfs, grs_bit
 		}
 	}
 
-	if ( bmp.bm_type == BM_LINEAR )	{
+	if (bmp.get_type() == BM_LINEAR)
+	{
 		for (row=0; row< ysize ; row++)      {
 			auto pixdata = &bmp.get_bitmap_data()[bmp.bm_rowsize*row];
 			for (col=0; col< xsize ; )      {
@@ -433,4 +444,6 @@ const char *pcx_errormsg(int error_number)
 	}
 
 	return p;
+}
+
 }

@@ -21,9 +21,13 @@
 #include "config.h"
 #include "strutil.h"
 #include "u_mem.h"
+#include "physfs_list.h"
+#include "digi.h"
 
 #include "compiler-make_unique.h"
 #include "partial_range.h"
+
+namespace dcx {
 
 #define MUSIC_HUDMSG_MAXLEN 40
 #define JUKEBOX_HUDMSG_PLAYING "Now playing:"
@@ -48,9 +52,9 @@ public:
 	}
 };
 
-class list_pointers : public std::unique_ptr<char *[], list_deleter>
+class list_pointers : public PHYSFSX_uncounted_list_template<list_deleter>
 {
-	typedef std::unique_ptr<char *[], list_deleter> base_ptr;
+	typedef PHYSFSX_uncounted_list_template<list_deleter> base_ptr;
 public:
 	using base_ptr::reset;
 	void reset(char **list, std::unique_ptr<char[]> &&buf)
@@ -62,7 +66,7 @@ public:
 		this->base_ptr::reset(list);
 		get_deleter().buf = std::move(buf);
 	}
-	void reset(PHYSFS_list_t list)
+	void reset(PHYSFSX_uncounted_list list)
 		noexcept(noexcept(std::declval<base_ptr>().reset(list.release())))
 	{
 		this->base_ptr::reset(list.release());
@@ -105,7 +109,17 @@ void jukebox_unload()
 	JukeboxSongs.unload();
 }
 
-const array<file_extension_t, 6> jukebox_exts{SONG_EXT_HMP, SONG_EXT_MID, SONG_EXT_OGG, SONG_EXT_FLAC, SONG_EXT_MP3};
+const array<file_extension_t, 5> jukebox_exts{{
+	SONG_EXT_HMP,
+	SONG_EXT_MID,
+	SONG_EXT_OGG,
+	SONG_EXT_FLAC,
+	SONG_EXT_MP3
+}};
+
+}
+
+namespace dsx {
 
 static int read_m3u(void)
 {
@@ -114,7 +128,7 @@ static int read_m3u(void)
 	char *buf;
 	array<char, PATH_MAX> absbuf;
 	if (PHYSFSX_exists(GameCfg.CMLevelMusicPath.data(), 0)) // it's a child of Sharepath, build full path
-		PHYSFSX_getRealPath(GameCfg.CMLevelMusicPath.data(), buf = absbuf.data());
+		PHYSFSX_getRealPath(GameCfg.CMLevelMusicPath.data(), (buf = absbuf.data(), absbuf));
 	else
 		buf = GameCfg.CMLevelMusicPath.data();
 	fp = fopen(buf, "rb");
@@ -178,7 +192,6 @@ void jukebox_load()
 		int new_path = 0;
 		const char *sep = PHYSFS_getDirSeparator();
 		size_t seplen = strlen(sep);
-		int i;
 
 		// stick a separator on the end if necessary.
 		if (musiclen >= seplen)
@@ -206,9 +219,7 @@ void jukebox_load()
 				PHYSFS_removeFromSearchPath(GameCfg.CMLevelMusicPath.data());
 			return;
 		}
-		
-		for (i = 0; JukeboxSongs.list[i]; i++) {}
-		JukeboxSongs.num_songs = i;
+		JukeboxSongs.num_songs = std::distance(JukeboxSongs.list.begin(), JukeboxSongs.list.end());
 
 		if (new_path)
 			PHYSFS_removeFromSearchPath(GameCfg.CMLevelMusicPath.data());
@@ -275,7 +286,7 @@ int jukebox_play()
 	snprintf(full_filename.get(), size_full_filename, "%s%s", LevelMusicPath, music_filename);
 
 	int played = songs_play_file(full_filename.get(), (GameCfg.CMLevelMusicPlayOrder == MUSIC_CM_PLAYORDER_LEVEL ? 1 : 0), (GameCfg.CMLevelMusicPlayOrder == MUSIC_CM_PLAYORDER_LEVEL ? nullptr : jukebox_hook_next));
-	full_filename = NULL;
+	full_filename.reset();
 	if (!played)
 	{
 		return 0;	// whoops, got an error
@@ -294,22 +305,4 @@ int jukebox_play()
 	return 1;
 }
 
-char *jukebox_current() {
-	return JukeboxSongs.list[GameCfg.CMLevelMusicTrack[0]];
-}
-
-int jukebox_is_loaded() { return (JukeboxSongs.list != NULL); }
-int jukebox_is_playing() { return GameCfg.CMLevelMusicTrack[0] + 1; }
-int jukebox_numtracks() { return GameCfg.CMLevelMusicTrack[1]; }
-
-void jukebox_list() {
-	int i;
-	if (!JukeboxSongs.list) return;
-	if (!JukeboxSongs.list[0]) {
-		con_printf(CON_DEBUG,"* No songs have been found");
-	}
-	else {
-		for (i = 0; i < GameCfg.CMLevelMusicTrack[1]; i++)
-			con_printf(CON_DEBUG,"* %s", JukeboxSongs.list[i]);
-	}
 }

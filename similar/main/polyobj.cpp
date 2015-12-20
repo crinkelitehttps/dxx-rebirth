@@ -29,13 +29,13 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <string.h>
 
 #include "inferno.h"
-#include "polyobj.h"
+#include "robot.h"
 #include "vecmat.h"
+#include "cntrlcen.h"
 #include "interp.h"
 #include "dxxerror.h"
 #include "u_mem.h"
 #include "args.h"
-#include "byteutil.h"
 #include "physfs-serial.h"
 #include "physfsx.h"
 #ifndef DRIVE
@@ -54,8 +54,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "compiler-make_unique.h"
 #include "partial_range.h"
 
+namespace dcx {
 unsigned N_polygon_models = 0;
 array<polymodel, MAX_POLYGON_MODELS> Polygon_models;	// = {&bot11,&bot17,&robot_s2,&robot_b2,&bot11,&bot17,&robot_s2,&robot_b2};
+}
 
 #define PM_COMPATIBLE_VERSION 6
 #define PM_OBJFILE_VERSION 8
@@ -172,7 +174,7 @@ static void pof_read_angs(vms_angvec *angs,int n,ubyte *bufp)
 #define ID_IDTA 0x41544449 // 'ATDI'  //Interpreter data
 #define ID_TXTR 0x52545854 // 'RTXT'  //Texture filename list
 
-vms_angvec anim_angs[N_ANIM_STATES][MAX_SUBMODELS];
+static array<array<vms_angvec, MAX_SUBMODELS>, N_ANIM_STATES> anim_angs;
 
 //set the animation angles for this robot.  Gun fields of robot info must
 //be filled in.
@@ -238,8 +240,7 @@ static void align_polygon_model_data(polymodel *pm)
 		}
 		//write (corrected) chunk for current chunk:
 		*((short *)(cur_ch.new_base + cur_ch.offset))
-		  = INTEL_SHORT(cur_ch.correction
-				+ INTEL_SHORT(*((short *)(cur_ch.old_base + cur_ch.offset))));
+		  = INTEL_SHORT(static_cast<short>(cur_ch.correction + GET_INTEL_SHORT(cur_ch.old_base + cur_ch.offset)));
 		//write (correctly aligned) chunk:
 		cur_old = old_dest(cur_ch);
 		cur_new = new_dest(cur_ch);
@@ -370,8 +371,8 @@ static polymodel *read_model_file(polymodel *pm,const char *filename,robot_info 
 					Assert(n_frames == N_ANIM_STATES);
 
 					for (int m=0;m<pm->n_models;m++)
-						for (int f=0;f<n_frames;f++)
-							pof_read_angs(&anim_angs[f][m], 1, model_buf);
+						range_for (auto &f, partial_range(anim_angs, n_frames))
+							pof_read_angs(&f[m], 1, model_buf);
 
 
 					robot_set_angles(r,pm,anim_angs);
@@ -415,17 +416,17 @@ static polymodel *read_model_file(polymodel *pm,const char *filename,robot_info 
 #ifdef WORDS_NEED_ALIGNMENT
 	align_polygon_model_data(pm);
 #endif
-#ifdef WORDS_BIGENDIAN
+	if (words_bigendian)
 	swap_polygon_model_data(pm->model_data.get());
-#endif
 	return pm;
 }
 
 //reads the gun information for a model
 //fills in arrays gun_points & gun_dirs, returns the number of guns read
-int read_model_guns(const char *filename,array<vms_vector, MAX_CONTROLCEN_GUNS> &gun_points, array<vms_vector, MAX_CONTROLCEN_GUNS> &gun_dirs);
-int read_model_guns(const char *filename,array<vms_vector, MAX_CONTROLCEN_GUNS> &gun_points, array<vms_vector, MAX_CONTROLCEN_GUNS> &gun_dirs)
+void read_model_guns(const char *filename, reactor &r)
 {
+	auto &gun_points = r.gun_points;
+	auto &gun_dirs = r.gun_dirs;
 	short version;
 	int id,len;
 	int n_guns=0;
@@ -478,8 +479,7 @@ int read_model_guns(const char *filename,array<vms_vector, MAX_CONTROLCEN_GUNS> 
 			pof_cfseek(model_buf,len,SEEK_CUR);
 
 	}
-
-	return n_guns;
+	r.n_guns = n_guns;
 }
 
 //free up a model, getting rid of all its memory
@@ -492,7 +492,6 @@ void free_model(polymodel *po)
 }
 
 array<grs_bitmap *, MAX_POLYOBJ_TEXTURES> texture_list;
-array<bitmap_index, MAX_POLYOBJ_TEXTURES> texture_list_index;
 
 //draw a polygon model
 
@@ -518,6 +517,7 @@ void draw_polygon_model(const vms_vector &pos,const vms_matrix *orient,const sub
 					po = &Polygon_models[po->simpler_model-1];
 			}
 
+	array<bitmap_index, MAX_POLYOBJ_TEXTURES> texture_list_index;
 	if (alt_textures)
    {
 		for (int i=0;i<po->n_textures;i++) {
@@ -644,7 +644,7 @@ static void polyobj_find_min_max(polymodel *pm)
 	}
 }
 
-char Pof_names[MAX_POLYGON_MODELS][FILENAME_LEN];
+array<char[FILENAME_LEN], MAX_POLYGON_MODELS> Pof_names;
 
 //returns the number of this model
 int load_polygon_model(const char *filename,int n_textures,int first_texture,robot_info *r)
@@ -695,13 +695,13 @@ void init_polygon_models()
 //canvas.
 void draw_model_picture(uint_fast32_t mn,vms_angvec *orient_angles)
 {
-	vms_vector	temp_pos=ZERO_VECTOR;
 	g3s_lrgb	lrgb = { f1_0, f1_0, f1_0 };
 
 	Assert(mn<N_polygon_models);
 
 	gr_clear_canvas( BM_XRGB(0,0,0) );
 	g3_start_frame();
+	vms_vector temp_pos{};
 	g3_set_view_matrix(temp_pos,vmd_identity_matrix,0x9000);
 
 	if (Polygon_models[mn].rad != 0)
@@ -713,6 +713,8 @@ void draw_model_picture(uint_fast32_t mn,vms_angvec *orient_angles)
 	draw_polygon_model(temp_pos,&temp_orient,NULL,mn,0,lrgb,NULL,NULL);
 	g3_end_frame();
 }
+
+namespace dcx {
 
 DEFINE_SERIAL_VMS_VECTOR_TO_MESSAGE();
 DEFINE_SERIAL_UDT_TO_MESSAGE(polymodel, p, (p.n_models, p.model_data_size, serial::pad<4>(), p.submodel_ptrs, p.submodel_offsets, p.submodel_norms, p.submodel_pnts, p.submodel_rads, p.submodel_parents, p.submodel_mins, p.submodel_maxs, p.mins, p.maxs, p.rad, p.n_textures, p.first_texture, p.simpler_model));
@@ -727,10 +729,14 @@ void polymodel_read(polymodel *pm, PHYSFS_file *fp)
 	PHYSFSX_serialize_read(fp, *pm);
 }
 
+}
+
+#if 0
 void polymodel_write(PHYSFS_file *fp, const polymodel &pm)
 {
 	PHYSFSX_serialize_write(fp, pm);
 }
+#endif
 
 /*
  * routine which allocates, reads, and inits a polymodel's model_data
@@ -742,9 +748,8 @@ void polygon_model_data_read(polymodel *pm, PHYSFS_file *fp)
 #ifdef WORDS_NEED_ALIGNMENT
 	align_polygon_model_data(pm);
 #endif
-#ifdef WORDS_BIGENDIAN
+	if (words_bigendian)
 	swap_polygon_model_data(pm->model_data.get());
-#endif
 #if defined(DXX_BUILD_DESCENT_II)
 	g3_init_polygon_model(pm->model_data.get());
 #endif

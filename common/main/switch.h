@@ -23,16 +23,16 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _SWITCH_H
-#define _SWITCH_H
+#pragma once
 
 #include <physfs.h>
+#include "maths.h"
 
 #ifdef __cplusplus
 #include "pack.h"
-#include "segnum.h"
-#include "objnum.h"
-#include "fwdvalptridx.h"
+#include "fwd-object.h"
+#include "fwd-segment.h"
+#include "compiler-array.h"
 
 #define MAX_TRIGGERS        100
 #define MAX_WALLS_PER_LINK  10
@@ -75,7 +75,7 @@ struct v29_trigger
 	fix     time;
 	sbyte   link_num;
 	short   num_links;
-	array<short, MAX_WALLS_PER_LINK>   seg;
+	array<segnum_t, MAX_WALLS_PER_LINK>   seg;
 	array<short, MAX_WALLS_PER_LINK>   side;
 } __pack__;
 
@@ -86,7 +86,7 @@ struct v30_trigger
 	sbyte   pad;                        //keep alignment
 	fix     value;
 	fix     time;
-	array<short, MAX_WALLS_PER_LINK>   seg;
+	array<segnum_t, MAX_WALLS_PER_LINK>   seg;
 	array<short, MAX_WALLS_PER_LINK>   side;
 } __pack__;
 #endif
@@ -124,20 +124,20 @@ struct trigger : public prohibit_void_ptr<trigger>
 	fix     value;
 	fix     time;
 #if defined(DXX_BUILD_DESCENT_I)
-	sbyte		link_num;
+	int8_t		link_num;
 	uint16_t 	num_links;
 #endif
 	array<segnum_t, MAX_WALLS_PER_LINK>   seg;
 	array<short, MAX_WALLS_PER_LINK>   side;
 };
 
-const int trigger_none = -1;
+const uint8_t trigger_none = -1;
 
 extern unsigned Num_triggers;
 extern array<trigger, MAX_TRIGGERS> Triggers;
 
 extern void trigger_init();
-void check_trigger(vsegptridx_t seg, short side, objnum_t objnum,int shot);
+void check_trigger(vcsegptridx_t seg, short side, vcobjptridx_t objnum, int shot);
 extern int check_trigger_sub(int trigger_num, int player_num,int shot);
 extern void triggers_frame_process();
 
@@ -192,8 +192,6 @@ void trigger_write(PHYSFS_file *fp, const trigger &t);
 void v29_trigger_write(PHYSFS_file *fp, const trigger &t);
 void v30_trigger_write(PHYSFS_file *fp, const trigger &t);
 void v31_trigger_write(PHYSFS_file *fp, const trigger &t);
-#endif
-
 #endif
 
 #endif

@@ -75,11 +75,12 @@ static void kmatrix_draw_item(int  i, playernum_array_t &sorted)
 	char temp[10];
 
 	y = FSPACY(50+i*9);
-	gr_string(FSPACX(CENTERING_OFFSET(N_players)), y, static_cast<const char *>(Players[sorted[i]].callsign));
+	const auto &&fspacx = FSPACX();
+	gr_string(fspacx(CENTERING_OFFSET(N_players)), y, static_cast<const char *>(Players[sorted[i]].callsign));
 
 	for (int j=0; j<N_players; j++)
 	{
-		x = FSPACX(70 + CENTERING_OFFSET(N_players) + j*25);
+		x = fspacx(70 + CENTERING_OFFSET(N_players) + j * 25);
 
 		const auto kmij = kill_matrix[sorted[i]][sorted[j]];
 		if (sorted[i]==sorted[j])
@@ -109,12 +110,19 @@ static void kmatrix_draw_item(int  i, playernum_array_t &sorted)
 		}
 	}
 
-	if (Players[sorted[i]].net_killed_total+Players[sorted[i]].net_kills_total==0)
-		strcpy (temp,"NA");
-	else
-		snprintf (temp,sizeof(temp),"%d%%",(int)((float)((float)Players[sorted[i]].net_kills_total/((float)Players[sorted[i]].net_killed_total+(float)Players[sorted[i]].net_kills_total))*100.0));
+	{
+		auto &p = Players[sorted[i]];
+		const int eff = (p.net_killed_total + p.net_kills_total <= 0)
+			? 0
+			: static_cast<int>(
+				static_cast<float>(p.net_kills_total) / (
+					static_cast<float>(p.net_killed_total) + static_cast<float>(p.net_kills_total)
+				) * 100.0
+			);
+		snprintf(temp, sizeof(temp), "%i%%", eff <= 0 ? 0 : eff);
+	}
 
-	x = FSPACX(60 + CENTERING_OFFSET(N_players) + N_players*25);
+	x = fspacx(60 + CENTERING_OFFSET(N_players) + N_players * 25);
 	gr_set_fontcolor( BM_XRGB(25,25,25),-1 );
 	gr_printf( x ,y,"%4d/%s",Players[sorted[i]].net_kills_total,temp);
 }
@@ -124,11 +132,12 @@ static void kmatrix_draw_coop_item(int  i, playernum_array_t &sorted)
 	int  x, y;
 
 	y = FSPACY(50+i*9);
-	gr_string(FSPACX(CENTERING_OFFSET(N_players)), y, static_cast<const char *>(Players[sorted[i]].callsign));
+	const auto &&fspacx = FSPACX();
+	gr_string(fspacx(CENTERING_OFFSET(N_players)), y, static_cast<const char *>(Players[sorted[i]].callsign));
 	x = CENTERSCREEN;
 	gr_set_fontcolor( BM_XRGB(60,40,10),-1 );
 	gr_printf( x, y, "%d", Players[sorted[i]].score );
-	x = CENTERSCREEN+FSPACX(50);
+	x = CENTERSCREEN + fspacx(50);
 	gr_set_fontcolor( BM_XRGB(60,40,10),-1 );
 	gr_printf( x, y, "%d", Players[sorted[i]].net_killed_total);
 }
@@ -137,9 +146,11 @@ static void kmatrix_draw_names(playernum_array_t &sorted)
 {
 	int x;
 
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacy = FSPACY();
 	for (int j=0; j<N_players; j++)
 	{
-		x = FSPACX (70 + CENTERING_OFFSET(N_players) + j*25);
+		x = fspacx(70 + CENTERING_OFFSET(N_players) + j * 25);
 
 		if (Players[sorted[j]].connected==CONNECT_DISCONNECTED)
 			gr_set_fontcolor(gr_find_closest_color(31,31,31),-1);
@@ -149,20 +160,21 @@ static void kmatrix_draw_names(playernum_array_t &sorted)
 			gr_set_fontcolor(BM_XRGB(player_rgb[color].r,player_rgb[color].g,player_rgb[color].b),-1 );
 		}
 
-		gr_printf( x, FSPACY(40), "%c", Players[sorted[j]].callsign[0u] );
+		gr_printf(x, fspacy(40), "%c", Players[sorted[j]].callsign[0u]);
 	}
 
-	x = FSPACX(72 + CENTERING_OFFSET(N_players) + N_players*25);
+	x = fspacx(72 + CENTERING_OFFSET(N_players) + N_players * 25);
 	gr_set_fontcolor( BM_XRGB(31,31,31),-1 );
-	gr_string( x, FSPACY(40), "K/E");
+	gr_string(x, fspacy(40), "K/E");
 }
 
 static void kmatrix_draw_coop_names(playernum_array_t &)
 {
 	gr_set_fontcolor( BM_XRGB(63,31,31),-1 );
-	gr_string( CENTERSCREEN, FSPACY(40), "SCORE");
+	const auto &&fspacy = FSPACY();
+	gr_string(CENTERSCREEN, fspacy(40), "SCORE");
 	gr_set_fontcolor( BM_XRGB(63,31,31),-1 );
-	gr_string( CENTERSCREEN+FSPACX(50), FSPACY(40), "DEATHS");
+	gr_string(CENTERSCREEN + FSPACX(50), fspacy(40), "DEATHS");
 }
 
 static void kmatrix_status_msg (fix time, int reactor)
@@ -176,13 +188,18 @@ static void kmatrix_status_msg (fix time, int reactor)
 		gr_printf(0x8000, SHEIGHT-LINE_SPACING, "Level finished. Wait (%d) to proceed or ESC to Quit.", time);
 }
 
+namespace {
+
 struct kmatrix_screen : ignore_window_pointer_t
 {
 	grs_bitmap background;
 	int network;
 	fix64 end_time;
 	int playing;
+        int aborted;
 };
+
+}
 
 static void kmatrix_redraw(kmatrix_screen *km)
 {
@@ -200,14 +217,16 @@ static void kmatrix_redraw(kmatrix_screen *km)
 		multi_sort_kill_list();
 		gr_set_curfont(MEDIUM3_FONT);
 
+		const auto title =
 #if defined(DXX_BUILD_DESCENT_II)
-		if (game_mode_capture_flag())
-			gr_string( 0x8000, FSPACY(10), "CAPTURE THE FLAG SUMMARY");
-		else if (game_mode_hoard())
-			gr_string( 0x8000, FSPACY(10), "HOARD SUMMARY");
-		else
+			game_mode_capture_flag()
+			? "CAPTURE THE FLAG SUMMARY"
+			: game_mode_hoard()
+				? "HOARD SUMMARY"
+				:
 #endif
-			gr_string( 0x8000, FSPACY(10), TXT_KILL_MATRIX_TITLE);
+				TXT_KILL_MATRIX_TITLE;
+		gr_string(0x8000, FSPACY(10), title);
 
 		gr_set_curfont(GAME_FONT);
 		multi_get_kill_list(sorted);
@@ -257,7 +276,7 @@ static void kmatrix_redraw_coop()
 	gr_palette_load(gr_palette);
 }
 
-static window_event_result kmatrix_handler(window *wind,const d_event &event, kmatrix_screen *km)
+static window_event_result kmatrix_handler(window *, const d_event &event, kmatrix_screen *km)
 {
 	int k = 0, choice = 0;
 	
@@ -269,23 +288,23 @@ static window_event_result kmatrix_handler(window *wind,const d_event &event, km
 			{
 				case KEY_ESC:
 					{
-						array<newmenu_item, 2> nm_message_items{
+						array<newmenu_item, 2> nm_message_items{{
 							nm_item_menu(TXT_YES),
 							nm_item_menu(TXT_NO),
-						};
+						}};
 						choice = newmenu_do( NULL, TXT_ABORT_GAME, nm_message_items, km->network ? multi_endlevel_poll2 : unused_newmenu_subfunction, unused_newmenu_userdata );
 					}
 					
 					if (choice==0)
 					{
-						Players[Player_num].connected=CONNECT_DISCONNECTED;
+						get_local_player().connected=CONNECT_DISCONNECTED;
 						
 						if (km->network)
 							multi_send_endlevel_packet();
 						
 						multi_leave_game();
-						if (Game_wind)
-							window_close(Game_wind);
+                                                km->aborted = 1;
+
 						return window_event_result::close;
 					}
 					return window_event_result::handled;
@@ -331,14 +350,14 @@ static window_event_result kmatrix_handler(window *wind,const d_event &event, km
 				{
 					if (Current_level_num==8)
 					{
-						Players[Player_num].connected=CONNECT_DISCONNECTED;
+						get_local_player().connected=CONNECT_DISCONNECTED;
 						
 						if (km->network)
 							multi_send_endlevel_packet();
 						
 						multi_leave_game();
-						if (Game_wind)
-							window_close(Game_wind);
+                                                km->aborted = 1;
+
 						return window_event_result::close;
 					}
 				}
@@ -365,20 +384,21 @@ static window_event_result kmatrix_handler(window *wind,const d_event &event, km
 	return window_event_result::ignored;
 }
 
-void kmatrix_view(int network)
+kmatrix_result kmatrix_view(int network)
 {
 	window *wind;
 	kmatrix_screen km;
 	gr_init_bitmap_data(km.background);
 	if (pcx_read_bitmap(STARS_BACKGROUND, km.background, BM_LINEAR, gr_palette) != PCX_ERROR_NONE)
 	{
-		return;
+		return kmatrix_result::abort;
 	}
 	gr_palette_load(gr_palette);
 	
 	km.network = network;
 	km.end_time = -1;
 	km.playing = 0;
+        km.aborted = 0;
 	
 	set_screen_mode( SCREEN_MENU );
 	game_flush_inputs();
@@ -390,10 +410,11 @@ void kmatrix_view(int network)
 	wind = window_create(&grd_curscreen->sc_canvas, 0, 0, SWIDTH, SHEIGHT, kmatrix_handler, &km);
 	if (!wind)
 	{
-		return;
+		return kmatrix_result::abort;
 	}
 	
 	while (window_exists(wind))
 		event_process();
 	gr_free_bitmap_data(km.background);
+	return (km.aborted ? kmatrix_result::abort : kmatrix_result::proceed);
 }

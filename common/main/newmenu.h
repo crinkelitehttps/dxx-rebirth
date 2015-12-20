@@ -25,11 +25,17 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
-#include "event.h"
+#include "fwd-event.h"
 
 #ifdef __cplusplus
 #include <cstdint>
 #include <algorithm>
+#include <memory>
+#include <tuple>
+#include <utility>
+#ifdef _WIN32
+#include "fwd-window.h"
+#endif
 #include "varutil.h"
 #include "dxxsconf.h"
 #include "fmtcheck.h"
@@ -198,7 +204,6 @@ int vnm_messagebox_aN(const char *title, const nm_messagebox_tie &tie, const cha
 newmenu_item *newmenu_get_items(newmenu *menu);
 int newmenu_get_nitems(newmenu *menu);
 int newmenu_get_citem(newmenu *menu);
-struct window *newmenu_get_window(newmenu *menu);
 void nm_draw_background(int x1, int y1, int x2, int y2);
 void nm_restore_background(int x, int y, int w, int h);
 
@@ -226,9 +231,10 @@ extern const char *Newmenu_allowed_chars;
 // }
 
 extern const char **listbox_get_items(listbox *lb);
-extern int listbox_get_nitems(listbox *lb);
 extern int listbox_get_citem(listbox *lb);
-struct window *listbox_get_window(listbox *lb);
+#ifdef _WIN32
+window *listbox_get_window(listbox *lb);
+#endif
 extern void listbox_delete_item(listbox *lb, int item);
 
 template <typename T>
@@ -399,6 +405,7 @@ static inline void nm_set_item_slider(newmenu_item &ni, const char *text, unsign
 #define DXX_NEWMENU_VARIABLE	m
 #define DXX_ENUM_CHECK(S,OPT,V)	OPT,
 #define DXX_ENUM_RADIO(S,OPT,C,G)	OPT,
+#define DXX_ENUM_NUMBER DXX_ENUM_SLIDER
 #define DXX_ENUM_SLIDER(S,OPT,V,MIN,MAX)	OPT,
 #define DXX_ENUM_SCALE_SLIDER(S,OPT,V,MIN,MAX,SCALE)	OPT,
 #define DXX_ENUM_MENU(S,OPT)	OPT,
@@ -406,6 +413,7 @@ static inline void nm_set_item_slider(newmenu_item &ni, const char *text, unsign
 #define DXX_ENUM_INPUT(S,OPT)	OPT,
 #define DXX_COUNT_CHECK(S,OPT,V)	+1
 #define DXX_COUNT_RADIO(S,OPT,C,G)	+1
+#define DXX_COUNT_NUMBER DXX_COUNT_SLIDER
 #define DXX_COUNT_SLIDER(S,OPT,V,MIN,MAX)	+1
 #define DXX_COUNT_SCALE_SLIDER(S,OPT,V,MIN,MAX,SCALE)	+1
 #define DXX_COUNT_MENU(S,OPT)	+1
@@ -415,6 +423,8 @@ static inline void nm_set_item_slider(newmenu_item &ni, const char *text, unsign
 	nm_set_item_checkbox(((DXX_NEWMENU_VARIABLE)[(OPT)]), (S), (V));
 #define DXX_ADD_RADIO(S,OPT,C,G)	\
 	nm_set_item_radio(((DXX_NEWMENU_VARIABLE)[(OPT)]), (S), (C), (G));
+#define DXX_ADD_NUMBER(S,OPT,V,MIN,MAX)	\
+	nm_set_item_number(((DXX_NEWMENU_VARIABLE)[(OPT)]), (S), (V), (MIN), (MAX));
 #define DXX_ADD_SLIDER(S,OPT,V,MIN,MAX)	\
 	nm_set_item_slider(((DXX_NEWMENU_VARIABLE)[(OPT)]), (S), (V), (MIN), (MAX));
 #define DXX_ADD_SCALE_SLIDER(S,OPT,V,MIN,MAX,SCALE)	\
@@ -426,13 +436,90 @@ static inline void nm_set_item_slider(newmenu_item &ni, const char *text, unsign
 #define DXX_ADD_INPUT(S,OPT)	\
 	nm_set_item_input(((DXX_NEWMENU_VARIABLE)[(OPT)]),(S));
 #define DXX_READ_CHECK(S,OPT,V)	\
-	V = (DXX_NEWMENU_VARIABLE)[(OPT)].value;
+	(V) = (DXX_NEWMENU_VARIABLE)[(OPT)].value;
+#define DXX_READ_RADIO(S,OPT,C,G)	/* handled specially */
+#define DXX_READ_NUMBER(S,OPT,V,MIN,MAX)	\
+	(V) = (DXX_NEWMENU_VARIABLE)[(OPT)].value;
 #define DXX_READ_SLIDER(S,OPT,V,MIN,MAX)	\
-	V = (DXX_NEWMENU_VARIABLE)[(OPT)].value;
+	(V) = (DXX_NEWMENU_VARIABLE)[(OPT)].value;
 #define DXX_READ_SCALE_SLIDER(S,OPT,V,MIN,MAX,SCALE)	\
-	V = (DXX_NEWMENU_VARIABLE)[(OPT)].value * (SCALE);
+	(V) = (DXX_NEWMENU_VARIABLE)[(OPT)].value * (SCALE);
 #define DXX_READ_MENU(S,OPT)	/* handled specially */
 #define DXX_READ_TEXT(S,OPT)	/* handled specially */
 #define DXX_READ_INPUT(S,OPT)	/* handled specially */
+
+template <typename T, typename B>
+class menu_bit_wrapper_t
+{
+	using M = decltype(std::declval<const T &>() & std::declval<B>());
+	std::tuple<T &, B> m_data;
+	enum
+	{
+		m_mask = 0,
+		m_bit = 1,
+	};
+	T &get_mask()
+	{
+		return std::get<m_mask>(m_data);
+	}
+	const T &get_mask() const
+	{
+		return std::get<m_mask>(m_data);
+	}
+	B get_bit() const
+	{
+		return std::get<m_bit>(m_data);
+	}
+public:
+	constexpr menu_bit_wrapper_t(T &t, B bit) :
+		m_data(t, bit)
+	{
+	}
+	constexpr operator M() const
+	{
+		return get_mask() & get_bit();
+	}
+	menu_bit_wrapper_t &operator=(bool n)
+	{
+		if (n)
+			get_mask() |= get_bit();
+		else
+			get_mask() &= ~get_bit();
+		return *this;
+	}
+};
+
+template <typename T, typename B>
+static constexpr menu_bit_wrapper_t<T, B> menu_bit_wrapper(T &t, B b)
+{
+	return {t, b};
+}
+
+template <typename T, typename B>
+class menu_number_bias_wrapper_t
+{
+	T &m_value;
+	B m_bias;
+public:
+	constexpr menu_number_bias_wrapper_t(T &t, B bias) :
+		m_value(t), m_bias(bias)
+	{
+	}
+	constexpr operator T() const
+	{
+		return m_value + m_bias;
+	}
+	menu_number_bias_wrapper_t &operator=(T n)
+	{
+		m_value = n - m_bias;
+		return *this;
+	}
+};
+
+template <typename T, typename B>
+static constexpr menu_number_bias_wrapper_t<T, B> menu_number_bias_wrapper(T &t, B b)
+{
+	return {t, b};
+}
 
 #endif

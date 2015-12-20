@@ -23,6 +23,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#include <algorithm>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,8 +92,7 @@ static void bm_free_extra_objbitmaps();
 #endif
 
 //for each model, a model number for dying & dead variants, or -1 if none
-int Dying_modelnums[MAX_POLYGON_MODELS];
-int Dead_modelnums[MAX_POLYGON_MODELS];
+array<int, MAX_POLYGON_MODELS> Dying_modelnums, Dead_modelnums;
 
 //right now there's only one player ship, but we can have another by
 //adding an array and setting the pointer to the active ship.
@@ -111,7 +111,7 @@ array<tmap_info, MAX_TEXTURES> TmapInfo;
 int             First_multi_bitmap_num=-1;
 
 array<bitmap_index, MAX_OBJ_BITMAPS> ObjBitmaps;
-ushort          ObjBitmapPtrs[MAX_OBJ_BITMAPS];     // These point back into ObjBitmaps, since some are used twice.
+array<ushort, MAX_OBJ_BITMAPS>          ObjBitmapPtrs;     // These point back into ObjBitmaps, since some are used twice.
 
 /*
  * reads n bitmap_index structs from a PHYSFS_file
@@ -119,6 +119,17 @@ ushort          ObjBitmapPtrs[MAX_OBJ_BITMAPS];     // These point back into Obj
 static inline void bitmap_index_read_n(partial_range_t<bitmap_index *> r, uint_fast32_t n, PHYSFS_file *fp)
 {
 	bitmap_index_read_n(fp, partial_range(r, n));
+}
+
+void gamedata_close()
+{
+	free_polygon_models();
+#if defined(DXX_BUILD_DESCENT_II)
+	bm_free_extra_objbitmaps();
+#endif
+	free_endlevel_data();
+	rle_cache_close();
+	piggy_close();
 }
 
 /*
@@ -132,14 +143,6 @@ static void tmap_info_read(tmap_info &ti, PHYSFS_file *fp)
 	ti.lighting = PHYSFSX_readFix(fp);
 	ti.damage = PHYSFSX_readFix(fp);
 	ti.eclip_num = PHYSFSX_readInt(fp);
-}
-
-void gamedata_close()
-{
-	free_polygon_models();
-	free_endlevel_data();
-	rle_cache_close();
-	piggy_close();
 }
 
 //-----------------------------------------------------------------
@@ -162,8 +165,6 @@ int gamedata_init()
 // Read compiled properties data from descent.pig
 void properties_read_cmp(PHYSFS_file * fp)
 {
-	int i;
-
 	//  bitmap_index is a short
 	
 	NumTextures = PHYSFSX_readInt(fp);
@@ -210,14 +211,14 @@ void properties_read_cmp(PHYSFS_file * fp)
 
 	bitmap_index_read_n(Gauges, MAX_GAUGE_BMS, fp);
 	
-	for (i = 0; i < MAX_POLYGON_MODELS; i++)
-		Dying_modelnums[i] = PHYSFSX_readInt(fp);
-	for (i = 0; i < MAX_POLYGON_MODELS; i++)
-		Dead_modelnums[i] = PHYSFSX_readInt(fp);
+	range_for (auto &i, Dying_modelnums)
+		i = PHYSFSX_readInt(fp);
+	range_for (auto &i, Dead_modelnums)
+		i = PHYSFSX_readInt(fp);
 
 	bitmap_index_read_n(ObjBitmaps, MAX_OBJ_BITMAPS, fp);
-	for (i = 0; i < MAX_OBJ_BITMAPS; i++)
-		ObjBitmapPtrs[i] = PHYSFSX_readShort(fp);
+	range_for (auto &i, ObjBitmapPtrs)
+		i = PHYSFSX_readShort(fp);
 
 	player_ship_read(&only_player_ship, fp);
 
@@ -230,8 +231,8 @@ void properties_read_cmp(PHYSFS_file * fp)
 	Num_total_object_types = PHYSFSX_readInt(fp);
 	PHYSFS_read( fp, ObjType, sizeof(ubyte), MAX_OBJTYPE );
 	PHYSFS_read( fp, ObjId, sizeof(ubyte), MAX_OBJTYPE );
-	for (i = 0; i < MAX_OBJTYPE; i++)
-		ObjStrength[i] = PHYSFSX_readFix(fp);
+	range_for (auto &i, ObjStrength)
+		i = PHYSFSX_readFix(fp);
 
 	First_multi_bitmap_num = PHYSFSX_readInt(fp);
 	Reactors[0].n_guns = PHYSFSX_readInt(fp);
@@ -246,12 +247,8 @@ void properties_read_cmp(PHYSFS_file * fp)
 
         #ifdef EDITOR
         //Build tmaplist
-        Num_tmaps = 0;
-         for (i=0; i < TextureEffects; i++)
-          Num_tmaps++;
-         for (uint_fast32_t i = 0; i < Num_effects; i++)
-          if (Effects[i].changing_wall_texture >= 0)
-           Num_tmaps++;
+	auto &&effect_range = partial_range(Effects, Num_effects);
+	Num_tmaps = TextureEffects + std::count_if(effect_range.begin(), effect_range.end(), [](const eclip &e) { return e.changing_wall_texture >= 0; });
         #endif
 }
 #elif defined(DXX_BUILD_DESCENT_II)
@@ -267,15 +264,6 @@ static void tmap_info_read(tmap_info &ti, PHYSFS_file *fp)
 	ti.destroyed = PHYSFSX_readShort(fp);
 	ti.slide_u = PHYSFSX_readShort(fp);
 	ti.slide_v = PHYSFSX_readShort(fp);
-}
-
-void gamedata_close()
-{
-	free_polygon_models();
-	bm_free_extra_objbitmaps();
-	free_endlevel_data();
-	rle_cache_close();
-	piggy_close();
 }
 
 //-----------------------------------------------------------------
@@ -580,7 +568,6 @@ static bitmap_index read_extra_bitmap_iff(const char * filename )
 
 	//MALLOC( new, grs_bitmap, 1 );
 	iff_error = iff_read_bitmap(filename,*n,BM_LINEAR,&newpal);
-	n->bm_handle=0;
 	if (iff_error != IFF_NO_ERROR)		{
 		con_printf(CON_DEBUG, "Error loading exit model bitmap <%s> - IFF error: %s", filename, iff_errormsg(iff_error));
 		return bitmap_num;
@@ -748,7 +735,7 @@ void compute_average_rgb(grs_bitmap *bm, array<fix, 3> &rgb)
 			auto dbits = buf.get();
 			gr_rle_decode({sbits, dbits}, {end(*bm), dbits + bm_w});
 			if ( bm->bm_flags & BM_FLAG_RLE_BIG )
-				sbits += (int)INTEL_SHORT(*((short *)&(bm->bm_data[4+(i*data_offset)])));
+				sbits += GET_INTEL_SHORT(&bm->bm_data[4 + (i * data_offset)]);
 			else
 				sbits += (int)bm->bm_data[4+i];
 			range_for (const auto color, unchecked_partial_range(dbits, bm_w))

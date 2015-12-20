@@ -36,6 +36,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "compiler-range_for.h"
 
+namespace dcx {
+
 #ifdef macintosh
 void snprintf(char *out_string, int size, char * format, ... )
 {
@@ -115,14 +117,13 @@ void d_strrev( char *s1 )
 }
 
 #ifdef DEBUG_MEMORY_ALLOCATIONS
-char *d_strdup(const char *str)
+char *(d_strdup)(const char *str, const char *var, const char *file, unsigned line)
 {
 	char *newstr;
 
-	MALLOC(newstr, char, strlen(str) + 1);
-	strcpy(newstr, str);
-
-	return newstr;
+	const auto len = strlen(str) + 1;
+	MALLOC<char>(newstr, len, var, file, line);
+	return static_cast<char *>(memcpy(newstr, str, len));
 }
 #endif
 
@@ -226,8 +227,10 @@ void string_array_t::tidy(std::size_t offset, int (*comp)( const char *, const c
 	// Sort by name, starting at offset
 	auto b = std::next(ptr.begin(), offset);
 	auto e = ptr.end();
-	std::sort(b, e, [](const char *a, const char *b) { return d_stricmp(a, b) < 0; });
+	std::sort(b, e, [](const char *sa, const char *sb) { return d_stricmp(sa, sb) < 0; });
 	// Remove duplicates
 	// Can't do this before reallocating, otherwise it makes a mess of things (the strings in the buffer aren't ordered)
-	ptr.erase(std::unique(b, e, [=](const char *a, const char *b) { return (*comp)(a, b) == 0; }), e);
+	ptr.erase(std::unique(b, e, [=](const char *sa, const char *sb) { return (*comp)(sa, sb) == 0; }), e);
+}
+
 }

@@ -26,10 +26,11 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #pragma once
 
 #include "maths.h"
+#include "vecmat.h"
 
 #ifdef __cplusplus
-#include "fwdsegment.h"
-#include "fwdvalptridx.h"
+#include "fwd-object.h"
+#include "fwd-segment.h"
 
 struct g3s_lrgb;
 
@@ -37,11 +38,9 @@ struct g3s_lrgb;
 
 #define MIN_LIGHT_DIST  (F1_0*4)
 
-extern g3s_lrgb Dynamic_light[MAX_VERTICES];
+extern array<g3s_lrgb, MAX_VERTICES> Dynamic_light;
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 extern object *old_viewer;
-
-// compute the average dynamic light in a segment.  Takes the segment number
-g3s_lrgb compute_seg_dynamic_light(segnum_t segnum);
 
 // compute the lighting for an object.  Takes a pointer to the object,
 // and possibly a rotated 3d point.  If the point isn't specified, the
@@ -50,6 +49,7 @@ g3s_lrgb compute_object_light(vobjptridx_t obj,const vms_vector *rotated_pnt);
 
 // turn headlight boost on & off
 void toggle_headlight_active(void);
-void start_lighting_frame(objptr_t viewer);
+void start_lighting_frame(vobjptr_t viewer);
+#endif
 
 #endif

@@ -58,6 +58,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gr.h"	//	for powerup outline drawing
 #include "editor/editor.h"
 #endif
+#include "hudmsg.h"
 #include "playsave.h"
 
 unsigned N_powerup_types;
@@ -109,7 +110,7 @@ void do_powerup_frame(const vobjptridx_t obj)
 	}
 
 	if (obj->lifeleft <= 0) {
-		object_create_explosion(obj->segnum, obj->pos, F1_0*7/2, VCLIP_POWERUP_DISAPPEARANCE );
+		object_create_explosion(vsegptridx(obj->segnum), obj->pos, F1_0*7/2, VCLIP_POWERUP_DISAPPEARANCE);
 
 		if ( Vclip[VCLIP_POWERUP_DISAPPEARANCE].sound_num > -1 )
 			digi_link_sound_to_object( Vclip[VCLIP_POWERUP_DISAPPEARANCE].sound_num, obj, 0, F1_0);
@@ -148,35 +149,34 @@ void powerup_basic_str(int redadd, int greenadd, int blueadd, int score, const c
 void do_megawow_powerup(int quantity)
 {
 	powerup_basic(30, 0, 30, 1, "MEGA-WOWIE-ZOWIE!");
+	auto &player_info = get_local_plrobj().ctype.player_info;
 #if defined(DXX_BUILD_DESCENT_I)
-	Players[Player_num].primary_weapon_flags = (HAS_LASER_FLAG | HAS_VULCAN_FLAG | HAS_SPREADFIRE_FLAG | HAS_PLASMA_FLAG | HAS_FUSION_FLAG);
-	Players[Player_num].secondary_weapon_flags |= (HAS_CONCUSSION_FLAG | HAS_HOMING_FLAG | HAS_PROXIMITY_BOMB_FLAG | HAS_SMART_FLAG | HAS_MEGA_FLAG);
+	player_info.primary_weapon_flags = (HAS_LASER_FLAG | HAS_VULCAN_FLAG | HAS_SPREADFIRE_FLAG | HAS_PLASMA_FLAG | HAS_FUSION_FLAG);
 #elif defined(DXX_BUILD_DESCENT_II)
-	Players[Player_num].primary_weapon_flags = (HAS_LASER_FLAG | HAS_VULCAN_FLAG | HAS_SPREADFIRE_FLAG | HAS_PLASMA_FLAG | HAS_FUSION_FLAG) | (HAS_GAUSS_FLAG | HAS_HELIX_FLAG | HAS_PHOENIX_FLAG | HAS_OMEGA_FLAG);
-	Players[Player_num].secondary_weapon_flags |= (HAS_CONCUSSION_FLAG | HAS_HOMING_FLAG | HAS_PROXIMITY_BOMB_FLAG | HAS_SMART_FLAG | HAS_MEGA_FLAG) | (HAS_FLASH_FLAG | HAS_GUIDED_FLAG | HAS_SMART_BOMB_FLAG | HAS_MERCURY_FLAG | HAS_EARTHSHAKER_FLAG);
+	player_info.primary_weapon_flags = (HAS_LASER_FLAG | HAS_VULCAN_FLAG | HAS_SPREADFIRE_FLAG | HAS_PLASMA_FLAG | HAS_FUSION_FLAG) | (HAS_GAUSS_FLAG | HAS_HELIX_FLAG | HAS_PHOENIX_FLAG | HAS_OMEGA_FLAG);
 #endif
-	Players[Player_num].vulcan_ammo = VULCAN_AMMO_MAX;
+	get_local_player_vulcan_ammo() = VULCAN_AMMO_MAX;
 
+	auto &secondary_ammo = get_local_player_secondary_ammo();
 	for (int i=0; i<3; i++)
-		Players[Player_num].secondary_ammo[i] = quantity;
+		secondary_ammo[i] = quantity;
 
 	for (int i=3; i<MAX_SECONDARY_WEAPONS; i++)
-		Players[Player_num].secondary_ammo[i] = quantity/5;
+		secondary_ammo[i] = quantity/5;
 
-	if (Newdemo_state == ND_STATE_RECORDING)
-		newdemo_record_laser_level(Players[Player_num].laser_level, MAX_LASER_LEVEL);
-
-	Players[Player_num].energy = F1_0*200;
-	Players[Player_num].shields = F1_0*200;
-	Players[Player_num].flags |= PLAYER_FLAGS_QUAD_LASERS;
+	get_local_player_energy() = F1_0*200;
+	get_local_player_shields() = F1_0*200;
+	get_local_player_flags() |= PLAYER_FLAGS_QUAD_LASERS;
 #if defined(DXX_BUILD_DESCENT_I)
-	Players[Player_num].laser_level = MAX_LASER_LEVEL;
+	const auto laser_level = MAX_LASER_LEVEL;
 #elif defined(DXX_BUILD_DESCENT_II)
-	Players[Player_num].laser_level = MAX_SUPER_LASER_LEVEL;
-
 	if (game_mode_hoard())
-		Players[Player_num].secondary_ammo[PROXIMITY_INDEX] = 12;
+		secondary_ammo[PROXIMITY_INDEX] = 12;
+	const auto laser_level = MAX_SUPER_LASER_LEVEL;
 #endif
+	if (Newdemo_state == ND_STATE_RECORDING)
+		newdemo_record_laser_level(player_info.laser_level, laser_level);
+	player_info.laser_level = laser_level;
 
 
 	update_laser_weapon_info();
@@ -188,17 +188,17 @@ static int pick_up_energy(void)
 {
 	int	used=0;
 
-	if (Players[Player_num].energy < MAX_ENERGY) {
+	if (get_local_player_energy() < MAX_ENERGY) {
 		fix boost;
 		boost = 3*F1_0 + 3*F1_0*(NDL - Difficulty_level);
 #if defined(DXX_BUILD_DESCENT_II)
 		if (Difficulty_level == 0)
 			boost += boost/2;
 #endif
-		Players[Player_num].energy += boost;
-		if (Players[Player_num].energy > MAX_ENERGY)
-			Players[Player_num].energy = MAX_ENERGY;
-		powerup_basic(15,15,7, ENERGY_SCORE, "%s %s %d",TXT_ENERGY,TXT_BOOSTED_TO,f2ir(Players[Player_num].energy));
+		get_local_player_energy() += boost;
+		if (get_local_player_energy() > MAX_ENERGY)
+			get_local_player_energy() = MAX_ENERGY;
+		powerup_basic(15,15,7, ENERGY_SCORE, "%s %s %d",TXT_ENERGY,TXT_BOOSTED_TO,f2ir(get_local_player_energy()));
 		used=1;
 	} else
 		HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, TXT_MAXED_OUT,TXT_ENERGY);
@@ -208,23 +208,15 @@ static int pick_up_energy(void)
 
 static int pick_up_vulcan_ammo(void)
 {
-	int	used=0,max;
-
-	int	pwsave = Primary_weapon;		// Ugh, save selected primary weapon around the picking up of the ammo.  I apologize for this code.  Matthew A. Toschlog
-	if (pick_up_ammo(CLASS_PRIMARY, VULCAN_INDEX, VULCAN_AMMO_AMOUNT)) {
+	int	used=0;
+	if (pick_up_vulcan_ammo(VULCAN_AMMO_AMOUNT, false)) {
 		powerup_basic(7, 14, 21, VULCAN_AMMO_SCORE, "%s!", TXT_VULCAN_AMMO);
 		used = 1;
 	} else {
-		max = VULCAN_AMMO_MAX;
-#if defined(DXX_BUILD_DESCENT_II)
-		if (Players[Player_num].flags & PLAYER_FLAGS_AMMO_RACK)
-			max *= 2;
-#endif
+		const auto max = PLAYER_MAX_AMMO(get_local_plrobj(), VULCAN_AMMO_MAX);
 		HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %d %s!",TXT_ALREADY_HAVE,f2i((unsigned) VULCAN_AMMO_SCALE * (unsigned) max),TXT_VULCAN_ROUNDS);
 		used = 0;
 	}
-	Primary_weapon = pwsave;
-
 	return used;
 }
 
@@ -237,13 +229,13 @@ int do_powerup(const vobjptridx_t obj)
 #endif
 	int special_used=0;		//for when hitting vulcan cannon gets vulcan ammo
 
-	if ((Player_is_dead) || (ConsoleObject->type == OBJ_GHOST) || (Players[Player_num].shields < 0))
+	if (Player_dead_state != player_dead_state::no ||
+		ConsoleObject->type == OBJ_GHOST ||
+		get_local_player_shields() < 0)
 		return 0;
 
-#if defined(DXX_BUILD_DESCENT_II)
 	if ((obj->ctype.powerup_info.flags & PF_SPAT_BY_PLAYER) && obj->ctype.powerup_info.creation_time>0 && GameTime64<obj->ctype.powerup_info.creation_time+i2f(2))
 		return 0;		//not enough time elapsed
-#endif
 
 	if (Game_mode & GM_MULTI)
 	{
@@ -259,17 +251,19 @@ int do_powerup(const vobjptridx_t obj)
 		{
 			if (i == Player_num || Players[i].connected != CONNECT_PLAYING)
 				continue;
-			if (Objects[Players[i].objnum].type == OBJ_GHOST || Players[i].shields < 0)
+			const auto &&o = vcobjptr(Players[i].objnum);
+			if (o->type == OBJ_GHOST)
 				continue;
-			if (mydist > vm_vec_normalized_dir(tvec, obj->pos, Objects[Players[i].objnum].pos))
+			if (mydist > vm_vec_normalized_dir(tvec, obj->pos, o->pos))
 				return 0;
 		}
 	}
 
+	auto &player_info = get_local_plrobj().ctype.player_info;
 	int id=get_powerup_id(obj);
 	switch (get_powerup_id(obj)) {
 		case POW_EXTRA_LIFE:
-			Players[Player_num].lives++;
+			get_local_player().lives++;
 			powerup_basic_str(15, 15, 15, 0, TXT_EXTRA_LIFE);
 			used=1;
 			break;
@@ -277,33 +271,33 @@ int do_powerup(const vobjptridx_t obj)
 			used = pick_up_energy();
 			break;
 		case POW_SHIELD_BOOST:
-			if (Players[Player_num].shields < MAX_SHIELDS) {
+			if (get_local_player_shields() < MAX_SHIELDS) {
 				fix boost = 3*F1_0 + 3*F1_0*(NDL - Difficulty_level);
 #if defined(DXX_BUILD_DESCENT_II)
 				if (Difficulty_level == 0)
 					boost += boost/2;
 #endif
-				Players[Player_num].shields += boost;
-				if (Players[Player_num].shields > MAX_SHIELDS)
-					Players[Player_num].shields = MAX_SHIELDS;
-				powerup_basic(0, 0, 15, SHIELD_SCORE, "%s %s %d",TXT_SHIELD,TXT_BOOSTED_TO,f2ir(Players[Player_num].shields));
+				get_local_player_shields() += boost;
+				if (get_local_player_shields() > MAX_SHIELDS)
+					get_local_player_shields() = MAX_SHIELDS;
+				powerup_basic(0, 0, 15, SHIELD_SCORE, "%s %s %d",TXT_SHIELD,TXT_BOOSTED_TO,f2ir(get_local_player_shields()));
 				used=1;
 			} else
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, TXT_MAXED_OUT,TXT_SHIELD);
 			break;
 		case POW_LASER:
-			if (Players[Player_num].laser_level >= MAX_LASER_LEVEL) {
+			if (player_info.laser_level >= MAX_LASER_LEVEL) {
 #if defined(DXX_BUILD_DESCENT_I)
-				Players[Player_num].laser_level = MAX_LASER_LEVEL;
+				player_info.laser_level = MAX_LASER_LEVEL;
 #endif
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, TXT_MAXED_OUT,TXT_LASER);
 			} else {
 				if (Newdemo_state == ND_STATE_RECORDING)
-					newdemo_record_laser_level(Players[Player_num].laser_level, Players[Player_num].laser_level + 1);
-				Players[Player_num].laser_level++;
-				powerup_basic(10, 0, 10, LASER_SCORE, "%s %s %d",TXT_LASER,TXT_BOOSTED_TO, Players[Player_num].laser_level+1);
+					newdemo_record_laser_level(player_info.laser_level, player_info.laser_level + 1);
+				++ player_info.laser_level;
+				powerup_basic(10, 0, 10, LASER_SCORE, "%s %s %d",TXT_LASER,TXT_BOOSTED_TO, player_info.laser_level+1);
 				update_laser_weapon_info();
-				pick_up_primary (LASER_INDEX);
+				pick_up_primary (primary_weapon_index_t::LASER_INDEX);
 				used=1;
 			}
 			if (!used && !(Game_mode & GM_MULTI) )
@@ -317,11 +311,10 @@ int do_powerup(const vobjptridx_t obj)
 			break;
 
 		case POW_KEY_BLUE:
-			if (Players[Player_num].flags & PLAYER_FLAGS_BLUE_KEY)
+			if (get_local_player_flags() & PLAYER_FLAGS_BLUE_KEY)
 				break;
-			multi_send_play_sound(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
-			digi_play_sample( Powerup_info[get_powerup_id(obj)].hit_sound, F1_0 );
-			Players[Player_num].flags |= PLAYER_FLAGS_BLUE_KEY;
+			multi_digi_play_sample(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
+			get_local_player_flags() |= PLAYER_FLAGS_BLUE_KEY;
 			powerup_basic(0, 0, 15, KEY_SCORE, "%s %s",TXT_BLUE,TXT_ACCESS_GRANTED);
 			if (Game_mode & GM_MULTI)
 				used=0;
@@ -330,11 +323,10 @@ int do_powerup(const vobjptridx_t obj)
 			invalidate_escort_goal();
 			break;
 		case POW_KEY_RED:
-			if (Players[Player_num].flags & PLAYER_FLAGS_RED_KEY)
+			if (get_local_player_flags() & PLAYER_FLAGS_RED_KEY)
 				break;
-			multi_send_play_sound(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
-			digi_play_sample( Powerup_info[get_powerup_id(obj)].hit_sound, F1_0 );
-			Players[Player_num].flags |= PLAYER_FLAGS_RED_KEY;
+			multi_digi_play_sample(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
+			get_local_player_flags() |= PLAYER_FLAGS_RED_KEY;
 			powerup_basic(15, 0, 0, KEY_SCORE, "%s %s",TXT_RED,TXT_ACCESS_GRANTED);
 			if (Game_mode & GM_MULTI)
 				used=0;
@@ -343,11 +335,10 @@ int do_powerup(const vobjptridx_t obj)
 			invalidate_escort_goal();
 			break;
 		case POW_KEY_GOLD:
-			if (Players[Player_num].flags & PLAYER_FLAGS_GOLD_KEY)
+			if (get_local_player_flags() & PLAYER_FLAGS_GOLD_KEY)
 				break;
-			multi_send_play_sound(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
-			digi_play_sample( Powerup_info[get_powerup_id(obj)].hit_sound, F1_0 );
-			Players[Player_num].flags |= PLAYER_FLAGS_GOLD_KEY;
+			multi_digi_play_sample(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
+			get_local_player_flags() |= PLAYER_FLAGS_GOLD_KEY;
 			powerup_basic(15, 15, 7, KEY_SCORE, "%s %s",TXT_YELLOW,TXT_ACCESS_GRANTED);
 			if (Game_mode & GM_MULTI)
 				used=0;
@@ -356,8 +347,8 @@ int do_powerup(const vobjptridx_t obj)
 			invalidate_escort_goal();
 			break;
 		case POW_QUAD_FIRE:
-			if (!(Players[Player_num].flags & PLAYER_FLAGS_QUAD_LASERS)) {
-				Players[Player_num].flags |= PLAYER_FLAGS_QUAD_LASERS;
+			if (!(get_local_player_flags() & PLAYER_FLAGS_QUAD_LASERS)) {
+				get_local_player_flags() |= PLAYER_FLAGS_QUAD_LASERS;
 				powerup_basic(15, 15, 7, QUAD_FIRE_SCORE, "%s!",TXT_QUAD_LASERS);
 				update_laser_weapon_info();
 				used=1;
@@ -369,10 +360,10 @@ int do_powerup(const vobjptridx_t obj)
 
 		case	POW_VULCAN_WEAPON:
 #if defined(DXX_BUILD_DESCENT_I)
-			if ((used = pick_up_primary(VULCAN_INDEX)) != 0) {
+			if ((used = pick_up_primary(primary_weapon_index_t::VULCAN_INDEX)) != 0) {
 				vulcan_ammo_to_add_with_cannon = obj->ctype.powerup_info.count;
 				if (vulcan_ammo_to_add_with_cannon < VULCAN_WEAPON_AMMO_AMOUNT) vulcan_ammo_to_add_with_cannon = VULCAN_WEAPON_AMMO_AMOUNT;
-				pick_up_ammo(CLASS_PRIMARY, VULCAN_INDEX, vulcan_ammo_to_add_with_cannon);
+				pick_up_vulcan_ammo(vulcan_ammo_to_add_with_cannon);
 			}
 
 //added/edited 8/3/98 by Victor Rachels to fix vulcan multi bug
@@ -397,7 +388,10 @@ int do_powerup(const vobjptridx_t obj)
 		case	POW_GAUSS_WEAPON: {
 			int ammo = obj->ctype.powerup_info.count;
 
-			used = pick_up_primary((get_powerup_id(obj)==POW_VULCAN_WEAPON)?VULCAN_INDEX:GAUSS_INDEX);
+			used = pick_up_primary((get_powerup_id(obj) == POW_VULCAN_WEAPON)
+				? primary_weapon_index_t::VULCAN_INDEX
+				: primary_weapon_index_t::GAUSS_INDEX
+			);
 
 			//didn't get the weapon (because we already have it), but
 			//maybe snag some of the ammo.  if single-player, grab all the ammo
@@ -409,7 +403,7 @@ int do_powerup(const vobjptridx_t obj)
 
 			if (ammo > 0) {
 				int ammo_used;
-				ammo_used = pick_up_ammo(CLASS_PRIMARY, VULCAN_INDEX, ammo);
+				ammo_used = pick_up_vulcan_ammo(ammo);
 				obj->ctype.powerup_info.count -= ammo_used;
 				if (!used && ammo_used) {
 					powerup_basic(7, 14, 21, VULCAN_AMMO_SCORE, "%s!", TXT_VULCAN_AMMO);
@@ -425,36 +419,36 @@ int do_powerup(const vobjptridx_t obj)
 #endif
 
 		case	POW_SPREADFIRE_WEAPON:
-			used = pick_up_primary(SPREADFIRE_INDEX);
+			used = pick_up_primary(primary_weapon_index_t::SPREADFIRE_INDEX);
 			if (!used && !(Game_mode & GM_MULTI) )
 				used = pick_up_energy();
 			break;
 		case	POW_PLASMA_WEAPON:
-			used = pick_up_primary(PLASMA_INDEX);
+			used = pick_up_primary(primary_weapon_index_t::PLASMA_INDEX);
 			if (!used && !(Game_mode & GM_MULTI) )
 				used = pick_up_energy();
 			break;
 		case	POW_FUSION_WEAPON:
-			used = pick_up_primary(FUSION_INDEX);
+			used = pick_up_primary(primary_weapon_index_t::FUSION_INDEX);
 			if (!used && !(Game_mode & GM_MULTI) )
 				used = pick_up_energy();
 			break;
 
 #if defined(DXX_BUILD_DESCENT_II)
 		case	POW_HELIX_WEAPON:
-			used = pick_up_primary(HELIX_INDEX);
+			used = pick_up_primary(primary_weapon_index_t::HELIX_INDEX);
 			if (!used && !(Game_mode & GM_MULTI) )
 				used = pick_up_energy();
 			break;
 
 		case	POW_PHOENIX_WEAPON:
-			used = pick_up_primary(PHOENIX_INDEX);
+			used = pick_up_primary(primary_weapon_index_t::PHOENIX_INDEX);
 			if (!used && !(Game_mode & GM_MULTI) )
 				used = pick_up_energy();
 			break;
 
 		case	POW_OMEGA_WEAPON:
-			used = pick_up_primary(OMEGA_INDEX);
+			used = pick_up_primary(primary_weapon_index_t::OMEGA_INDEX);
 			if (used)
 				Omega_charge = obj->ctype.powerup_info.count;
 			if (!used && !(Game_mode & GM_MULTI) )
@@ -511,12 +505,12 @@ int do_powerup(const vobjptridx_t obj)
 			used=pick_up_secondary(HOMING_INDEX,4);
 			break;
 		case	POW_CLOAK:
-			if (Players[Player_num].flags & PLAYER_FLAGS_CLOAKED) {
+			if (get_local_player_flags() & PLAYER_FLAGS_CLOAKED) {
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %s!",TXT_ALREADY_ARE,TXT_CLOAKED);
 				break;
 			} else {
-				Players[Player_num].cloak_time = GameTime64;	//	Not! changed by awareness events (like player fires laser).
-				Players[Player_num].flags |= PLAYER_FLAGS_CLOAKED;
+				get_local_player_cloak_time() = GameTime64;	//	Not! changed by awareness events (like player fires laser).
+				get_local_player_flags() |= PLAYER_FLAGS_CLOAKED;
 				ai_do_cloak_stuff();
 				if (Game_mode & GM_MULTI)
 					multi_send_cloak();
@@ -525,12 +519,12 @@ int do_powerup(const vobjptridx_t obj)
 				break;
 			}
 		case	POW_INVULNERABILITY:
-			if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE) {
+			if (get_local_player_flags() & PLAYER_FLAGS_INVULNERABLE) {
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %s!",TXT_ALREADY_ARE,TXT_INVULNERABLE);
 				break;
 			} else {
-				Players[Player_num].invulnerable_time = GameTime64;
-				Players[Player_num].flags |= PLAYER_FLAGS_INVULNERABLE;
+				get_local_player_invulnerable_time() = GameTime64;
+				get_local_player_flags() |= PLAYER_FLAGS_INVULNERABLE;
 				powerup_basic(7, 14, 21, INVULNERABILITY_SCORE, "%s!",TXT_INVULNERABILITY);
 				used = 1;
 				break;
@@ -544,24 +538,24 @@ int do_powerup(const vobjptridx_t obj)
 
 #if defined(DXX_BUILD_DESCENT_II)
 		case POW_FULL_MAP:
-			if (Players[Player_num].flags & PLAYER_FLAGS_MAP_ALL) {
+			if (get_local_player_flags() & PLAYER_FLAGS_MAP_ALL) {
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %s!",TXT_ALREADY_HAVE,"the FULL MAP");
 				if (!(Game_mode & GM_MULTI) )
 					used = pick_up_energy();
 			} else {
-				Players[Player_num].flags |= PLAYER_FLAGS_MAP_ALL;
+				get_local_player_flags() |= PLAYER_FLAGS_MAP_ALL;
 				powerup_basic(15, 0, 15, 0, "FULL MAP!");
 				used=1;
 			}
 			break;
 
 		case POW_CONVERTER:
-			if (Players[Player_num].flags & PLAYER_FLAGS_CONVERTER) {
+			if (get_local_player_flags() & PLAYER_FLAGS_CONVERTER) {
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %s!",TXT_ALREADY_HAVE,"the Converter");
 				if (!(Game_mode & GM_MULTI) )
 					used = pick_up_energy();
 			} else {
-				Players[Player_num].flags |= PLAYER_FLAGS_CONVERTER;
+				get_local_player_flags() |= PLAYER_FLAGS_CONVERTER;
 			    	powerup_basic(15, 0, 15, 0, "Energy -> shield converter!");
 
 
@@ -570,21 +564,22 @@ int do_powerup(const vobjptridx_t obj)
 			break;
 
 		case POW_SUPER_LASER:
-			if (Players[Player_num].laser_level >= MAX_SUPER_LASER_LEVEL) {
-				Players[Player_num].laser_level = MAX_SUPER_LASER_LEVEL;
+			if (player_info.laser_level >= MAX_SUPER_LASER_LEVEL)
+			{
+				player_info.laser_level = MAX_SUPER_LASER_LEVEL;
 				HUD_init_message_literal(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "SUPER LASER MAXED OUT!");
 			} else {
-				int old_level=Players[Player_num].laser_level;
+				const auto old_level = player_info.laser_level;
 
-				if (Players[Player_num].laser_level <= MAX_LASER_LEVEL)
-					Players[Player_num].laser_level = MAX_LASER_LEVEL;
-				Players[Player_num].laser_level++;
+				if (player_info.laser_level <= MAX_LASER_LEVEL)
+					player_info.laser_level = MAX_LASER_LEVEL;
+				++ player_info.laser_level;
 				if (Newdemo_state == ND_STATE_RECORDING)
-					newdemo_record_laser_level(old_level, Players[Player_num].laser_level);
-				powerup_basic(10, 0, 10, LASER_SCORE, "Super Boost to Laser level %d",Players[Player_num].laser_level+1);
+					newdemo_record_laser_level(old_level, player_info.laser_level);
+				powerup_basic(10, 0, 10, LASER_SCORE, "Super Boost to Laser level %d", player_info.laser_level + 1);
 				update_laser_weapon_info();
-				if (Primary_weapon!=LASER_INDEX)
-			      check_to_use_primary (SUPER_LASER_INDEX);
+				if (Primary_weapon!=primary_weapon_index_t::LASER_INDEX)
+					check_to_use_primary_super_laser();
 				used=1;
 			}
 			if (!used && !(Game_mode & GM_MULTI) )
@@ -592,30 +587,28 @@ int do_powerup(const vobjptridx_t obj)
 			break;
 
 		case POW_AMMO_RACK:
-			if (Players[Player_num].flags & PLAYER_FLAGS_AMMO_RACK) {
+			if (get_local_player_flags() & PLAYER_FLAGS_AMMO_RACK) {
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %s!",TXT_ALREADY_HAVE,"the Ammo rack");
 				if (!(Game_mode & GM_MULTI) )
 					used = pick_up_energy();
 			}
 			else {
-				Players[Player_num].flags |= PLAYER_FLAGS_AMMO_RACK;
-				multi_send_play_sound(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
-				digi_play_sample( Powerup_info[get_powerup_id(obj)].hit_sound, F1_0 );
+				get_local_player_flags() |= PLAYER_FLAGS_AMMO_RACK;
+				multi_digi_play_sample(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
 				powerup_basic(15, 0, 15, 0, "AMMO RACK!");
 				used=1;
 			}
 			break;
 
 		case POW_AFTERBURNER:
-			if (Players[Player_num].flags & PLAYER_FLAGS_AFTERBURNER) {
+			if (get_local_player_flags() & PLAYER_FLAGS_AFTERBURNER) {
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %s!",TXT_ALREADY_HAVE,"the Afterburner");
 				if (!(Game_mode & GM_MULTI) )
 					used = pick_up_energy();
 			}
 			else {
-				Players[Player_num].flags |= PLAYER_FLAGS_AFTERBURNER;
-				multi_send_play_sound(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
-				digi_play_sample( Powerup_info[get_powerup_id(obj)].hit_sound, F1_0 );
+				get_local_player_flags() |= PLAYER_FLAGS_AFTERBURNER;
+				multi_digi_play_sample(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
 				powerup_basic(15, 15, 15, 0, "AFTERBURNER!");
 				Afterburner_charge = f1_0;
 				used=1;
@@ -623,18 +616,17 @@ int do_powerup(const vobjptridx_t obj)
 			break;
 
 		case POW_HEADLIGHT:
-			if (Players[Player_num].flags & PLAYER_FLAGS_HEADLIGHT) {
+			if (get_local_player_flags() & PLAYER_FLAGS_HEADLIGHT) {
 				HUD_init_message(HM_DEFAULT|HM_REDUNDANT|HM_MAYDUPL, "%s %s!",TXT_ALREADY_HAVE,"the Headlight boost");
 				if (!(Game_mode & GM_MULTI) )
 					used = pick_up_energy();
 			}
 			else {
-				Players[Player_num].flags |= PLAYER_FLAGS_HEADLIGHT;
-				multi_send_play_sound(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
-				digi_play_sample( Powerup_info[get_powerup_id(obj)].hit_sound, F1_0 );
+				get_local_player_flags() |= PLAYER_FLAGS_HEADLIGHT;
+				multi_digi_play_sample(Powerup_info[get_powerup_id(obj)].hit_sound, F1_0);
 				powerup_basic(15, 0, 15, 0, "HEADLIGHT BOOST! (Headlight is %s)",PlayerCfg.HeadlightActiveDefault?"ON":"OFF");
 				if (PlayerCfg.HeadlightActiveDefault)
-					Players[Player_num].flags |= PLAYER_FLAGS_HEADLIGHT_ON;
+					get_local_player_flags() |= PLAYER_FLAGS_HEADLIGHT_ON;
 				used=1;
 			   if (Game_mode & GM_MULTI)
 					multi_send_flags (Player_num);
@@ -645,7 +637,7 @@ int do_powerup(const vobjptridx_t obj)
 			if (game_mode_capture_flag())			
 				if (get_team(Player_num) == TEAM_RED) {
 					powerup_basic(15, 0, 15, 0, "BLUE FLAG!");
-					Players[Player_num].flags |= PLAYER_FLAGS_FLAG;
+					get_local_player_flags() |= PLAYER_FLAGS_FLAG;
 					used=1;
 					multi_send_got_flag (Player_num);
 				}
@@ -653,20 +645,23 @@ int do_powerup(const vobjptridx_t obj)
 
 		case POW_HOARD_ORB:
 			if (game_mode_hoard())			
-				if (Players[Player_num].secondary_ammo[PROXIMITY_INDEX]<12) {
+			{
+				auto &proximity = get_local_player_secondary_ammo()[PROXIMITY_INDEX];
+				if (proximity < 12) {
+					++ proximity;
 					powerup_basic(15, 0, 15, 0, "Orb!!!");
-					Players[Player_num].secondary_ammo[PROXIMITY_INDEX]++;
-					Players[Player_num].flags |= PLAYER_FLAGS_FLAG;
+					get_local_player_flags() |= PLAYER_FLAGS_FLAG;
 					used=1;
 					multi_send_got_orb (Player_num);
 				}
+			}
 		  break;	
 
 		case POW_FLAG_RED:
 			if (game_mode_capture_flag())			
 				if (get_team(Player_num) == TEAM_BLUE) {
 					powerup_basic(15, 0, 15, 0, "RED FLAG!");
-					Players[Player_num].flags |= PLAYER_FLAGS_FLAG;
+					get_local_player_flags() |= PLAYER_FLAGS_FLAG;
 					used=1;
 					multi_send_got_flag (Player_num);
 				}
@@ -684,9 +679,7 @@ int do_powerup(const vobjptridx_t obj)
 //!!	used=1;
 
 	if ((used || special_used) && Powerup_info[id].hit_sound  > -1 ) {
-		if (Game_mode & GM_MULTI) // Added by Rob, take this out if it turns out to be not good for net games!
-			multi_send_play_sound(Powerup_info[id].hit_sound, F1_0);
-		digi_play_sample( Powerup_info[id].hit_sound, F1_0 );
+		multi_digi_play_sample(Powerup_info[id].hit_sound, F1_0);
 		detect_escort_goal_accomplished(obj);
 	}
 

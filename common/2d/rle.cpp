@@ -39,6 +39,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "compiler-range_for.h"
 
+namespace dcx {
+
 const uint8_t RLE_CODE = 0xe0;
 const uint8_t NOT_RLE_CODE = 0x1f;
 static_assert((RLE_CODE | NOT_RLE_CODE) == 0xff, "RLE mask error");
@@ -329,7 +331,7 @@ int gr_bitmap_rle_compress(grs_bitmap &bmp)
 		Assert( d==d1 );
 		doffset	+= d;
 		if (large_rle)
-			*((short *)&(rle_data[(y*2)+4])) = (short)d;
+			PUT_INTEL_SHORT(&rle_data[(y*2)+4], static_cast<short>(d));
 		else
 			rle_data[y+4] = d;
 	}
@@ -341,12 +343,16 @@ int gr_bitmap_rle_compress(grs_bitmap &bmp)
 
 #define MAX_CACHE_BITMAPS 32
 
+namespace {
+
 struct rle_cache_element
 {
 	const grs_bitmap *rle_bitmap;
 	grs_bitmap_ptr expanded_bitmap;
 	int last_used;
 };
+
+}
 
 static int rle_cache_initialized;
 static int rle_counter;
@@ -525,7 +531,7 @@ void rle_swap_0_255(grs_bitmap &bmp)
 	for (int i = 0; i < bmp.bm_h; i++) {
 		start = ptr2;
 		if (rle_big)
-			line_size = INTEL_SHORT(*((unsigned short *)&bmp.bm_data[4 + 2 * i]));
+			line_size = GET_INTEL_SHORT(&bmp.bm_data[4 + 2 * i]);
 		else
 			line_size = bmp.bm_data[4 + i];
 		for (int j = 0; j < line_size; j++) {
@@ -549,7 +555,7 @@ void rle_swap_0_255(grs_bitmap &bmp)
 			}
 		}
 		if (rle_big)                // set line size
-			*((unsigned short *)&temp[4 + 2 * i]) = INTEL_SHORT(ptr2 - start);
+			PUT_INTEL_SHORT(&temp[4 + 2 * i], static_cast<uint16_t>(ptr2 - start));
 		else
 			temp[4 + i] = ptr2 - start;
 		ptr += line_size;           // go to next line
@@ -579,7 +585,7 @@ void rle_remap(grs_bitmap &bmp, array<color_t, 256> &colormap)
 	for (int i = 0; i < bmp.bm_h; i++) {
 		start = ptr2;
 		if (rle_big)
-			line_size = INTEL_SHORT(*((unsigned short *)&bmp.get_bitmap_data()[4 + 2 * i]));
+			line_size = GET_INTEL_SHORT(&bmp.get_bitmap_data()[4 + 2 * i]);
 		else
 			line_size = bmp.get_bitmap_data()[4 + i];
 		for (int j = 0; j < line_size; j++) {
@@ -596,7 +602,7 @@ void rle_remap(grs_bitmap &bmp, array<color_t, 256> &colormap)
 			}
 		}
 		if (rle_big)                // set line size
-			*((unsigned short *)&temp[4 + 2 * i]) = INTEL_SHORT(ptr2 - start);
+			PUT_INTEL_SHORT(&temp[4 + 2 * i], static_cast<uint16_t>(ptr2 - start));
 		else
 			temp[4 + i] = ptr2 - start;
 		ptr += line_size;           // go to next line
@@ -604,4 +610,6 @@ void rle_remap(grs_bitmap &bmp, array<color_t, 256> &colormap)
 	len = ptr2 - temp.get();
 	memcpy(bmp.get_bitmap_data(), &len, 4);
 	memcpy(&bmp.get_bitmap_data()[4], &temp.get()[4], len - 4);
+}
+
 }

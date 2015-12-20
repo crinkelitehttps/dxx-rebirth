@@ -29,6 +29,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "dxxerror.h"
 #include "inferno.h"
 #include "object.h"
+#include "hudmsg.h"
 #include "game.h"
 #include "player.h"
 #include "gauges.h"
@@ -40,9 +41,12 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 //------------- Globaly used hostage variables --------------------------------
 
-int N_hostage_types = 0;		  			// Number of hostage types
-int Hostage_vclip_num[MAX_HOSTAGE_TYPES];	// vclip num for each tpye of hostage
+namespace dcx {
+unsigned N_hostage_types;		  			// Number of hostage types
+array<int, MAX_HOSTAGE_TYPES> Hostage_vclip_num;	// vclip num for each tpye of hostage
+}
 
+namespace dsx {
 
 //-------------- Renders a hostage --------------------------------------------
 void draw_hostage(const vobjptridx_t obj)
@@ -56,11 +60,13 @@ void hostage_rescue()
 {
 	PALETTE_FLASH_ADD(0, 0, 25);		//small blue flash
 
-	Players[Player_num].hostages_on_board++;
+	get_local_player().hostages_on_board++;
 
 	// Do an audio effect
 	if (Newdemo_state != ND_STATE_PLAYBACK)
 		digi_play_sample(SOUND_HOSTAGE_RESCUED, F1_0);
 
 	HUD_init_message_literal(HM_DEFAULT, TXT_HOSTAGE_RESCUED);
+}
+
 }

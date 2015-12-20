@@ -23,13 +23,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-#ifndef _GAMEMINE_H
-#define _GAMEMINE_H
+#pragma once
 
 #include <physfs.h>
 #include "maths.h"
-#include "vecmat.h"
 
 #define TMAP_NUM_MASK 0x3FFF
 
@@ -39,6 +36,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define MINE_VERSION					17	// Current version expected
 #elif defined(DXX_BUILD_DESCENT_II)
 #define MINE_VERSION        20  // Current version expected
+#include "vecmat.h"
+#include "segnum.h"
 #endif
 #define COMPATIBLE_VERSION  16  // Oldest version that can safely be loaded.
 
@@ -49,6 +48,7 @@ struct mtfi {
 	int     fileinfo_sizeof;
 };    // Should be same as first two fields below...
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 struct mfi {
 	ushort  fileinfo_signature;
 	ushort  fileinfo_version;
@@ -107,6 +107,7 @@ struct mfi {
 	int     segment2_sizeof;
 #endif
 };
+#endif
 #endif // EDITOR
 
 struct mh {
@@ -152,5 +153,3 @@ extern int d1_tmap_num_unique(short d1_tmap_num); //is d1_tmap_num's texture onl
 #endif
 
 #endif
-
-#endif /* _GAMEMINE_H */

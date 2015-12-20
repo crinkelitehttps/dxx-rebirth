@@ -31,8 +31,12 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "dxxsconf.h"
 #include "compiler-make_unique.h"
 
+namespace dcx {
+
 #define MENU_BORDER 2
 #define MENU_VERT_SPACING 2
+
+namespace {
 
 struct menu
 {
@@ -41,6 +45,8 @@ struct menu
 	int *choice;
 	int num_buttons;
 };
+
+}
 
 static int menu_handler(UI_DIALOG *,const d_event &event, menu *m)
 {
@@ -92,8 +98,8 @@ int MenuX( int x, int y, int NumButtons, const char *const text[] )
 	height = (button_height*NumButtons) + (MENU_VERT_SPACING*(NumButtons-1)) ;
 	height += (MENU_BORDER+3) * 2;
 
-	w = grd_curscreen->sc_w;
-	h = grd_curscreen->sc_h;
+	w = grd_curscreen->get_screen_width();
+	h = grd_curscreen->get_screen_height();
 
 	{
 		int mx, my, mz;
@@ -137,4 +143,6 @@ int MenuX( int x, int y, int NumButtons, const char *const text[] )
 
 	ui_close_dialog(dlg);
 	return choice;
+}
+
 }

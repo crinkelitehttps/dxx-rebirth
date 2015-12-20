@@ -23,6 +23,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#include <algorithm>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,6 +49,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "menu.h"
 #include "screens.h"
 #include "textures.h"
+#include "hudmsg.h"
 #include "mouse.h"
 #include "timer.h"
 #include "segpoint.h"
@@ -84,6 +86,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "compiler-make_unique.h"
 #include "compiler-range_for.h"
 #include "highest_valid.h"
+#include "partial_range.h"
 
 #define LEAVE_TIME 0x4000
 
@@ -95,15 +98,27 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define EF_NO_FADE  32  // An edge that doesn't fade with distance
 #define EF_TOO_FAR  64  // An edge that is too far away
 
+namespace dcx {
+
+namespace {
+
 struct Edge_info
 {
 	array<int, 2>   verts;     // 8  bytes
-	ubyte sides[4];     // 4  bytes
-	segnum_t   segnum[4];    // 16 bytes  // This might not need to be stored... If you can access the normals of a side.
+	array<uint8_t, 4> sides;     // 4  bytes
+	array<segnum_t, 4> segnum;    // 16 bytes  // This might not need to be stored... If you can access the normals of a side.
 	ubyte flags;        // 1  bytes  // See the EF_??? defines above.
 	color_t color;        // 1  bytes
 	ubyte num_faces;    // 1  bytes  // 31 bytes...
 };
+
+}
+
+}
+
+namespace dsx {
+
+namespace {
 
 struct automap : ignore_window_pointer_t
 {
@@ -121,7 +136,7 @@ struct automap : ignore_window_pointer_t
 	int			max_edges; //set each frame
 	int			highest_edge_index;
 	std::unique_ptr<Edge_info[]>		edges;
-	std::unique_ptr<int[]>			drawingListBright;
+	std::unique_ptr<Edge_info *[]>			drawingListBright;
 	
 	// Screen canvas variables
 	grs_canvas		automap_view;
@@ -153,6 +168,12 @@ struct automap : ignore_window_pointer_t
 	segment_depth_array_t depth_array;
 };
 
+}
+
+}
+
+namespace dcx {
+
 #define MAX_EDGES_FROM_VERTS(v)     ((v)*4)
 
 #define K_WALL_NORMAL_COLOR     BM_XRGB(29, 29, 29 )
@@ -167,7 +188,9 @@ struct automap : ignore_window_pointer_t
 
 int Automap_active = 0;
 static int Automap_debug_show_all_segments;
+}
 
+namespace dsx {
 static void init_automap_colors(automap *am)
 {
 	am->wall_normal_color = K_WALL_NORMAL_COLOR;
@@ -185,8 +208,11 @@ static void init_automap_colors(automap *am)
 	am->blue_48 = gr_find_closest_color_current(0,0,48);
 	am->red_48 = gr_find_closest_color_current(48,0,0);
 }
+}
 
+namespace dcx {
 array<ubyte, MAX_SEGMENTS> Automap_visited; // Segment visited list
+}
 
 // Map movement defines
 #define PITCH_DEFAULT 9000
@@ -199,9 +225,11 @@ array<ubyte, MAX_SEGMENTS> Automap_visited; // Segment visited list
 #define ROT_SPEED_DIVISOR		(115000)
 
 // Function Prototypes
+namespace dsx {
 static void adjust_segment_limit(automap *am, int SegmentLimit);
 static void draw_all_edges(automap *am);
 static void automap_build_edge_list(automap *am, int add_all_edges);
+}
 
 #define	MAX_DROP_MULTI	2
 #define	MAX_DROP_SINGLE	9
@@ -209,10 +237,11 @@ static void automap_build_edge_list(automap *am, int add_all_edges);
 #if defined(DXX_BUILD_DESCENT_II)
 #include "compiler-integer_sequence.h"
 
+namespace dsx {
 int HighlightMarker=-1;
 marker_message_text_t Marker_input;
 marker_messages_array_t MarkerMessage;
-float MarkerScale=2.0;
+static float MarkerScale=2.0;
 
 template <std::size_t... N>
 static inline constexpr array<objnum_t, sizeof...(N)> init_MarkerObject(index_sequence<N...>)
@@ -221,12 +250,14 @@ static inline constexpr array<objnum_t, sizeof...(N)> init_MarkerObject(index_se
 }
 
 array<objnum_t, NUM_MARKERS> MarkerObject = init_MarkerObject(make_tree_index_sequence<NUM_MARKERS>());
+}
 #endif
 
 # define automap_draw_line g3_draw_line
 
 // -------------------------------------------------------------
 
+namespace dsx {
 #if defined(DXX_BUILD_DESCENT_I)
 static inline void DrawMarkers (automap *am)
 {
@@ -237,66 +268,89 @@ static inline void ClearMarkers()
 {
 }
 #elif defined(DXX_BUILD_DESCENT_II)
-static void DrawMarkerNumber (automap *am, int num)
+static void DrawMarkerNumber(const automap *am, unsigned num, const g3s_point &BasePoint)
 {
-	int i;
-	g3s_point FromPoint,ToPoint;
-
-	static const float sArrayX[10][20]={ 	{-.25, 0.0, 0.0, 0.0, -1.0, 1.0},
-				{-1.0, 1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0},
-				{-1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 0.0, 1.0},
-				{-1.0, -1.0, -1.0, 1.0, 1.0, 1.0},
-				{-1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, 1.0},
-				{-1.0, 1.0, -1.0, -1.0, -1.0, 1.0, 1.0, 1.0, -1.0, 1.0},
-				{-1.0, 1.0, 1.0, 1.0},
-				{-1.0, 1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0, -1.0, 1.0},
-				{-1.0, 1.0, 1.0, 1.0, -1.0, 1.0, -1.0, -1.0}
-				};
-
-	static const float sArrayY[10][20]={	{.75, 1.0, 1.0, -1.0, -1.0, -1.0},
-				{1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0},
-				{1.0, 1.0, 1.0, -1.0, -1.0, -1.0, 0.0, 0.0},
-				{1.0, 0.0, 0.0, 0.0, 1.0, -1.0},
-				{1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, -1.0, -1.0, -1.0},
-				{1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 0.0, 0.0, 0.0},
-				{1.0, 1.0, 1.0, -1.0},
-				{1.0, 1.0, 1.0, -1.0, -1.0, -1.0, -1.0, 1.0, 0.0, 0.0},
-				{1.0, 1.0, 1.0, -1.0, 0.0, 0.0, 0.0, 1.0}
-				};
-	static const int NumOfPoints[]={6,10,8,6,10,10,4,10,8};
-
-	float ArrayX[10], ArrayY[10];
-	
-	for (i=0;i<NumOfPoints[num];i++)
+	struct xy
 	{
-		ArrayX[i] = sArrayX[num][i] * MarkerScale;
-		ArrayY[i] = sArrayY[num][i] * MarkerScale;
-	}
-	
-	if (num==HighlightMarker)
-		gr_setcolor (am->white_63);
-	else
-		gr_setcolor (am->blue_48);
-	
-	
-	const auto BasePoint = g3_rotate_point(Objects[MarkerObject[(Player_num*2)+num]].pos);
-	
-	for (i=0;i<NumOfPoints[num];i+=2)
+		float x0, y0, x1, y1;
+	};
+	static const array<array<xy, 5>, 9> sArray = {{
+		{{
+			{-0.25, 0.75, 0, 1},
+			{0, 1, 0, -1},
+			{-1, -1, 1, -1},
+		}},
+		{{
+			{-1, 1, 1, 1},
+			{1, 1, 1, 0},
+			{-1, 0, 1, 0},
+			{-1, 0, -1, -1},
+			{-1, -1, 1, -1}
+		}},
+		{{
+			{-1, 1, 1, 1},
+			{1, 1, 1, -1},
+			{-1, -1, 1, -1},
+			{0, 0, 1, 0},
+		}},
+		{{
+			{-1, 1, -1, 0},
+			{-1, 0, 1, 0},
+			{1, 1, 1, -1},
+		}},
+		{{
+			{-1, 1, 1, 1},
+			{-1, 1, -1, 0},
+			{-1, 0, 1, 0},
+			{1, 0, 1, -1},
+			{-1, -1, 1, -1}
+		}},
+		{{
+			{-1, 1, 1, 1},
+			{-1, 1, -1, -1},
+			{-1, -1, 1, -1},
+			{1, -1, 1, 0},
+			{-1, 0, 1, 0}
+		}},
+		{{
+			{-1, 1, 1, 1},
+			{1, 1, 1, -1},
+		}},
+		{{
+			{-1, 1, 1, 1},
+			{1, 1, 1, -1},
+			{-1, -1, 1, -1},
+			{-1, -1, -1, 1},
+			{-1, 0, 1, 0}
+		}},
+		{{
+			{-1, 1, 1, 1},
+			{1, 1, 1, -1},
+			{-1, 0, 1, 0},
+			{-1, 0, -1, 1},
+		 }}
+	}};
+	static const array<uint_fast8_t, 9> NumOfPoints = {{3, 5, 4, 3, 5, 5, 2, 5, 4}};
+
+	gr_setcolor(num==HighlightMarker ? am->white_63: am->blue_48);
+	const auto scale_x = Matrix_scale.x;
+	const auto scale_y = Matrix_scale.y;
+	range_for (const auto &i, unchecked_partial_range(&sArray[num][0], NumOfPoints[num]))
 	{
-	
-		FromPoint=BasePoint;
-		ToPoint=BasePoint;
-		
-		FromPoint.p3_x+=fixmul ((fl2f (ArrayX[i])),Matrix_scale.x);
-		FromPoint.p3_y+=fixmul ((fl2f (ArrayY[i])),Matrix_scale.y);
+		const auto ax0 = i.x0 * MarkerScale;
+		const auto ay0 = i.y0 * MarkerScale;
+		const auto ax1 = i.x1 * MarkerScale;
+		const auto ay1 = i.y1 * MarkerScale;
+		auto FromPoint = BasePoint;
+		auto ToPoint = BasePoint;
+		FromPoint.p3_x += fixmul(fl2f(ax0), scale_x);
+		FromPoint.p3_y += fixmul(fl2f(ay0), scale_y);
+		ToPoint.p3_x += fixmul(fl2f(ax1), scale_x);
+		ToPoint.p3_y += fixmul(fl2f(ay1), scale_y);
 		g3_code_point(FromPoint);
-		g3_project_point(FromPoint);
-		
-		ToPoint.p3_x+=fixmul ((fl2f (ArrayX[i+1])),Matrix_scale.x);
-		ToPoint.p3_y+=fixmul ((fl2f (ArrayY[i+1])),Matrix_scale.y);
 		g3_code_point(ToPoint);
+		g3_project_point(FromPoint);
 		g3_project_point(ToPoint);
-	
 		automap_draw_line(FromPoint, ToPoint);
 	}
 }
@@ -304,16 +358,15 @@ static void DrawMarkerNumber (automap *am, int num)
 static void DropMarker (int player_marker_num)
 {
 	int marker_num = (Player_num*2)+player_marker_num;
-	object *playerp = &Objects[Players[Player_num].objnum];
 
 	if (MarkerObject[marker_num] != object_none)
 		obj_delete(MarkerObject[marker_num]);
 
-	MarkerObject[marker_num] = drop_marker_object(playerp->pos,playerp->segnum,playerp->orient,marker_num);
+	const auto &playerp = get_local_plrobj();
+	MarkerObject[marker_num] = drop_marker_object(playerp.pos, playerp.segnum, playerp.orient, marker_num);
 
 	if (Game_mode & GM_MULTI)
-		multi_send_drop_marker (Player_num,playerp->pos,player_marker_num,MarkerMessage[marker_num]);
-
+		multi_send_drop_marker(Player_num, playerp.pos, player_marker_num, MarkerMessage[marker_num]);
 }
 
 void DropBuddyMarker(const vobjptr_t objp)
@@ -339,26 +392,35 @@ void DropBuddyMarker(const vobjptr_t objp)
 
 static void DrawMarkers (automap *am)
  {
-	int i,maxdrop;
 	static int cyc=10,cycdir=1;
 
-	if (Game_mode & GM_MULTI)
-		maxdrop=2;
-	else
-		maxdrop=9;
-
-	for (i=0;i<maxdrop;i++)
-		if (MarkerObject[(Player_num*2)+i] != object_none) {
-
-			auto sphere_point = g3_rotate_point(Objects[MarkerObject[(Player_num*2)+i]].pos);
-			gr_setcolor (gr_find_closest_color_current(cyc,0,0));
+	const auto mb = &MarkerObject[(Player_num * 2)];
+	const auto me = std::next(mb, (Game_mode & GM_MULTI) ? 2 : 9);
+	for (auto iter = mb;;)
+	{
+		if (*iter != object_none)
+			break;
+		if (++ iter == me)
+			return;
+	}
+	const auto current_cycle_color = cyc;
+	const array<color_t, 3> colors{{
+		gr_find_closest_color_current(current_cycle_color, 0, 0),
+		gr_find_closest_color_current(current_cycle_color + 10, 0, 0),
+		gr_find_closest_color_current(current_cycle_color + 20, 0, 0),
+	}};
+	unsigned i = 0;
+	for (auto iter = mb; iter != me; ++iter, ++i)
+		if (*iter != object_none)
+		{
+			auto sphere_point = g3_rotate_point(vcobjptr(*iter)->pos);
+			gr_setcolor(colors[0]);
 			g3_draw_sphere(sphere_point,MARKER_SPHERE_SIZE);
-			gr_setcolor (gr_find_closest_color_current(cyc+10,0,0));
+			gr_setcolor(colors[1]);
 			g3_draw_sphere(sphere_point,MARKER_SPHERE_SIZE/2);
-			gr_setcolor (gr_find_closest_color_current(cyc+20,0,0));
+			gr_setcolor(colors[2]);
 			g3_draw_sphere(sphere_point,MARKER_SPHERE_SIZE/4);
-
-			DrawMarkerNumber (am, i);
+			DrawMarkerNumber(am, i, sphere_point);
 		}
 
 	if (cycdir)
@@ -392,14 +454,14 @@ static void ClearMarkers()
 
 void automap_clear_visited()	
 {
-	Automap_visited.fill(0);
+	Automap_visited = {};
 #ifndef NDEBUG
 	Automap_debug_show_all_segments = 0;
 #endif
 		ClearMarkers();
 }
 
-static void draw_player(const vobjptr_t obj)
+static void draw_player(const vcobjptr_t obj)
 {
 	// Draw Console player -- shaped like a ellipse with an arrow.
 	auto sphere_point = g3_rotate_point(obj->pos);
@@ -463,7 +525,6 @@ static void name_frame(automap *am)
 	gr_string((SWIDTH/64),(SHEIGHT/48),name_level);
 #elif defined(DXX_BUILD_DESCENT_II)
 	char	name_level_right[128];
-	int wr,h,aw;
 	if (Current_level_num > 0)
 		snprintf(name_level_left, sizeof(name_level_left), "%s %i",TXT_LEVEL, Current_level_num);
 	else
@@ -477,8 +538,9 @@ static void name_frame(automap *am)
 	strcat(name_level_right, Current_level_name);
 
 	gr_string((SWIDTH/64),(SHEIGHT/48),name_level_left);
-	gr_get_string_size(name_level_right,&wr,&h,&aw);
-	gr_string(grd_curcanv->cv_bitmap.bm_w-wr-(SWIDTH/64),(SHEIGHT/48),name_level_right);
+	int wr,h;
+	gr_get_string_size(name_level_right, &wr, &h, nullptr);
+	gr_string(grd_curcanv->cv_bitmap.bm_w-wr-(SWIDTH/64),(SHEIGHT/48),name_level_right, wr, h);
 #endif
 }
 
@@ -537,7 +599,7 @@ static void draw_automap(automap *am)
 	// Draw player...
 	const auto color = get_player_or_team_color(Player_num);
 	gr_setcolor(BM_XRGB(player_rgb[color].r,player_rgb[color].g,player_rgb[color].b));
-	draw_player(&Objects[Players[Player_num].objnum]);
+	draw_player(vcobjptr(get_local_player().objnum));
 
 	DrawMarkers(am);
 	
@@ -545,10 +607,13 @@ static void draw_automap(automap *am)
 	if ( (Game_mode & (GM_TEAM | GM_MULTI_COOP)) || (Netgame.game_flag.show_on_map) )	{
 		for (i=0; i<N_players; i++)		{
 			if ( (i != Player_num) && ((Game_mode & GM_MULTI_COOP) || (get_team(Player_num) == get_team(i)) || (Netgame.game_flag.show_on_map)) )	{
-				if ( Objects[Players[i].objnum].type == OBJ_PLAYER )	{
+				const auto &&objp = vcobjptr(Players[i].objnum);
+				if (objp->type == OBJ_PLAYER)
+				{
 					const auto color = get_player_or_team_color(i);
-					gr_setcolor(BM_XRGB(player_rgb[color].r,player_rgb[color].g,player_rgb[color].b));
-					draw_player(&Objects[Players[i].objnum]);
+					const auto &rgb = player_rgb[color];
+					gr_setcolor(BM_XRGB(rgb.r, rgb.g, rgb.b));
+					draw_player(objp);
 				}
 			}
 		}
@@ -556,7 +621,7 @@ static void draw_automap(automap *am)
 
 	range_for (const auto i, highest_valid(Objects))
 	{
-		auto objp = vobjptridx(i);
+		const auto &&objp = vobjptridx(static_cast<objnum_t>(i));
 		switch( objp->type )	{
 		case OBJ_HOSTAGE:
 			gr_setcolor(am->hostage_color);
@@ -601,11 +666,14 @@ static void draw_automap(automap *am)
 		show_mousefs_indicator(am->controls.raw_mouse_axis[0], am->controls.raw_mouse_axis[1], am->controls.raw_mouse_axis[2], GWIDTH-(GHEIGHT/8), GHEIGHT-(GHEIGHT/8), GHEIGHT/5);
 
 	am->t2 = timer_query();
-	while (am->t2 - am->t1 < F1_0 / (GameCfg.VSync?MAXIMUM_FPS:GameArg.SysMaxFPS)) // ogl is fast enough that the automap can read the input too fast and you start to turn really slow.  So delay a bit (and free up some cpu :)
+	const auto vsync = CGameCfg.VSync;
+	const auto bound = F1_0 / (vsync ? MAXIMUM_FPS : CGameArg.SysMaxFPS);
+	const auto may_sleep = !GameArg.SysNoNiceFPS && !vsync;
+	while (am->t2 - am->t1 < bound) // ogl is fast enough that the automap can read the input too fast and you start to turn really slow.  So delay a bit (and free up some cpu :)
 	{
 		if (Game_mode & GM_MULTI)
 			multi_do_frame(); // during long wait, keep packets flowing
-		if (!GameArg.SysNoNiceFPS && !GameCfg.VSync)
+		if (may_sleep)
 			timer_delay(F1_0>>8);
 		am->t2 = timer_update();
 	}
@@ -625,16 +693,16 @@ static void draw_automap(automap *am)
 
 static void recompute_automap_segment_visibility(automap *am)
 {
-	int compute_depth_all_segments = (cheats.fullautomap || (Players[Player_num].flags & PLAYER_FLAGS_MAP_ALL));
+	int compute_depth_all_segments = (cheats.fullautomap || (get_local_player_flags() & PLAYER_FLAGS_MAP_ALL));
 	if (Automap_debug_show_all_segments)
 		compute_depth_all_segments = 1;
 	automap_build_edge_list(am, compute_depth_all_segments);
-	am->max_segments_away = set_segment_depths(Objects[Players[Player_num].objnum].segnum, compute_depth_all_segments ? NULL : &Automap_visited, am->depth_array);
+	am->max_segments_away = set_segment_depths(get_local_plrobj().segnum, compute_depth_all_segments ? NULL : &Automap_visited, am->depth_array);
 	am->segment_limit = am->max_segments_away;
 	adjust_segment_limit(am, am->segment_limit);
 }
 
-static window_event_result automap_key_command(window *wind,const d_event &event, automap *am)
+static window_event_result automap_key_command(window *, const d_event &event, automap *am)
 {
 	int c = event_key_get(event);
 #if defined(DXX_BUILD_DESCENT_II)
@@ -734,7 +802,7 @@ static window_event_result automap_key_command(window *wind,const d_event &event
 	return window_event_result::ignored;
 }
 
-static window_event_result automap_process_input(window *wind,const d_event &event, automap *am)
+static window_event_result automap_process_input(window *, const d_event &event, automap *am)
 {
 	Controls = am->controls;
 	kconfig_read_controls(event, 1);
@@ -760,8 +828,8 @@ static window_event_result automap_process_input(window *wind,const d_event &eve
 		if ( am->controls.state.fire_primary)
 		{
 			// Reset orientation
-			am->viewMatrix = Objects[Players[Player_num].objnum].orient;
-			vm_vec_scale_add(am->view_position, Objects[Players[Player_num].objnum].pos, am->viewMatrix.fvec, -ZOOM_DEFAULT );
+			am->viewMatrix = get_local_plrobj().orient;
+			vm_vec_scale_add(am->view_position, get_local_plrobj().pos, am->viewMatrix.fvec, -ZOOM_DEFAULT );
 			am->controls.state.fire_primary = 0;
 		}
 		
@@ -799,7 +867,7 @@ static window_event_result automap_process_input(window *wind,const d_event &eve
 			am->tangles.p = PITCH_DEFAULT;
 			am->tangles.h  = 0;
 			am->tangles.b  = 0;
-			am->view_target = Objects[Players[Player_num].objnum].pos;
+			am->view_target = get_local_plrobj().pos;
 			am->controls.state.fire_primary = 0;
 		}
 
@@ -816,15 +884,15 @@ static window_event_result automap_process_input(window *wind,const d_event &eve
 			old_vt = am->view_target;
 			tangles1 = am->tangles;
 			const auto &&tempm = vm_angles_2_matrix(tangles1);
-			vm_matrix_x_matrix(am->viewMatrix,Objects[Players[Player_num].objnum].orient,tempm);
+			vm_matrix_x_matrix(am->viewMatrix, get_local_plrobj().orient, tempm);
 			vm_vec_scale_add2( am->view_target, am->viewMatrix.uvec, am->controls.vertical_thrust_time*SLIDE_SPEED );
 			vm_vec_scale_add2( am->view_target, am->viewMatrix.rvec, am->controls.sideways_thrust_time*SLIDE_SPEED );
-			if ( vm_vec_dist_quick( am->view_target, Objects[Players[Player_num].objnum].pos) > i2f(1000) )
+			if ( vm_vec_dist_quick( am->view_target, get_local_plrobj().pos) > i2f(1000) )
 				am->view_target = old_vt;
 		}
 
 		const auto &&tempm = vm_angles_2_matrix(am->tangles);
-		vm_matrix_x_matrix(am->viewMatrix,Objects[Players[Player_num].objnum].orient,tempm);
+		vm_matrix_x_matrix(am->viewMatrix, get_local_plrobj().orient, tempm);
 
 		clamp_fix_lh(am->viewDist, ZOOM_MIN_VALUE, ZOOM_MAX_VALUE);
 	}
@@ -903,7 +971,7 @@ void do_automap()
 	am->highest_edge_index = -1;
 	am->max_edges = Num_segments*12;
 	am->edges = make_unique<Edge_info[]>(am->max_edges);
-	am->drawingListBright = make_unique<int[]>(am->max_edges);
+	am->drawingListBright = make_unique<Edge_info *[]>(am->max_edges);
 	am->zoom = 0x9000;
 	am->farthest_dist = (F1_0 * 20 * 50); // 50 segments away
 	am->viewDist = 0;
@@ -915,7 +983,8 @@ void do_automap()
 	if (am->pause_game) {
 		window_set_visible(Game_wind, 0);
 	}
-	if (!am->pause_game)	{
+	else
+	{
 		am->old_wiggle = ConsoleObject->mtype.phys_info.flags & PF_WIGGLE;	// Save old wiggle
 		ConsoleObject->mtype.phys_info.flags &= ~PF_WIGGLE;		// Turn off wiggle
 	}
@@ -927,14 +996,14 @@ void do_automap()
 	if ( am->viewDist==0 )
 		am->viewDist = ZOOM_DEFAULT;
 
-	am->viewMatrix = Objects[Players[Player_num].objnum].orient;
+	am->viewMatrix = get_local_plrobj().orient;
 	am->tangles.p = PITCH_DEFAULT;
 	am->tangles.h  = 0;
 	am->tangles.b  = 0;
-	am->view_target = Objects[Players[Player_num].objnum].pos;
+	am->view_target = get_local_plrobj().pos;
 	
 	if (PlayerCfg.AutomapFreeFlight)
-		vm_vec_scale_add(am->view_position, Objects[Players[Player_num].objnum].pos, am->viewMatrix.fvec, -ZOOM_DEFAULT );
+		vm_vec_scale_add(am->view_position, get_local_plrobj().pos, am->viewMatrix.fvec, -ZOOM_DEFAULT );
 
 	am->t1 = am->entry_time = timer_query();
 	am->t2 = am->t1;
@@ -963,33 +1032,32 @@ void do_automap()
 
 void adjust_segment_limit(automap *am, int SegmentLimit)
 {
-	int i,e1;
+	int i;
 	Edge_info * e;
 
+	const auto &depth_array = am->depth_array;
+	const auto predicate = [&depth_array, SegmentLimit](const segnum_t &e1) {
+		return depth_array[e1] <= SegmentLimit;
+	};
 	for (i=0; i<=am->highest_edge_index; i++ )	{
 		e = &am->edges[i];
-		e->flags |= EF_TOO_FAR;
-		for (e1=0; e1<e->num_faces; e1++ )	{
-			ubyte depthlimit = am->depth_array[e->segnum[e1]];
-			if ( depthlimit <= SegmentLimit )	{
-				e->flags &= (~EF_TOO_FAR);
-				break;
-			}
-		}
+		// Unchecked for speed
+		const auto &&range = unchecked_partial_range(e->segnum.begin(), e->num_faces);
+		if (std::any_of(range.begin(), range.end(), predicate))
+			e->flags &= ~EF_TOO_FAR;
+		else
+			e->flags |= EF_TOO_FAR;
 	}
 }
 
 void draw_all_edges(automap *am)	
 {
-	int i,j,nbright;
+	int i,j;
+	unsigned nbright = 0;
 	ubyte nfacing,nnfacing;
 	Edge_info *e;
 	fix distance;
 	fix min_distance = 0x7fffffff;
-	g3s_point *p1, *p2;
-	
-	
-	nbright=0;
 
 	for (i=0; i<=am->highest_edge_index; i++ )	{
 		//e = &am->edges[Edge_used_list[i]];
@@ -1002,13 +1070,13 @@ void draw_all_edges(automap *am)
 			if ( (!(e->flags&EF_SECRET))&&(e->color==am->wall_normal_color))
 				continue; 	// If a line isn't secret and is normal color, then don't draw it
 		}
-		g3s_codes cc=rotate_list(e->verts);
 		distance = Segment_points[e->verts[1]].p3_z;
 
 		if (min_distance>distance )
 			min_distance = distance;
 
-		if (!cc.uand) {			//all off screen?
+		if (!rotate_list(e->verts).uand)
+		{			//all off screen?
 			nfacing = nnfacing = 0;
 			auto &tv1 = Vertices[e->verts[0]];
 			j = 0;
@@ -1022,7 +1090,7 @@ void draw_all_edges(automap *am)
 
 			if ( nfacing && nnfacing )	{
 				// a contour line
-				am->drawingListBright[nbright++] = e-am->edges.get();
+				am->drawingListBright[nbright++] = e;
 			} else if ( e->flags&(EF_DEFINING|EF_GRATE) )	{
 				if ( nfacing == 0 )	{
 					if ( e->flags & EF_NO_FADE )
@@ -1031,7 +1099,7 @@ void draw_all_edges(automap *am)
 						gr_setcolor( gr_fade_table[8][e->color] );
 					g3_draw_line( Segment_points[e->verts[0]], Segment_points[e->verts[1]] );
 				} 	else {
-					am->drawingListBright[nbright++] = e-am->edges.get();
+					am->drawingListBright[nbright++] = e;
 				}
 			}
 		}
@@ -1040,38 +1108,19 @@ void draw_all_edges(automap *am)
 	if ( min_distance < 0 ) min_distance = 0;
 
 	// Sort the bright ones using a shell sort
-	{
-		int i, j, incr, v1, v2;
-	
-		incr = nbright / 2;
-		while( incr > 0 )	{
-			for (i=incr; i<nbright; i++ )	{
-				j = i - incr;
-				while (j>=0 )	{
-					// compare element j and j+incr
-					v1 = am->edges[am->drawingListBright[j]].verts[0];
-					v2 = am->edges[am->drawingListBright[j+incr]].verts[0];
-
-					if (Segment_points[v1].p3_z < Segment_points[v2].p3_z) {
-						// If not in correct order, them swap 'em
-						std::swap(am->drawingListBright[j+incr], am->drawingListBright[j]);
-						j -= incr;
-					}
-					else
-						break;
-				}
-			}
-			incr = incr / 2;
-		}
-	}
-					
+	const auto &&range = unchecked_partial_range(am->drawingListBright.get(), nbright);
+	std::sort(range.begin(), range.end(), [am](const Edge_info *const a, const Edge_info *const b) {
+		const auto &v1 = a->verts[0];
+		const auto &v2 = b->verts[0];
+		return Segment_points[v1].p3_z < Segment_points[v2].p3_z;
+	});
 	// Draw the bright ones
-	for (i=0; i<nbright; i++ )	{
+	range_for (const auto e, range)
+	{
+		const auto p1 = &Segment_points[e->verts[0]];
+		const auto p2 = &Segment_points[e->verts[1]];
 		int color;
 		fix dist;
-		e = &am->edges[am->drawingListBright[i]];
-		p1 = &Segment_points[e->verts[0]];
-		p2 = &Segment_points[e->verts[1]];
 		dist = p1->p3_z - min_distance;
 		// Make distance be 1.0 to 0.0, where 0.0 is 10 segments away;
 		if ( dist < 0 ) dist=0;
@@ -1235,8 +1284,8 @@ static void add_segment_edges(automap *am, const vcsegptridx_t seg)
 		if (seg->sides[sn].wall_num != wall_none)	{
 		
 #if defined(DXX_BUILD_DESCENT_II)
-			int trigger_num = Walls[seg->sides[sn].wall_num].trigger;
-			if (trigger_num != -1 && Triggers[trigger_num].type==TT_SECRET_EXIT)
+			auto trigger_num = Walls[seg->sides[sn].wall_num].trigger;
+			if (trigger_num != trigger_none && Triggers[trigger_num].type == TT_SECRET_EXIT)
 				{
 			    color = BM_XRGB( 29, 0, 31 );
 				 no_fade=1;
@@ -1258,19 +1307,17 @@ static void add_segment_edges(automap *am, const vcsegptridx_t seg)
 				} else if (!(WallAnims[Walls[seg->sides[sn].wall_num].clip_num].flags & WCF_HIDDEN)) {
 					auto connected_seg = seg->children[sn];
 					if (connected_seg != segment_none) {
-						auto connected_side = find_connect_side(seg, &Segments[connected_seg]);
-						int	keytype = Walls[Segments[connected_seg].sides[connected_side].wall_num].keys;
-						if ((keytype != KEY_BLUE) && (keytype != KEY_GOLD) && (keytype != KEY_RED))
-							color = am->wall_door_color;
-						else {
-							switch (Walls[Segments[connected_seg].sides[connected_side].wall_num].keys) {
+						const auto &vcseg = vcsegptr(connected_seg);
+						const auto &connected_side = find_connect_side(seg, vcseg);
+						switch (Walls[vcseg->sides[connected_side].wall_num].keys)
+						{
 								case KEY_BLUE:	color = am->wall_door_blue;	no_fade = 1; break;
 								case KEY_GOLD:	color = am->wall_door_gold;	no_fade = 1; break;
 								case KEY_RED:	color = am->wall_door_red;	no_fade = 1; break;
-								default:	Error("Inconsistent data.  Supposed to be a colored wall, but not blue, gold or red.\n");
-							}
+							default:
+								color = am->wall_door_color;
+								break;
 						}
-
 					}
 				} else {
 					color = am->wall_normal_color;
@@ -1301,7 +1348,7 @@ static void add_segment_edges(automap *am, const vcsegptridx_t seg)
 			// If they have a map powerup, draw unvisited areas in dark blue.
 			// NOTE: D1 originally had this part of code but w/o cheat-check. It's only supposed to draw blue with powerup that does not exist in D1. So make this D2-only
 			if (!Automap_debug_show_all_segments)
-			if ((cheats.fullautomap || Players[Player_num].flags & PLAYER_FLAGS_MAP_ALL) && (!Automap_visited[segnum]))	
+			if ((cheats.fullautomap || get_local_player_flags() & PLAYER_FLAGS_MAP_ALL) && (!Automap_visited[segnum]))	
 				color = am->wall_revealed_color;
 			Here:
 #endif
@@ -1355,29 +1402,37 @@ void automap_build_edge_list(automap *am, int add_all_edges)
 	if (add_all_edges)	{
 		// Cheating, add all edges as visited
 		range_for (const auto s, highest_valid(Segments))
+		{
+			const auto &&segp = vcsegptridx(static_cast<segnum_t>(s));
 #ifdef EDITOR
-			if (Segments[s].segnum != segment_none)
+			if (segp->segnum != segment_none)
 #endif
 			{
-				add_segment_edges(am, &Segments[s]);
+				add_segment_edges(am, segp);
 			}
+		}
 	} else {
 		// Not cheating, add visited edges, and then unvisited edges
 		range_for (const auto s, highest_valid(Segments))
+		{
+			const auto &&segp = vcsegptridx(static_cast<segnum_t>(s));
 #ifdef EDITOR
-			if (Segments[s].segnum != segment_none)
+			if (segp->segnum != segment_none)
 #endif
 				if (Automap_visited[s]) {
-					add_segment_edges(am, &Segments[s]);
+					add_segment_edges(am, segp);
 				}
-	
+		}
 		range_for (const auto s, highest_valid(Segments))
+		{
+			const auto &&segp = vcsegptridx(static_cast<segnum_t>(s));
 #ifdef EDITOR
-			if (Segments[s].segnum != segment_none)
+			if (segp->segnum != segment_none)
 #endif
 				if (!Automap_visited[s]) {
-					add_unknown_segment_edges(am, &Segments[s]);
+					add_unknown_segment_edges(am, segp);
 				}
+		}
 	}
 
 	// Find unnecessary lines (These are lines that don't have to be drawn because they have small curvature)
@@ -1480,3 +1535,4 @@ window_event_result MarkerInputMessage(int key)
 	return window_event_result::handled;
 }
 #endif
+}

@@ -25,15 +25,16 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+
 #include "pstypes.h"
 #include "vecmat.h"
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #include "aistruct.h"
-#endif
 #include "polyobj.h"
 #include "laser.h"
 
 #ifdef __cplusplus
+#include <bitset>
 #include <cassert>
 #include <cstdint>
 #include "dxxsconf.h"
@@ -44,7 +45,13 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <vector>
 #include <stdexcept>
 #include "compiler-type_traits.h"
-#include "fwdobject.h"
+#include "fwd-object.h"
+#include "weapon.h"
+#include "powerup.h"
+#include "poison.h"
+#include "player-flags.h"
+
+namespace dsx {
 
 // Object types
 enum object_type_t : int
@@ -73,14 +80,35 @@ enum object_type_t : int
  * STRUCTURES
  */
 
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 struct reactor_static {
 	/* Location of the gun on the reactor object */
-	vms_vector	gun_pos[MAX_CONTROLCEN_GUNS];
+	array<vms_vector, MAX_CONTROLCEN_GUNS>	gun_pos,
 	/* Orientation of the gun on the reactor object */
-	vms_vector	gun_dir[MAX_CONTROLCEN_GUNS];
+		gun_dir;
 };
+
+struct player_info
+{
+	fix     energy;                 // Amount of energy remaining.
+	fix     homing_object_dist;     // Distance of nearest homing object.
+	player_flags powerup_flags;
+	objnum_t   killer_objnum;          // Who killed me.... (-1 if no one)
+	uint16_t vulcan_ammo;
+#if defined(DXX_BUILD_DESCENT_I)
+	using primary_weapon_flag_type = uint8_t;
+#elif defined(DXX_BUILD_DESCENT_II)
+	using primary_weapon_flag_type = uint16_t;
 #endif
+	primary_weapon_flag_type primary_weapon_flags;
+	stored_laser_level laser_level;
+	array<uint8_t, MAX_SECONDARY_WEAPONS>  secondary_ammo; // How much ammo of each type.
+	fix64   cloak_time;             // Time cloaked
+	fix64   invulnerable_time;      // Time invulnerable
+};
+
+}
+
+namespace dcx {
 
 // A compressed form for sending crucial data
 struct shortpos
@@ -129,79 +157,80 @@ struct physics_info_rw
 
 // stuctures for different kinds of simulation
 
-struct laser_info : prohibit_void_ptr<laser_info>
+struct laser_parent
+{
+	short   parent_type;        // The type of the parent of this object
+	objnum_t   parent_num;         // The object's parent's number
+	object_signature_t     parent_signature;   // The object's parent's signature...
+	constexpr laser_parent() :
+		parent_type{}, parent_num{}, parent_signature(0)
+	{
+	}
+};
+
+}
+
+namespace dsx {
+
+struct laser_info : prohibit_void_ptr<laser_info>, laser_parent
 {
 	struct hitobj_list_t : public prohibit_void_ptr<hitobj_list_t>
 	{
-		template <typename T>
-			struct tproxy
-			{
-				T *addr;
-				uint8_t mask;
-				tproxy(T *a, uint8_t m) :
-					addr(a), mask(m)
-				{
-					assert(m);
-					assert(!(m & (m - 1)));
-				}
-				dxx_explicit_operator_bool operator bool() const
-				{
-					return *addr & mask;
-				}
-			};
-		typedef tproxy<const uint8_t> cproxy;
-		struct proxy : public tproxy<uint8_t>
+		typedef std::bitset<MAX_OBJECTS> mask_type;
+		mask_type mask;
+		struct proxy
 		{
-			proxy(uint8_t *a, uint8_t m) :
-				tproxy<uint8_t>(a, m)
+			mask_type &mask;
+			std::size_t i;
+			proxy(mask_type &m, std::size_t s) :
+				mask(m), i(s)
 			{
+			}
+			explicit operator bool() const
+			{
+				return mask.test(i);
 			}
 			proxy &operator=(bool b)
 			{
-				if (b)
-					*addr |= mask;
-				else
-					*addr &= ~mask;
+				mask.set(i, b);
 				return *this;
 			}
 			template <typename T>
-				void operator=(T) DXX_CXX11_EXPLICIT_DELETE;
+				void operator=(T) = delete;
 		};
-		array<uint8_t, (MAX_OBJECTS + 7) / 8> mask;
 		proxy operator[](objnum_t i)
 		{
-			return make_proxy<proxy>(mask, i);
+			return proxy(mask, i);
 		}
-		cproxy operator[](objnum_t i) const
+		bool operator[](objnum_t i) const
 		{
-			return make_proxy<cproxy>(mask, i);
+			return mask.test(i);
 		}
 		void clear()
 		{
-			mask.fill(0);
-		}
-		template <typename T1, typename T2>
-		static T1 make_proxy(T2 &mask, objnum_t i)
-		{
-			typename T2::size_type index = i / 8, bitshift = i % 8;
-			if (!(index < mask.size()))
-				throw std::out_of_range("index exceeds object range");
-			return T1(&mask[index], 1 << bitshift);
+			mask.reset();
 		}
 	};
-	short   parent_type;        // The type of the parent of this object
-	objnum_t   parent_num;         // The object's parent's number
-	int     parent_signature;   // The object's parent's signature...
 	fix64   creation_time;      // Absolute time of creation.
 	hitobj_list_t hitobj_list;	// list of all objects persistent weapon has already damaged (useful in case it's in contact with two objects at the same time)
 	objnum_t   last_hitobj;        // For persistent weapons (survive object collision), object it most recently hit.
 	objnum_t   track_goal;         // Object this object is tracking.
 	fix     multiplier;         // Power if this is a fusion bolt (or other super weapon to be added).
-	fix     track_turn_time;
 #if defined(DXX_BUILD_DESCENT_II)
 	fix64	last_afterburner_time;	//	Time at which this object last created afterburner blobs.
 #endif
+	constexpr laser_info() :
+		creation_time{}, last_hitobj{}, track_goal{}, multiplier{}
+#if defined(DXX_BUILD_DESCENT_II)
+		, last_afterburner_time{}
+#endif
+	{
+	}
 };
+
+}
+
+namespace dcx {
 
 // Same as above but structure Savegames/Multiplayer objects expect
 struct laser_info_rw
@@ -248,11 +277,13 @@ struct light_info_rw
 struct powerup_info : prohibit_void_ptr<powerup_info>
 {
 	int     count;          // how many/much we pick up (vulcan cannon only?)
-#if defined(DXX_BUILD_DESCENT_II)
 	int     flags;          // spat by player?
 	fix64   creation_time;  // Absolute time of creation.
-#endif
 };
+
+}
+
+namespace dsx {
 
 struct powerup_info_rw
 {
@@ -263,6 +294,10 @@ struct powerup_info_rw
 	int     flags;          // spat by player?
 #endif
 } __pack__;
+
+}
+
+namespace dcx {
 
 struct vclip_info : prohibit_void_ptr<vclip_info>
 {
@@ -298,9 +333,12 @@ struct polyobj_info_rw
 	int     alt_textures;       // if not -1, use these textures instead
 } __pack__;
 
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+}
+
+namespace dsx {
+
 struct object {
-	int     signature;      // Every object ever has a unique signature...
+	object_signature_t signature;
 	ubyte   type;           // what type of object this is... robot, weapon, hostage, powerup, fireball
 	ubyte   id;             // which form of object...which powerup, robot, etc.
 	objnum_t   next,prev;      // id of next and previous connected object in Objects, -1 = no connection
@@ -323,27 +361,47 @@ struct object {
 	// -- Removed, MK, 10/16/95, using lifeleft instead: int     lightlevel;
 
 	// movement info, determined by MOVEMENT_TYPE
-	union {
+	union movement_info {
 		physics_info phys_info; // a physics object
 		vms_vector   spin_rate; // for spinning objects
+		constexpr movement_info() :
+			phys_info{}
+		{
+			static_assert(sizeof(phys_info) == sizeof(*this), "insufficient initialization");
+		}
 	} mtype;
 
 	// render info, determined by RENDER_TYPE
-	union {
+	union render_info {
 		struct polyobj_info    pobj_info;      // polygon model
 		struct vclip_info      vclip_info;     // vclip
+		constexpr render_info() :
+			pobj_info{}
+		{
+			static_assert(sizeof(pobj_info) == sizeof(*this), "insufficient initialization");
+		}
 	} rtype;
 
 	// control info, determined by CONTROL_TYPE
-	union {
+	union control_info {
+		constexpr control_info() :
+			ai_info{}
+		{
+			static_assert(sizeof(ai_info) == sizeof(*this), "insufficient initialization");
+		}
 		struct laser_info      laser_info;
 		struct explosion_info  expl_info;      // NOTE: debris uses this also
 		struct light_info      light_info;     // why put this here?  Didn't know what else to do with it.
 		struct powerup_info    powerup_info;
 		struct ai_static       ai_info;
 		struct reactor_static  reactor_info;
+		struct player_info     player_info;
 	} ctype;
 };
+
+}
+
+namespace dcx {
 
 // Same as above but structure Savegames/Multiplayer objects expect
 struct object_rw
@@ -351,9 +409,6 @@ struct object_rw
 	int     signature;      // Every object ever has a unique signature...
 	ubyte   type;           // what type of object this is... robot, weapon, hostage, powerup, fireball
 	ubyte   id;             // which form of object...which powerup, robot, etc.
-#ifdef WORDS_NEED_ALIGNMENT
-	short   pad;
-#endif
 	short   next,prev;      // id of next and previous connected object in Objects, -1 = no connection
 	ubyte   control_type;   // how this object is controlled
 	ubyte   movement_type;  // how this object moves
@@ -393,12 +448,7 @@ struct object_rw
 		polyobj_info_rw    pobj_info;      // polygon model
 		vclip_info_rw      vclip_info;     // vclip
 	} __pack__ rtype;
-
-#ifdef WORDS_NEED_ALIGNMENT
-	short   pad2;
-#endif
 } __pack__;
-#endif
 
 struct obj_position
 {
@@ -407,84 +457,108 @@ struct obj_position
 	segnum_t       segnum;     // segment number containing object
 };
 
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
-struct object_array_t : array<object, MAX_OBJECTS>
-{
-	int highest;
+}
+
 #define Highest_object_index Objects.highest
-	typedef array<object, MAX_OBJECTS> array_t;
-	template <typename T>
-		typename tt::enable_if<tt::is_integral<T>::value, reference>::type operator[](T n)
-		{
-			return array_t::operator[](n);
-		}
-	template <typename T>
-		typename tt::enable_if<tt::is_integral<T>::value, const_reference>::type operator[](T n) const
-		{
-			return array_t::operator[](n);
-		}
-	template <typename T>
-		typename tt::enable_if<!tt::is_integral<T>::value, reference>::type operator[](T) const DXX_CXX11_EXPLICIT_DELETE;
-	object_array_t();
-	object_array_t(const object_array_t &) = delete;
-	object_array_t &operator=(const object_array_t &) = delete;
-};
 
 DEFINE_VALPTRIDX_SUBTYPE(obj, object, objnum_t, Objects);
 
-static inline ubyte get_hostage_id(const vcobjptr_t o)
+namespace dsx {
+
+static inline uint8_t get_hostage_id(const object &o)
 {
-	return o->id;
+	return o.id;
 }
 
-static inline ubyte get_player_id(const vcobjptr_t o)
+static inline uint8_t get_player_id(const object &o)
 {
-	return o->id;
+	return o.id;
 }
 
-static inline ubyte get_powerup_id(const vcobjptr_t o)
+static inline powerup_type_t get_powerup_id(const vcobjptr_t o)
 {
-	return o->id;
+	return static_cast<powerup_type_t>(o->id);
 }
 
-static inline ubyte get_reactor_id(const vcobjptr_t o)
+static inline uint8_t get_reactor_id(const object &o)
 {
-	return o->id;
+	return o.id;
 }
 
-static inline ubyte get_robot_id(const vcobjptr_t o)
+static inline uint8_t get_fireball_id(const object &o)
 {
-	return o->id;
+	return o.id;
 }
 
-static inline weapon_type_t get_weapon_id(const vcobjptr_t o)
+static inline uint8_t get_robot_id(const object &o)
 {
-	return static_cast<weapon_type_t>(o->id);
+	return o.id;
 }
 
-static inline void set_hostage_id(const vobjptr_t o, ubyte id)
+static inline uint8_t get_marker_id(const object &o)
 {
-	o->id = id;
+	return o.id;
 }
 
-static inline void set_player_id(const vobjptr_t o, ubyte id)
+static inline weapon_id_type get_weapon_id(const object &o)
 {
-	o->id = id;
+	return static_cast<weapon_id_type>(o.id);
 }
 
-static inline void set_powerup_id(const vobjptr_t o, ubyte id)
+static inline void set_hostage_id(object &o, ubyte id)
 {
-	o->id = id;
+	o.id = id;
 }
 
-static inline void set_robot_id(const vobjptr_t o, ubyte id)
+static inline void set_player_id(object &o, ubyte id)
 {
-	o->id = id;
+	o.id = id;
 }
 
-static inline void set_weapon_id(const vobjptr_t o, weapon_type_t id)
+void set_powerup_id(object &o, powerup_type_t id);
+
+static inline void set_reactor_id(object &o, uint8_t id)
 {
-	o->id = id;
+	o.id = id;
+}
+
+static inline void set_robot_id(object &o, ubyte id)
+{
+	o.id = id;
+}
+
+static inline void set_weapon_id(object &o, weapon_id_type id)
+{
+	o.id = static_cast<uint8_t>(id);
+}
+
+void check_warn_object_type(const object &, object_type_t, const char *file, unsigned line);
+#define get_hostage_id(O)	(check_warn_object_type(O, OBJ_HOSTAGE, __FILE__, __LINE__), get_hostage_id(O))
+#define get_player_id(O)	(check_warn_object_type(O, OBJ_PLAYER, __FILE__, __LINE__), get_player_id(O))
+#define get_powerup_id(O)	(check_warn_object_type(O, OBJ_POWERUP, __FILE__, __LINE__), get_powerup_id(O))
+#define get_reactor_id(O)	(check_warn_object_type(O, OBJ_CNTRLCEN, __FILE__, __LINE__), get_reactor_id(O))
+#define get_fireball_id(O)	(check_warn_object_type(O, OBJ_FIREBALL, __FILE__, __LINE__), get_fireball_id(O))
+#define get_robot_id(O)	(check_warn_object_type(O, OBJ_ROBOT, __FILE__, __LINE__), get_robot_id(O))
+#define get_weapon_id(O)	(check_warn_object_type(O, OBJ_WEAPON, __FILE__, __LINE__), get_weapon_id(O))
+#define get_marker_id(O)	(check_warn_object_type(O, OBJ_MARKER, __FILE__, __LINE__), get_marker_id(O))
+#define set_hostage_id(O,I)	(check_warn_object_type(O, OBJ_HOSTAGE, __FILE__, __LINE__), set_hostage_id(O, I))
+#define set_player_id(O,I)	(check_warn_object_type(O, OBJ_PLAYER, __FILE__, __LINE__), set_player_id(O, I))
+#define set_reactor_id(O,I)	(check_warn_object_type(O, OBJ_CNTRLCEN, __FILE__, __LINE__), set_reactor_id(O, I))
+#define set_robot_id(O,I)	(check_warn_object_type(O, OBJ_ROBOT, __FILE__, __LINE__), set_robot_id(O, I))
+#define set_weapon_id(O,I)	(check_warn_object_type(O, OBJ_WEAPON, __FILE__, __LINE__), set_weapon_id(O, I))
+#ifdef DXX_HAVE_BUILTIN_CONSTANT_P
+#define check_warn_object_type(O,T,F,L)	\
+	({	\
+		const object &dxx_check_warn_o = O;	\
+		/* If the type is always wrong, force a compile-time error. */	\
+		if (__builtin_constant_p(dxx_check_warn_o.type != T) && dxx_check_warn_o.type != T)	\
+			DXX_ALWAYS_ERROR_FUNCTION(dxx_error_object_type_mismatch, "object type mismatch");	\
+		/* If the type is always right, omit the runtime check. */	\
+		if (!(__builtin_constant_p(dxx_check_warn_o.type == T) && dxx_check_warn_o.type == T))	\
+			(check_warn_object_type)(O,T,F,L);	\
+	})
+#endif
+
 }
 #endif
 

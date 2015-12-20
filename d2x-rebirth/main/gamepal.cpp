@@ -42,6 +42,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "strutil.h"
 #include "gauges.h"
 
+namespace dsx {
+
 char last_palette_loaded[FILENAME_LEN]="";
 char last_palette_loaded_pig[FILENAME_LEN]="";
 
@@ -92,7 +94,6 @@ int load_palette(const char *name,int used_for_level,int no_change_screen)
 
 		newmenu_free_background(); // palette changed! free menu!
 		gr_remap_color_fonts();
-		gr_remap_mono_fonts();
 
 		Color_0_31_0 = -1;		//for gauges
 	}
@@ -113,3 +114,4 @@ int load_palette(const char *name,int used_for_level,int no_change_screen)
 	return 1;
 }
 
+}

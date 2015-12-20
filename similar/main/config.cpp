@@ -38,6 +38,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "palette.h"
 #include "args.h"
 #include "player.h"
+#include "digi.h"
 #include "mission.h"
 #include "u_mem.h"
 #include "physfsx.h"
@@ -45,7 +46,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "compiler-make_unique.h"
 
-struct Cfg GameCfg;
+CCfg dcx::CGameCfg;
+
+namespace dsx {
+Cfg GameCfg;
 
 #define DigiVolumeStr "DigiVolume"
 #define MusicVolumeStr "MusicVolume"
@@ -113,22 +117,22 @@ int ReadConfigFile()
 	snprintf(GameCfg.CMMiscMusic[SONG_ENDGAME].data(), GameCfg.CMMiscMusic[SONG_ENDGAME].size(), "%s%s", PHYSFS_getUserDir(), "Music/iTunes/iTunes Music/Insanity/Descent/14 Insanity.mp3");
 #endif
 	GameCfg.GammaLevel = 0;
-	GameCfg.LastPlayer.fill(0);
-	memset(GameCfg.LastMission,0,MISSION_NAME_LEN+1);
+	GameCfg.LastPlayer = {};
+	GameCfg.LastMission = "";
 	GameCfg.ResolutionX = 640;
 	GameCfg.ResolutionY = 480;
 	GameCfg.AspectX = 3;
 	GameCfg.AspectY = 4;
-	GameCfg.WindowMode = 0;
-	GameCfg.TexFilt = 0;
+	CGameCfg.WindowMode = false;
+	CGameCfg.TexFilt = 0;
 #if defined(DXX_BUILD_DESCENT_II)
 	GameCfg.MovieTexFilt = 0;
 	GameCfg.MovieSubtitles = 0;
 #endif
-	GameCfg.VSync = 0;
+	CGameCfg.VSync = false;
 	GameCfg.Multisample = 0;
 	GameCfg.FPSIndicator = 0;
-	GameCfg.Grabinput = 1;
+	CGameCfg.Grabinput = true;
 
 
 	auto infile = PHYSFSX_openReadBuffered("descent.cfg");
@@ -138,11 +142,9 @@ int ReadConfigFile()
 	}
 
 	// to be fully safe, assume the whole cfg consists of one big line
-	for (PHYSFSX_gets_line_t<0> line(PHYSFS_fileLength(infile) + 1); !PHYSFS_eof(infile);)
+	for (PHYSFSX_gets_line_t<0> line(PHYSFS_fileLength(infile) + 1); const char *const eol = PHYSFSX_fgets(line, infile);)
 	{
-		PHYSFSX_fgets(line, infile);
 		const auto lb = line.begin();
-		const auto eol = std::find(lb, line.end(), 0);
 		if (eol == line.end())
 			continue;
 		auto eq = std::find(lb, eol, '=');
@@ -195,9 +197,9 @@ int ReadConfigFile()
 		else if (cmp(lb, eq, AspectYStr))
 			convert_integer(GameCfg.AspectY, value);
 		else if (cmp(lb, eq, WindowModeStr))
-			convert_integer(GameCfg.WindowMode, value);
+			convert_integer(CGameCfg.WindowMode, value);
 		else if (cmp(lb, eq, TexFiltStr))
-			convert_integer(GameCfg.TexFilt, value);
+			convert_integer(CGameCfg.TexFilt, value);
 #if defined(DXX_BUILD_DESCENT_II)
 		else if (cmp(lb, eq, MovieTexFiltStr))
 			convert_integer(GameCfg.MovieTexFilt, value);
@@ -205,19 +207,22 @@ int ReadConfigFile()
 			convert_integer(GameCfg.MovieSubtitles, value);
 #endif
 		else if (cmp(lb, eq, VSyncStr))
-			convert_integer(GameCfg.VSync, value);
+			convert_integer(CGameCfg.VSync, value);
 		else if (cmp(lb, eq, MultisampleStr))
 			convert_integer(GameCfg.Multisample, value);
 		else if (cmp(lb, eq, FPSIndicatorStr))
 			convert_integer(GameCfg.FPSIndicator, value);
 		else if (cmp(lb, eq, GrabinputStr))
-			convert_integer(GameCfg.Grabinput, value);
+			convert_integer(CGameCfg.Grabinput, value);
 	}
 	if ( GameCfg.DigiVolume > 8 ) GameCfg.DigiVolume = 8;
 	if ( GameCfg.MusicVolume > 8 ) GameCfg.MusicVolume = 8;
 
 	if (GameCfg.ResolutionX >= 320 && GameCfg.ResolutionY >= 200)
-		Game_screen_mode = SM(GameCfg.ResolutionX,GameCfg.ResolutionY);
+	{
+		Game_screen_mode.width = GameCfg.ResolutionX;
+		Game_screen_mode.height = GameCfg.ResolutionY;
+	}
 
 	return 0;
 }
@@ -246,21 +251,23 @@ int WriteConfigFile()
 	PHYSFSX_printf(infile, "%s=%s\n", CMMiscMusic3Str, GameCfg.CMMiscMusic[SONG_ENDGAME].data());
 	PHYSFSX_printf(infile, "%s=%s\n", CMMiscMusic4Str, GameCfg.CMMiscMusic[SONG_CREDITS].data());
 	PHYSFSX_printf(infile, "%s=%d\n", GammaLevelStr, GameCfg.GammaLevel);
-	PHYSFSX_printf(infile, "%s=%s\n", LastPlayerStr, static_cast<const char *>(Players[Player_num].callsign));
-	PHYSFSX_printf(infile, "%s=%s\n", LastMissionStr, GameCfg.LastMission);
+	PHYSFSX_printf(infile, "%s=%s\n", LastPlayerStr, static_cast<const char *>(get_local_player().callsign));
+	PHYSFSX_printf(infile, "%s=%s\n", LastMissionStr, static_cast<const char *>(GameCfg.LastMission));
 	PHYSFSX_printf(infile, "%s=%i\n", ResolutionXStr, SM_W(Game_screen_mode));
 	PHYSFSX_printf(infile, "%s=%i\n", ResolutionYStr, SM_H(Game_screen_mode));
 	PHYSFSX_printf(infile, "%s=%i\n", AspectXStr, GameCfg.AspectX);
 	PHYSFSX_printf(infile, "%s=%i\n", AspectYStr, GameCfg.AspectY);
-	PHYSFSX_printf(infile, "%s=%i\n", WindowModeStr, GameCfg.WindowMode);
-	PHYSFSX_printf(infile, "%s=%i\n", TexFiltStr, GameCfg.TexFilt);
+	PHYSFSX_printf(infile, "%s=%i\n", WindowModeStr, CGameCfg.WindowMode);
+	PHYSFSX_printf(infile, "%s=%i\n", TexFiltStr, CGameCfg.TexFilt);
 #if defined(DXX_BUILD_DESCENT_II)
 	PHYSFSX_printf(infile, "%s=%i\n", MovieTexFiltStr, GameCfg.MovieTexFilt);
 	PHYSFSX_printf(infile, "%s=%i\n", MovieSubtitlesStr, GameCfg.MovieSubtitles);
 #endif
-	PHYSFSX_printf(infile, "%s=%i\n", VSyncStr, GameCfg.VSync);
+	PHYSFSX_printf(infile, "%s=%i\n", VSyncStr, CGameCfg.VSync);
 	PHYSFSX_printf(infile, "%s=%i\n", MultisampleStr, GameCfg.Multisample);
 	PHYSFSX_printf(infile, "%s=%i\n", FPSIndicatorStr, GameCfg.FPSIndicator);
-	PHYSFSX_printf(infile, "%s=%i\n", GrabinputStr, GameCfg.Grabinput);
+	PHYSFSX_printf(infile, "%s=%i\n", GrabinputStr, CGameCfg.Grabinput);
 	return 0;
+}
+
 }

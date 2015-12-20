@@ -30,17 +30,14 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "func.h"
 #include "strutil.h"
 
+namespace dcx {
+
 #define MAX_PARAMS 10
 
 static const FUNCTION * func_table = NULL;
 static int func_size = 0;
 static int initialized = 0;
 static int func_params[MAX_PARAMS];
-
-int func_howmany()
-{
-	return func_size;
-}
 
 void func_init( const FUNCTION * funtable, int size )
 {
@@ -100,14 +97,10 @@ int (*func_nget( int func_number, int * numparams, const char **name ))(void)
 	return NULL;
 }
 
-void func_set_param( int n, int value )
-{
-	func_params[n] = value;
-}
-
 int func_get_param( int n )
 {
 	return func_params[n];
 }
 
 
+}

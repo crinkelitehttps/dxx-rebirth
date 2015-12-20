@@ -34,6 +34,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "segment.h"
 #include "object.h"
 #include "physics.h"
+#include "robot.h"
 #include "key.h"
 #include "game.h"
 #include "collide.h"
@@ -62,8 +63,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 //check point against each side of segment. return bitmask, where bit
 //set means behind that side
 
-int floor_levelling=0;
-
 //make sure matrix is orthogonal
 void check_and_fix_matrix(vms_matrix &m)
 {
@@ -76,37 +75,31 @@ static void do_physics_align_object(const vobjptr_t obj)
 	vms_vector desired_upvec;
 	fixang delta_ang,roll_ang;
 	//vms_vector forvec = {0,0,f1_0};
-	fix d,largest_d=-f1_0;
-	int best_side;
-
-        best_side=0;
+	fix largest_d=-f1_0;
+	const side *best_side = nullptr;
 	// bank player according to segment orientation
 
 	//find side of segment that player is most alligned with
 
-	for (int i=0;i<6;i++) {
-			d = vm_vec_dot(Segments[obj->segnum].sides[i].normals[0],obj->orient.uvec);
+	range_for (auto &i, Segments[obj->segnum].sides)
+	{
+		const auto d = vm_vec_dot(i.normals[0], obj->orient.uvec);
 
-		if (d > largest_d) {largest_d = d; best_side=i;}
+		if (largest_d < d)
+		{
+			largest_d = d;
+			best_side = &i;
+		}
 	}
 
-	if (floor_levelling) {
-
-		// old way: used floor's normal as upvec
-			desired_upvec = Segments[obj->segnum].sides[3].normals[0];
-
-	}
-	else  // new player leveling code: use normal of side closest to our up vec
-		if (get_num_faces(&Segments[obj->segnum].sides[best_side])==2) {
-				side *s = &Segments[obj->segnum].sides[best_side];
-				desired_upvec.x = (s->normals[0].x + s->normals[1].x) / 2;
-				desired_upvec.y = (s->normals[0].y + s->normals[1].y) / 2;
-				desired_upvec.z = (s->normals[0].z + s->normals[1].z) / 2;
-		
+	// new player leveling code: use normal of side closest to our up vec
+	if (get_num_faces(best_side) == 2)
+	{
+		desired_upvec = vm_vec_avg(best_side->normals[0], best_side->normals[1]);
 				vm_vec_normalize(desired_upvec);
 		}
 		else
-				desired_upvec = Segments[obj->segnum].sides[best_side].normals[0];
+		desired_upvec = best_side->normals[0];
 
 	if (labs(vm_vec_dot(desired_upvec,obj->orient.fvec)) < f1_0/2) {
 		vms_angvec tangles;
@@ -127,7 +120,6 @@ static void do_physics_align_object(const vobjptr_t obj)
 			const auto &&rotmat = vm_angles_2_matrix(tangles);
 			obj->orient = vm_matrix_x_matrix(obj->orient,rotmat);
 		}
-		else floor_levelling=0;
 	}
 
 }
@@ -157,18 +149,11 @@ static void set_object_turnroll(const vobjptr_t obj)
 }
 
 //list of segments went through
-int phys_seglist[MAX_FVI_SEGS],n_phys_segs;
+unsigned n_phys_segs;
+array<segnum_t, MAX_FVI_SEGS> phys_seglist;
 
 
 #define MAX_IGNORE_OBJS 100
-
-#ifndef NDEBUG
-#define EXTRA_DEBUG 1		//no extra debug when NDEBUG is on
-#endif
-
-#ifdef EXTRA_DEBUG
-object *debug_obj=NULL;
-#endif
 
 #ifndef NDEBUG
 int	Total_retries=0, Total_sims=0;
@@ -251,8 +236,7 @@ static void do_physics_sim_rot(const vobjptr_t obj)
 	tangles.h = fixmul(obj->mtype.phys_info.rotvel.y,FrameTime);
 	tangles.b = fixmul(obj->mtype.phys_info.rotvel.z,FrameTime);
 
-	const auto &&rotmat = vm_angles_2_matrix(tangles);
-	obj->orient = vm_matrix_x_matrix(obj->orient,rotmat);
+	obj->orient = vm_matrix_x_matrix(obj->orient, vm_angles_2_matrix(tangles));
 
 	if (obj->mtype.phys_info.flags & PF_TURNROLL)
 		set_object_turnroll(obj);
@@ -261,8 +245,7 @@ static void do_physics_sim_rot(const vobjptr_t obj)
 	if (obj->mtype.phys_info.turnroll) {
 		tangles.p = tangles.h = 0;
 		tangles.b = obj->mtype.phys_info.turnroll;
-		const auto &&rotmat = vm_angles_2_matrix(tangles);
-		obj->orient = vm_matrix_x_matrix(obj->orient,rotmat);
+		obj->orient = vm_matrix_x_matrix(obj->orient, vm_angles_2_matrix(tangles));
 	}
 
 	check_and_fix_matrix(obj->orient);
@@ -317,7 +300,6 @@ void do_physics_sim(const vobjptridx_t obj)
 	int try_again;
 	int fate=0;
 	vms_vector ipos;		//position after this frame
-	int count=0;
 	segnum_t WallHitSeg;
 	int WallHitSide;
 	fvi_info hit_info;
@@ -350,21 +332,6 @@ void do_physics_sim(const vobjptridx_t obj)
 	n_phys_segs = 0;
 
 	sim_time = FrameTime;
-
-	//debug_obj = obj;
-
-#ifdef EXTRA_DEBUG
-	//check for correct object segment
-	if(!get_seg_masks(obj->pos, obj->segnum, 0, __FILE__, __LINE__).centermask == 0)
-	{
-		if (!update_object_seg(obj)) {
-			if (!(Game_mode & GM_MULTI))
-				Int3();
-			compute_segment_center(obj->pos,&Segments[obj->segnum]);
-			obj->pos.x += obj;
-		}
-	}
-#endif
 
 	start_pos = obj->pos;
 
@@ -414,6 +381,7 @@ void do_physics_sim(const vobjptridx_t obj)
 		}
 	}
 
+	int count = 0;
 	do {
 		try_again = 0;
 
@@ -446,7 +414,7 @@ void do_physics_sim(const vobjptridx_t obj)
 		fate = find_vector_intersection(fq, hit_info);
 		//	Matt: Mike's hack.
 		if (fate == HIT_OBJECT) {
-			object	*objp = &Objects[hit_info.hit_object];
+			const auto &&objp = vcobjptr(hit_info.hit_object);
 
 			if (((objp->type == OBJ_WEAPON) && is_proximity_bomb_or_smart_mine(get_weapon_id(objp))) || objp->type == OBJ_POWERUP) // do not increase count for powerups since they *should* not change our movement
 				count--;
@@ -459,7 +427,7 @@ void do_physics_sim(const vobjptridx_t obj)
 #endif
 
 		if (obj->type == OBJ_PLAYER) {
-			if (n_phys_segs && phys_seglist[n_phys_segs-1]==hit_info.seglist[0])
+			if (n_phys_segs && !hit_info.seglist.empty() && phys_seglist[n_phys_segs-1]==hit_info.seglist[0])
 				n_phys_segs--;
 
 			range_for (const auto &hs, hit_info.seglist)
@@ -493,7 +461,7 @@ void do_physics_sim(const vobjptridx_t obj)
 			obj_relink(obj, iseg );
 
 		//if start point not in segment, move object to center of segment
-		if (get_seg_masks(obj->pos, obj->segnum, 0, __FILE__, __LINE__).centermask !=0 )
+		if (get_seg_masks(obj->pos, vcsegptr(obj->segnum), 0).centermask !=0 )
 		{
 			segnum_t n;
 
@@ -504,7 +472,7 @@ void do_physics_sim(const vobjptridx_t obj)
 					obj_relink(obj, n );
 				}
 				else {
-					compute_segment_center(obj->pos,&Segments[obj->segnum]);
+					compute_segment_center(obj->pos, vcsegptr(obj->segnum));
 					obj->pos.x += obj;
 				}
 				if (obj->type == OBJ_WEAPON)
@@ -740,7 +708,7 @@ void do_physics_sim(const vobjptridx_t obj)
 	if (obj->type==OBJ_PLAYER && obj->segnum!=orig_segnum && (!cheats.ghostphysics) ) {
 
 		const auto orig_segp = vcsegptr(orig_segnum);
-		auto sidenum = find_connect_side(&Segments[obj->segnum],orig_segp);
+		const auto &&sidenum = find_connect_side(vcsegptridx(obj->segnum), orig_segp);
 
 		if (sidenum != -1) {
 
@@ -751,7 +719,7 @@ void do_physics_sim(const vobjptridx_t obj)
 
 				auto s = &orig_segp->sides[sidenum];
 
-				const auto v = create_abs_vertex_lists(orig_segp, sidenum);
+				const auto v = create_abs_vertex_lists(orig_segp, s, sidenum);
 				const auto &vertex_list = v.second;
 
 				//let's pretend this wall is not triangulated
@@ -768,18 +736,20 @@ void do_physics_sim(const vobjptridx_t obj)
 
 //--WE ALWYS WANT THIS IN, MATT AND MIKE DECISION ON 12/10/94, TWO MONTHS AFTER FINAL 	#ifndef NDEBUG
 	//if end point not in segment, move object to last pos, or segment center
-	if (get_seg_masks(obj->pos, obj->segnum, 0, __FILE__, __LINE__).centermask != 0)
+	if (get_seg_masks(obj->pos, vcsegptr(obj->segnum), 0).centermask != 0)
 	{
 		if (find_object_seg(obj)==segment_none) {
 			segnum_t n;
 
 			//Int3();
-			if (obj->type==OBJ_PLAYER && (n=find_point_seg(obj->last_pos,obj->segnum))!=segment_none) {
+			const auto &&obj_segp = vsegptridx(obj->segnum);
+			if (obj->type==OBJ_PLAYER && (n = find_point_seg(obj->last_pos,obj_segp)) != segment_none)
+			{
 				obj->pos = obj->last_pos;
-				obj_relink(obj, n );
+				obj_relink(obj, vsegptridx(n));
 			}
 			else {
-				compute_segment_center(obj->pos,&Segments[obj->segnum]);
+				compute_segment_center(obj->pos, obj_segp);
 				obj->pos.x += obj;
 			}
 			if (obj->type == OBJ_WEAPON)

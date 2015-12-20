@@ -29,7 +29,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #ifdef __cplusplus
 #include "dxxsconf.h"
-#include "fwdobject.h"
+#include "fwd-object.h"
 #include "pack.h"
 #include "countarray.h"
 
@@ -90,6 +90,7 @@ struct fvi_hitpoint
 //Returns the hit_data->hit_type
 int find_vector_intersection(const fvi_query &fq, fvi_info &hit_data);
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 //finds the uv coords of the given point on the given seg & side
 //fills in u & v. if l is non-NULL fills it in also
 __attribute_warn_unused_result
@@ -102,7 +103,8 @@ struct object_intersects_wall_result_t
 };
 
 //Returns true if the object is through any walls
-int object_intersects_wall(vobjptr_t objp);
+int object_intersects_wall(vcobjptr_t objp);
 int object_intersects_wall_d(vcobjptr_t objp, object_intersects_wall_result_t &); // same as above but more detailed
+#endif
 
 #endif

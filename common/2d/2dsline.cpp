@@ -28,6 +28,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gr.h"
 #include "grdef.h"
 
+namespace dcx {
+
 static void gr_linear_darken(ubyte * dest, int darkening_level, int count, const gft_array1 &fade_table) {
 	auto predicate = [&](ubyte c) { return fade_table[darkening_level][c]; };
 	std::transform(dest, dest + count, dest, predicate);
@@ -35,6 +37,7 @@ static void gr_linear_darken(ubyte * dest, int darkening_level, int count, const
 
 #define gr_linear_stosd(D,C,N)	memset(D,C,N)
 
+#ifndef OGL
 void gr_uscanline( int x1, int x2, int y )
 {
 	if (grd_curcanv->cv_fade_level >= GR_FADE_OFF) {
@@ -59,6 +62,7 @@ void gr_uscanline( int x1, int x2, int y )
 		}
 	}
 }
+#endif
 
 void gr_scanline( int x1, int x2, int y )
 {
@@ -93,4 +97,6 @@ void gr_scanline( int x1, int x2, int y )
 			break;
 		}
 	}
+}
+
 }

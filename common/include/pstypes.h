@@ -39,39 +39,18 @@ typedef unsigned int uint;
  typedef SInt16 int16_t;
  typedef SInt32 int32_t;
  typedef SInt64 int64_t;
- typedef UInt16 u_int16_t;
- typedef UInt32 u_int32_t;
- typedef UInt64 u_int64_t;
+ typedef UInt16 uint16_t;
+ typedef UInt32 uint32_t;
+ typedef UInt64 uint64_t;
 #endif // macintosh
 #if defined(_WIN32) || defined(__sun__) // platforms missing u_int??_t
- typedef Uint16 u_int16_t;
- typedef Uint32 u_int32_t;
- typedef Uint64 u_int64_t;
+ typedef Uint16 uint16_t;
+ typedef Uint32 uint32_t;
+ typedef Uint64 uint64_t;
 #endif // defined(_WIN32) || defined(__sun__)
 
 #ifdef _MSC_VER
 # include <stdlib.h> // this is where min and max are defined
-#endif
-#ifndef __cplusplus
-#ifndef min
-#define min(a,b) (((a)>(b))?(b):(a))
-#endif
-#ifndef max
-#define max(a,b) (((a)<(b))?(b):(a))
-#endif
-
-#ifndef PATH_MAX
-#define PATH_MAX 4096
-#endif
-
-#ifndef bool
-//define a boolean
-typedef ubyte bool;
-#endif
-
-#ifndef NULL
-#define NULL 0
-#endif
 #endif
 
 // the following stuff has nothing to do with types but needed everywhere,

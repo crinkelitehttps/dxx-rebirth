@@ -39,6 +39,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "dxxsconf.h"
 #include "compiler-array.h"
 
+namespace dcx {
+
 const unsigned MAX_TMAP_VERTS = 25;
 
 #ifndef OGL
@@ -78,7 +80,30 @@ struct g3ds_tmap {
 
 //	Note:	Not all interpolation method and lighting combinations are supported.
 //	Set Interpolation_method to 0/1/2 for linear/linear, perspective/linear, perspective/perspective
+#ifndef OGL
 extern	int	Interpolation_method;
+void init_interface_vars_to_assembler();
+#endif
+class push_interpolation_method
+{
+#ifdef OGL
+public:
+	push_interpolation_method(int, bool = true) {}
+#else
+	int previous;
+public:
+	push_interpolation_method(int next, bool condition = true) :
+		previous(Interpolation_method)
+	{
+		if (condition)
+			Interpolation_method = next;
+	}
+	~push_interpolation_method()
+	{
+		Interpolation_method = previous;
+	}
+#endif
+};
 
 // Set Lighting_on to 0/1/2 for no lighting/intensity lighting/rgb lighting
 extern	int	Lighting_on;
@@ -98,6 +123,6 @@ extern int Window_clip_left, Window_clip_bot, Window_clip_right, Window_clip_top
 #define FIX_XLIMIT	(639 * F1_0)
 #define FIX_YLIMIT	(479 * F1_0)
 
-extern void init_interface_vars_to_assembler(void);
+}
 
 #endif

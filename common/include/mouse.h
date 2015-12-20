@@ -10,18 +10,20 @@
  *
  */
 
-#ifndef MOUSE_H
-#define MOUSE_H
+#pragma once
 
 #include "pstypes.h"
 #include "maths.h"
 
 #ifdef __cplusplus
-#include "window.h"
+#include <cassert>
+#include "fwd-window.h"
+#include "event.h"
 
-struct d_event;
 struct SDL_MouseButtonEvent;
 struct SDL_MouseMotionEvent;
+
+namespace dcx {
 
 #define MOUSE_MAX_BUTTONS       16
 #define Z_SENSITIVITY		100
@@ -49,17 +51,44 @@ struct SDL_MouseMotionEvent;
 extern void mouse_flush();	// clears all mice events...
 extern void mouse_init(void);
 extern void mouse_close(void);
-extern int event_mouse_get_button(const d_event &event);
 extern void mouse_get_pos( int *x, int *y, int *z );
 window_event_result mouse_in_window(struct window *wind);
 extern void mouse_get_delta( int *dx, int *dy, int *dz );
-extern void event_mouse_get_delta(const d_event &event, int *dx, int *dy, int *dz);
-extern int mouse_get_btns();
-extern void mouse_toggle_cursor(int activate);
+void mouse_enable_cursor();
+void mouse_disable_cursor();
 void mouse_button_handler(struct SDL_MouseButtonEvent *mbe);
 void mouse_motion_handler(struct SDL_MouseMotionEvent *mme);
 void mouse_cursor_autohide();
 
-#endif
+class d_event_mousebutton : public d_event
+{
+public:
+	d_event_mousebutton(event_type type, unsigned b);
+	const unsigned button;
+};
+
+class d_event_mouse_moved : public d_event
+{
+public:
+	short		dx, dy, dz;
+};
+
+static inline int event_mouse_get_button(const d_event &event)
+{
+	auto &e = static_cast<const d_event_mousebutton &>(event);
+	assert(e.type == EVENT_MOUSE_BUTTON_DOWN || e.type == EVENT_MOUSE_BUTTON_UP);
+	return e.button;
+}
+
+static inline void event_mouse_get_delta(const d_event &event, int *dx, int *dy, int *dz)
+{
+	auto &e = static_cast<const d_event_mouse_moved &>(event);
+	assert(e.type == EVENT_MOUSE_MOVED);
+	*dx = e.dx;
+	*dy = e.dy;
+	*dz = e.dz;
+}
+
+}
 
 #endif

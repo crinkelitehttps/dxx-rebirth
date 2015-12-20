@@ -119,7 +119,7 @@ window *Pad_info;		// Keypad text
 grs_font_ptr editor_font;
 
 //where the editor is looking
-vms_vector Ed_view_target=ZERO_VECTOR;
+vms_vector Ed_view_target;
 
 int gamestate_not_restored = 0;
 
@@ -143,8 +143,6 @@ static std::unique_ptr<UI_GADGET_ICON>
 	OutlineIcon,
 	LockIcon;
 
-UI_EVENT * DemoBuffer = NULL;
-
 //grs_canvas * BigCanvas[2];
 //int CurrentBigCanvas = 0;
 //int BigCanvasFirstTime = 1;
@@ -153,13 +151,13 @@ int	Found_seg_index=0;				// Index in Found_segs corresponding to Cursegp
 
 
 static void print_status_bar( char message[DIAGNOSTIC_MESSAGE_MAX] ) {
-	int w,h,aw;
 
 	gr_set_current_canvas( NULL );
 	gr_set_curfont(editor_font);
 	gr_set_fontcolor( CBLACK, CGREY );
-	gr_get_string_size( message, &w, &h, &aw );
-	gr_string( 4, 583, message );
+	int w,h;
+	gr_get_string_size( message, &w, &h, nullptr);
+	gr_string(4, 583, message, w, h);
 	gr_set_fontcolor( CBLACK, CWHITE );
 	gr_setcolor( CGREY );
 	gr_rect( 4+w, 583, 799, 599 );
@@ -238,7 +236,7 @@ int ExitEditor()
 
 int	GotoGameScreen()
 {
-	stop_time();
+	pause_game_world_time p;
 
 //@@	init_player_stats();
 //@@
@@ -256,8 +254,6 @@ int	GotoGameScreen()
 	}
 
 	ai_reset_all_paths();
-
-	start_time();
 
 	ModeFlag = 3;
 	return 1;
@@ -297,7 +293,7 @@ static void medkey_init()
 				Assert( key < 2048);
 				KeyFunction[key] = func_get( LispCommand, &np );
 			} else {
-				Error( "Bad key %s in GLOBAL.KEY!", keypress );
+				UserError( "Bad key %s in GLOBAL.KEY!", keypress );
 			}
 		}
 	}
@@ -344,12 +340,10 @@ void init_editor()
 	Draw_all_segments = 1;						// Say draw all segments, not just connected ones
 	
 	if (!Cursegp)
-		Cursegp = &Segments[0];
+		Cursegp = segptridx(segment_first);
 
 	init_autosave();
   
-//	atexit(close_editor);
-
 	Clear_window = 1;	//	do full window clear.
 	
 	InitCurve();
@@ -395,12 +389,6 @@ void init_editor()
 	
 	//set the wire-frame window to be the current view
 	current_view = &LargeView;
-	
-	if (faded_in==0)
-	{
-		faded_in = 1;
-		//gr_pal_fade_in( grd_curscreen->pal );
-	}
 	
 	gr_set_current_canvas( GameViewBox->canvas );
 	gr_set_curfont(editor_font);
@@ -513,8 +501,7 @@ static void move_player_2_segment_and_rotate(const vsegptridx_t seg,int side)
 	vm_vector_2_matrix(ConsoleObject->orient,vp,&upvec,nullptr);
 //	vm_vector_2_matrix(&ConsoleObject->orient,&vp,NULL,NULL);
 
-	obj_relink( ConsoleObject-Objects, seg );
-	
+	obj_relink(vobjptridx(ConsoleObject), seg);
 }
 
 int SetPlayerFromCursegAndRotate()
@@ -529,8 +516,8 @@ int SetPlayerFromCursegAndRotate()
 //far enough away to see all of curside
 int SetPlayerFromCursegMinusOne()
 {
-	vms_vector corner_v[4];
-	g3s_point corner_p[4];
+	array<vms_vector, 4> corner_v;
+	array<g3s_point, 4> corner_p;
 	int i;
 	fix max,view_dist=f1_0*10;
         static int edgenum=0;
@@ -565,7 +552,7 @@ int SetPlayerFromCursegMinusOne()
 
 	auto newseg = find_point_seg(ConsoleObject->pos,Cursegp);
 	if (newseg != segment_none)
-		obj_relink(ConsoleObject-Objects,newseg);
+		obj_relink(vobjptridx(ConsoleObject), newseg);
 
 	Update_flags |= UF_ED_STATE_CHANGED | UF_GAME_VIEW_CHANGED;
 	return 1;
@@ -828,8 +815,9 @@ int SafetyCheck()
 }
 
 //called at the end of the program
-void close_editor() {
 
+static void close_editor()
+{
 	//	_MARK_("end of editor");//Nuked to compile -KRB
 	
 #ifndef __linux__
@@ -932,7 +920,7 @@ void gamestate_restore_check()
 			if (Save_position.segnum <= Highest_segment_index) {
 				ConsoleObject->pos = Save_position.pos;
 				ConsoleObject->orient = Save_position.orient;
-				obj_relink(ConsoleObject-Objects,Save_position.segnum);
+				obj_relink(vobjptridx(ConsoleObject), vsegptridx(Save_position.segnum));
 			}
 
 			gamestate_not_restored = 0;
@@ -1018,7 +1006,7 @@ int editor_handler(UI_DIALOG *, const d_event &event, unused_ui_userdata_t *)
 					Update_flags |= UF_GAME_VIEW_CHANGED;
 					if (Gameview_lockstep)
 					{
-						Cursegp = &Segments[ConsoleObject->segnum];
+						Cursegp = segptridx(ConsoleObject->segnum);
 						med_create_new_segment_from_cursegp();
 						Update_flags |= UF_ED_STATE_CHANGED;
 					}
@@ -1177,7 +1165,7 @@ int editor_handler(UI_DIALOG *, const d_event &event, unused_ui_userdata_t *)
 	
 		if (Found_segs.count()) {
 			sort_seg_list(Found_segs,ConsoleObject->pos);
-			Cursegp = &Segments[Found_segs[0]];
+			Cursegp = segptridx(Found_segs[0]);
 			med_create_new_segment_from_cursegp();
 			if (Lock_view_to_cursegp)
 				set_view_target_from_segment(Cursegp);
@@ -1233,7 +1221,7 @@ int editor_handler(UI_DIALOG *, const d_event &event, unused_ui_userdata_t *)
 
 				//	See if either shift key is down and, if so, assign texture map
 				if (keyd_pressed[KEY_LSHIFT] || keyd_pressed[KEY_RSHIFT]) {
-					Cursegp = &Segments[seg];
+					Cursegp = segptridx(seg);
 					Curside = side;
 					AssignTexture();
 					med_create_new_segment_from_cursegp();
@@ -1245,7 +1233,7 @@ int editor_handler(UI_DIALOG *, const d_event &event, unused_ui_userdata_t *)
 				} else if (keyd_pressed[ KEY_LAPOSTRO] ) {
 					move_object_to_mouse_click();
 				} else {
-					Cursegp = &Segments[seg];
+					Cursegp = segptridx(seg);
 					Curside = side;
 					med_create_new_segment_from_cursegp();
 					editor_status("Curseg and curside selected");
@@ -1291,24 +1279,3 @@ int editor_handler(UI_DIALOG *, const d_event &event, unused_ui_userdata_t *)
 	
 	return rval;
 }
-
-#ifndef NDEBUG
-int MarkStart(void)
-{
-	char mystr[30];
-	sprintf(mystr,"mark %i start",Mark_count);
-//	_MARK_(mystr);//Nuked to compile -KRB
-
-	return 1;
-}
-
-int MarkEnd(void)
-{
-	char mystr[30];
-	sprintf(mystr,"mark %i end",Mark_count);
-	Mark_count++;
-//	_MARK_(mystr);//Nuked to compile -KRB
-
-	return 1;
-}
-#endif

@@ -28,17 +28,20 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "vecmat.h"
 #include "3d.h"
 
-#include "robot.h"
-
 struct bitmap_index;
 
 #ifdef __cplusplus
 #include <cstddef>
+#include <memory>
+#include <physfs.h>
 #include "pack.h"
 
-struct glow_values_t;
+struct robot_info;
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+struct glow_values_t;
+}
 #if defined(DXX_BUILD_DESCENT_I)
 #define MAX_POLYGON_MODELS 85
 #elif defined(DXX_BUILD_DESCENT_II)
@@ -46,13 +49,14 @@ struct glow_values_t;
 #endif
 
 // array of names of currently-loaded models
-extern char Pof_names[MAX_POLYGON_MODELS][13];
+extern array<char[13], MAX_POLYGON_MODELS> Pof_names;
 
 //for each model, a model number for dying & dead variants, or -1 if none
-extern int Dying_modelnums[MAX_POLYGON_MODELS];
-extern int Dead_modelnums[MAX_POLYGON_MODELS];
+extern array<int, MAX_POLYGON_MODELS> Dying_modelnums, Dead_modelnums;
 #endif
 #define MAX_SUBMODELS 10
+
+namespace dcx {
 
 //used to describe a polygon model
 struct polymodel : prohibit_void_ptr<polymodel>
@@ -94,10 +98,12 @@ public:
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 // array of pointers to polygon objects
 extern array<polymodel, MAX_POLYGON_MODELS> Polygon_models;
-#endif
 
 // how many polygon objects there are
 extern unsigned N_polygon_models;
+#endif
+
+}
 
 void free_polygon_models();
 void init_polygon_models();
@@ -137,19 +143,21 @@ void free_model(polymodel *po);
 static const unsigned N_D2_POLYGON_MODELS = 166;
 #endif
 extern array<grs_bitmap *, MAX_POLYOBJ_TEXTURES> texture_list;
-extern array<bitmap_index, MAX_POLYOBJ_TEXTURES> texture_list_index;
 #endif
 
+namespace dcx {
 /*
  * reads a polymodel structure from a PHYSFS_file
  */
-extern void polymodel_read(polymodel *pm, PHYSFS_file *fp);
-void polymodel_write(PHYSFS_file *fp, const polymodel &pm);
+extern void polymodel_read(polymodel *pm, PHYSFS_File *fp);
+}
+#if 0
+void polymodel_write(PHYSFS_File *fp, const polymodel &pm);
+#endif
 
 /*
  * routine which allocates, reads, and inits a polymodel's model_data
  */
-void polygon_model_data_read(polymodel *pm, PHYSFS_file *fp);
-void robot_set_angles(robot_info *r,polymodel *pm,vms_angvec angs[N_ANIM_STATES][MAX_SUBMODELS]);
+void polygon_model_data_read(polymodel *pm, PHYSFS_File *fp);
 
 #endif

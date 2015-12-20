@@ -6,13 +6,15 @@
  */
 // Event header file
 
-#ifndef _EVENT_H
-#define _EVENT_H
+#pragma once
+
+#include "fwd-event.h"
 #include "maths.h"
 
 #ifdef __cplusplus
+namespace dcx {
 
-typedef enum event_type
+enum event_type : unsigned
 {
 	EVENT_IDLE = 0,
 	EVENT_QUIT,
@@ -45,7 +47,7 @@ typedef enum event_type
 	EVENT_UI_LISTBOX_MOVED,
 	EVENT_UI_LISTBOX_SELECTED,
 	EVENT_UI_USERBOX_DRAGGED
-} event_type;
+};
 
 // A vanilla event. Cast to the correct type of event according to 'type'.
 struct d_event
@@ -76,28 +78,7 @@ struct d_select_event : d_event
 	}
 };
 
-int event_init();
-
-// Sends input events to event handlers
-void event_poll();
-void event_flush();
-
-// Set and call the default event handler
-void set_default_handler(int (*handler)(const d_event &event));
-int call_default_handler(const d_event &event);
-
-// Send an event to the front window as first priority, then to the windows behind if it's not modal (editor), then the default handler
-void event_send(const d_event &event);
-
-// Sends input, idle and draw events to event handlers
-void event_process();
-
-void event_toggle_focus(int activate_focus);
-
-// See how long we were idle for
-void event_reset_idle_seconds();
 fix event_get_idle_seconds();
 
-#endif
-
+}
 #endif

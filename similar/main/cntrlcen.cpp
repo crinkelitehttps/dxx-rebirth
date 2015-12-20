@@ -37,8 +37,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "laser.h"
 #include "gameseq.h"
 #include "ai.h"
+#include "player.h"
 #include "multi.h"
-#include "fwdwall.h"
+#include "fwd-wall.h"
 #include "segment.h"
 #include "object.h"
 #include "robot.h"
@@ -47,7 +48,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "fireball.h"
 #include "endlevel.h"
 #include "state.h"
-#include "byteutil.h"
 #include "args.h"
 
 #include "compiler-range_for.h"
@@ -74,22 +74,28 @@ static void do_countdown_frame();
 
 //	-----------------------------------------------------------------------------
 //return the position & orientation of a gun on the control center object
-void calc_controlcen_gun_point(reactor *reactor, const vobjptr_t obj,int gun_num)
+static void calc_controlcen_gun_point(reactor &r, const vobjptr_t obj, const uint_fast32_t gun_num)
 {
-	vms_vector *gun_point = &obj->ctype.reactor_info.gun_pos[gun_num];
-	vms_vector *gun_dir = &obj->ctype.reactor_info.gun_dir[gun_num];
-
 	Assert(obj->type == OBJ_CNTRLCEN);
 	Assert(obj->render_type==RT_POLYOBJ);
 
-	Assert(gun_num < reactor->n_guns);
+	assert(gun_num < r.n_guns);
 
 	//instance gun position & orientation
 
-	vms_matrix m = vm_transposed_matrix(obj->orient);
-	vm_vec_rotate(*gun_point,reactor->gun_points[gun_num],m);
-	vm_vec_add2(*gun_point,obj->pos);
-	vm_vec_rotate(*gun_dir,reactor->gun_dirs[gun_num],m);
+	auto &gun_point = obj->ctype.reactor_info.gun_pos[gun_num];
+	auto &gun_dir = obj->ctype.reactor_info.gun_dir[gun_num];
+	const auto &&m = vm_transposed_matrix(obj->orient);
+	vm_vec_rotate(gun_point, r.gun_points[gun_num], m);
+	vm_vec_add2(gun_point, obj->pos);
+	vm_vec_rotate(gun_dir, r.gun_dirs[gun_num], m);
+}
+
+void calc_controlcen_gun_point(const vobjptr_t obj)
+{
+	auto &reactor = get_reactor_definition(get_reactor_id(obj));
+	for (uint_fast32_t i = reactor.n_guns; i--;)
+		calc_controlcen_gun_point(reactor, obj, i);
 }
 
 //	-----------------------------------------------------------------------------
@@ -142,7 +148,7 @@ static const int	D2_Alan_pavlish_reactor_times[NDL] = {90, 60, 45, 35, 30};
 //	Called every frame.  If control center been destroyed, then actually do something.
 void do_controlcen_dead_frame(void)
 {
-	if ((Game_mode & GM_MULTI) && (Players[Player_num].connected != CONNECT_PLAYING)) // if out of level already there's no need for this
+	if ((Game_mode & GM_MULTI) && (get_local_player().connected != CONNECT_PLAYING)) // if out of level already there's no need for this
 		return;
 
 	if ((Dead_controlcen_object_num != object_none) && (Countdown_seconds_left > 0))
@@ -320,7 +326,7 @@ void do_controlcen_frame(const vobjptridx_t obj)
 			// center can spot cloaked dudes.
 
 			if (Game_mode & GM_MULTI)
-				Believed_player_pos = Objects[Players[Player_num].objnum].pos;
+				Believed_player_pos = get_local_plrobj().pos;
 
 			//	Hack for special control centers which are isolated and not reachable because the
 			//	real control center is inside the boss.
@@ -360,22 +366,23 @@ void do_controlcen_frame(const vobjptridx_t obj)
 	}
 #endif
 
-	if (Player_is_dead)
+	if (Player_dead_state != player_dead_state::no)
 		controlcen_death_silence += FrameTime;
 	else
 		controlcen_death_silence = 0;
 
 	if ((Control_center_next_fire_time < 0) && !(controlcen_death_silence > F1_0*2)) {
-		reactor *reactor = get_reactor_definition(get_reactor_id(obj));
-		if (Players[Player_num].flags & PLAYER_FLAGS_CLOAKED)
-			best_gun_num = calc_best_gun(reactor->n_guns, obj, Believed_player_pos);
-		else
-			best_gun_num = calc_best_gun(reactor->n_guns, obj, ConsoleObject->pos);
+		const auto &player_pos = (get_local_player_flags() & PLAYER_FLAGS_CLOAKED) ? Believed_player_pos : ConsoleObject->pos;
+		best_gun_num = calc_best_gun(
+			get_reactor_definition(get_reactor_id(obj)).n_guns,
+			obj,
+			player_pos
+		);
 
 		if (best_gun_num != -1) {
 			fix			delta_fire_time;
 
-			auto vec_to_goal = vm_vec_sub((Players[Player_num].flags & PLAYER_FLAGS_CLOAKED) ? Believed_player_pos : ConsoleObject->pos, obj->ctype.reactor_info.gun_pos[best_gun_num]);
+			auto vec_to_goal = vm_vec_sub(player_pos, obj->ctype.reactor_info.gun_pos[best_gun_num]);
 			auto dist_to_player = vm_vec_normalize_quick(vec_to_goal);
 
 			if (dist_to_player > F1_0*300)
@@ -387,7 +394,7 @@ void do_controlcen_frame(const vobjptridx_t obj)
 	
 			if (Game_mode & GM_MULTI)
 				multi_send_controlcen_fire(vec_to_goal, best_gun_num, obj);	
-			Laser_create_new_easy( vec_to_goal, obj->ctype.reactor_info.gun_pos[best_gun_num], obj, CONTROLCEN_WEAPON_NUM, 1);
+			Laser_create_new_easy( vec_to_goal, obj->ctype.reactor_info.gun_pos[best_gun_num], obj, weapon_id_type::CONTROLCEN_WEAPON_NUM, 1);
 
 			int count = 0;
 #if defined(DXX_BUILD_DESCENT_I)
@@ -406,7 +413,7 @@ void do_controlcen_frame(const vobjptridx_t obj)
 				vm_vec_normalize_quick(vec_to_goal);
 				if (Game_mode & GM_MULTI)
 					multi_send_controlcen_fire(vec_to_goal, best_gun_num, obj);
-				Laser_create_new_easy( vec_to_goal, obj->ctype.reactor_info.gun_pos[best_gun_num], obj, CONTROLCEN_WEAPON_NUM, count == 0);
+				Laser_create_new_easy( vec_to_goal, obj->ctype.reactor_info.gun_pos[best_gun_num], obj, weapon_id_type::CONTROLCEN_WEAPON_NUM, count == 0);
 				count++;
 			}
 
@@ -433,46 +440,47 @@ void do_controlcen_frame(const vobjptridx_t obj)
 //	If this level contains a boss and mode == multiplayer, do control center stuff.
 void init_controlcen_for_level(void)
 {
-	objnum_t		cntrlcen_objnum=object_none, boss_objnum=object_none;
+	objptr_t cntrlcen_objnum = nullptr, boss_objnum = nullptr;
 
 	range_for (const auto i, highest_valid(Objects))
 	{
-		auto objp = vobjptridx(i);
+		const auto &&objp = vobjptridx(i);
 		if (objp->type == OBJ_CNTRLCEN)
 		{
-			if (cntrlcen_objnum != object_none)
-				;
-			else
+			if (cntrlcen_objnum == nullptr)
 				cntrlcen_objnum = i;
 		}
 
 		if ((objp->type == OBJ_ROBOT) && (Robot_info[get_robot_id(objp)].boss_flag)) {
-			if (boss_objnum != object_none)
-				;
-			else
+			if (boss_objnum == nullptr)
 				boss_objnum = i;
 		}
 	}
 
 #ifndef NDEBUG
-	if (cntrlcen_objnum == object_none) {
+	if (cntrlcen_objnum == nullptr)
+	{
 		Dead_controlcen_object_num = object_none;
 		return;
 	}
 #endif
 
-	if ( (boss_objnum != object_none) && !((Game_mode & GM_MULTI) && !(Game_mode & GM_MULTI_ROBOTS)) ) {
-		if (cntrlcen_objnum != object_none) {
-			Objects[cntrlcen_objnum].type = OBJ_GHOST;
-			Objects[cntrlcen_objnum].render_type = RT_NONE;
+	if (boss_objnum != nullptr && !((Game_mode & GM_MULTI) && !(Game_mode & GM_MULTI_ROBOTS)))
+	{
+		if (cntrlcen_objnum != nullptr)
+		{
+			const vobjptr_t objp = cntrlcen_objnum;
+			objp->type = OBJ_GHOST;
+			objp->control_type = CT_NONE;
+			objp->render_type = RT_NONE;
 			Control_center_present = 0;
 		}
-	} else if (cntrlcen_objnum != object_none) {
+	}
+	else if (cntrlcen_objnum != nullptr)
+	{
 		//	Compute all gun positions.
-		auto objp = &Objects[cntrlcen_objnum];
-		reactor *reactor = get_reactor_definition(get_reactor_id(objp));
-		for (uint_fast32_t i=0; i<reactor->n_guns; i++)
-			calc_controlcen_gun_point(reactor, objp, i);
+		const vobjptr_t objp = cntrlcen_objnum;
+		calc_controlcen_gun_point(objp);
 		Control_center_present = 1;
 
 #if defined(DXX_BUILD_DESCENT_I)
@@ -526,28 +534,15 @@ void reactor_read_n(PHYSFS_file *fp, partial_range_t<reactor *> r)
 }
 #endif
 
-static void control_center_triggers_swap(control_center_triggers *cct, int swap)
-{
-	if (!swap)
-		return;
-	
-	cct->num_links = SWAPSHORT(cct->num_links);
-	for (unsigned i = 0; i < sizeof(cct->seg) / sizeof(cct->seg[0]); i++)
-		cct->seg[i] = SWAPSHORT(cct->seg[i]);
-	for (unsigned i = 0; i < sizeof(cct->side) / sizeof(cct->side[0]); i++)
-		cct->side[i] = SWAPSHORT(cct->side[i]);
-}
-
 DEFINE_SERIAL_UDT_TO_MESSAGE(control_center_triggers, cct, (cct.num_links, cct.seg, cct.side));
 ASSERT_SERIAL_UDT_MESSAGE_SIZE(control_center_triggers, 42);
 
 /*
  * reads n control_center_triggers structs from a PHYSFS_file and swaps if specified
  */
-void control_center_triggers_read_swap(control_center_triggers *cct, int swap, PHYSFS_file *fp)
+void control_center_triggers_read(control_center_triggers *cct, PHYSFS_file *fp)
 {
 	PHYSFSX_serialize_read(fp, *cct);
-	control_center_triggers_swap(cct, swap);
 }
 
 void control_center_triggers_write(const control_center_triggers *cct, PHYSFS_file *fp)

@@ -137,7 +137,7 @@ static void set_robot_state(const vobjptr_t obj,int state)
 
 //set the animation angles for this robot.  Gun fields of robot info must
 //be filled in.
-void robot_set_angles(robot_info *r,polymodel *pm,vms_angvec angs[N_ANIM_STATES][MAX_SUBMODELS])
+void robot_set_angles(robot_info *r,polymodel *pm,array<array<vms_angvec, MAX_SUBMODELS>, N_ANIM_STATES> &angs)
 {
 	int m,g,state;
 	array<int, MAX_SUBMODELS> gun_nums;			//which gun each submodel is part of
@@ -210,10 +210,10 @@ void robot_info_read(PHYSFS_File *fp, robot_info &ri)
 	ri.exp2_sound_num = PHYSFSX_readShort(fp);
 
 #if defined(DXX_BUILD_DESCENT_I)
-	ri.weapon_type = PHYSFSX_readShort(fp);
+	ri.weapon_type = static_cast<weapon_id_type>(PHYSFSX_readShort(fp));
 #elif defined(DXX_BUILD_DESCENT_II)
-	ri.weapon_type = PHYSFSX_readByte(fp);
-	ri.weapon_type2 = PHYSFSX_readByte(fp);
+	ri.weapon_type = static_cast<weapon_id_type>(PHYSFSX_readByte(fp));
+	ri.weapon_type2 = static_cast<weapon_id_type>(PHYSFSX_readByte(fp));
 	ri.n_guns = PHYSFSX_readByte(fp);
 #endif
 	ri.contains_id = PHYSFSX_readByte(fp);
@@ -283,11 +283,12 @@ void robot_info_read(PHYSFS_File *fp, robot_info &ri)
 	ri.death_roll = PHYSFSX_readByte(fp);
 
 	ri.flags = PHYSFSX_readByte(fp);
-	PHYSFS_read(fp, ri.pad, 3, 1);
+	array<char, 3> pad;
+	PHYSFS_read(fp, pad, pad.size(), 1);
 
 	ri.deathroll_sound = PHYSFSX_readByte(fp);
 	ri.glow = PHYSFSX_readByte(fp);
-	ri.behavior = PHYSFSX_readByte(fp);
+	ri.behavior = static_cast<ai_behavior>(PHYSFSX_readByte(fp));
 	ri.aim = PHYSFSX_readByte(fp);
 #endif
 
@@ -306,8 +307,10 @@ void jointpos_read(PHYSFS_file *fp, jointpos &jp)
 	PHYSFSX_readAngleVec(&jp.angles, fp);
 }
 
+#if 0
 void jointpos_write(PHYSFS_file *fp, const jointpos &jp)
 {
 	PHYSFS_writeSLE16(fp, jp.jointnum);
 	PHYSFSX_writeAngleVec(fp, jp.angles);
 }
+#endif

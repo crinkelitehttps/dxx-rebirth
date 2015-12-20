@@ -18,7 +18,25 @@
 #include "dxxerror.h"
 #include "maths.h"
 
+namespace dcx {
+
 #define EPSILON (F1_0/100)
+
+namespace {
+
+class fix_sincos_input
+{
+public:
+	const unsigned m_idx;
+	const signed m_mul;
+	fix_sincos_input(fix a) :
+		m_idx(static_cast<uint8_t>(a >> 8)),
+		m_mul(static_cast<uint8_t>(a))
+	{
+	}
+};
+
+}
 
 fix64 fixmul64(fix a, fix b)
 {
@@ -84,12 +102,12 @@ static unsigned int fixdivquadlongu(quadint n, uint64_t d)
 	return n.q / d;
 }
 
-u_int32_t quad_sqrt(const quadint iq)
+uint32_t quad_sqrt(const quadint iq)
 {
-	const u_int32_t low = iq.low;
+	const uint32_t low = iq.low;
 	const int32_t high = iq.high;
 	int i, cnt;
-	u_int32_t r,old_r,t;
+	uint32_t r,old_r,t;
 
 	if (high<0)
 		return 0;
@@ -199,28 +217,36 @@ fix fix_sqrt(fix a)
 	return static_cast<fix>(long_sqrt(a)) << 8;
 }
 
+static fix fix_sin(const fix_sincos_input sci)
+{
+	fix ss = sincos_table[sci.m_idx];
+	return (ss + (((sincos_table[sci.m_idx + 1] - ss) * sci.m_mul) >> 8)) << 2;
+}
+
+__attribute_warn_unused_result
+static fix fix_cos(const fix_sincos_input sci)
+{
+	fix cc = sincos_table[sci.m_idx + 64];
+	return (cc + (((sincos_table[sci.m_idx + 64 + 1] - cc) * sci.m_mul) >> 8)) << 2;
+}
 
 //compute sine and cosine of an angle, filling in the variables
 //either of the pointers can be NULL
 //with interpolation
-void fix_sincos(fix a,fix *s,fix *c)
+fix_sincos_result fix_sincos(fix a)
 {
-	int i,f;
+	fix_sincos_input i(a);
+	return {fix_sin(i), fix_cos(i)};
+}
 
-	i = (a>>8)&0xff;
-	f = a&0xff;
+fix fix_sin(fix a)
+{
+	return fix_sin(fix_sincos_input{a});
+}
 
-	if (s)
-	{
-		fix ss = sincos_table[i];
-		*s = (ss + (((sincos_table[i+1] - ss) * f)>>8))<<2;
-	}
-
-	if (c)
-	{
-		fix cc = sincos_table[i+64];
-		*c = (cc + (((sincos_table[i+64+1] - cc) * f)>>8))<<2;
-	}
+fix fix_cos(fix a)
+{
+	return fix_cos(fix_sincos_input{a});
 }
 
 //compute sine and cosine of an angle, filling in the variables
@@ -277,4 +303,6 @@ fixang fix_acos(fix v)
 		aa = 0x8000 - aa;
 
 	return aa;
+}
+
 }

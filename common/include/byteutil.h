@@ -62,20 +62,34 @@ static inline int32_t SWAPINT(const int32_t &i)
 #endif
 
 #ifndef WORDS_BIGENDIAN
-#define INTEL_INT64(x)  x
-#define INTEL_INT(x)    x
-#define INTEL_SHORT(x)  x
+/* Always resolve F(a), so ambiguous calls are flagged even on little
+ * endian.
+ */
+#define byteutil_choose_endian(F,a)	(static_cast<void>(static_cast<decltype(F(a))>(0)), a)
+const int words_bigendian = 0;
 #else // ! WORDS_BIGENDIAN
-#define INTEL_INT64(x)  SWAPINT64(x)
-#define INTEL_INT(x)    SWAPINT(x)
-#define INTEL_SHORT(x)  SWAPSHORT(x)
+#define byteutil_choose_endian(F,a)	(F(a))
+const int words_bigendian = 1;
 #endif // ! WORDS_BIGENDIAN
 
 #ifndef WORDS_NEED_ALIGNMENT
 #define byteutil_unaligned_copy(dt, d, s)	(static_cast<dt &>(d) = *reinterpret_cast<const dt *>(s))
 #else // ! WORDS_NEED_ALIGNMENT
-#define byteutil_unaligned_copy(dt, d, s)	memcpy(&static_cast<dt &>(d), reinterpret_cast<const uint8_t *>(s), sizeof(d))
+#define byteutil_unaligned_copy(dt, d, s)	memcpy(&static_cast<dt &>(d), (s), sizeof(d))
 #endif // ! WORDS_NEED_ALIGNMENT
+
+template <typename T>
+static inline T INTEL_SHORT(const T &x)
+{
+	return byteutil_choose_endian(SWAPSHORT, x);
+}
+
+template <typename T>
+static inline T INTEL_INT(const T &x)
+{
+	return byteutil_choose_endian(SWAPINT, x);
+}
+#undef byteutil_choose_endian
 
 template <typename T>
 static inline uint32_t GET_INTEL_INT(const T *p)

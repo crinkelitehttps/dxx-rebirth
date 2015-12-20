@@ -18,24 +18,23 @@
 #include "args.h"
 #include "window.h"
 
+namespace dsx {
+
 static void arch_close(void)
 {
 	songs_uninit();
 
 	gr_close();
 
-	if (!GameArg.CtlNoJoystick)
+	if (!CGameArg.CtlNoJoystick)
 		joy_close();
 
 	mouse_close();
 
-	if (!GameArg.SndNoSound)
+	if (!CGameArg.SndNoSound)
 	{
 		digi_close();
 	}
-
-	key_close();
-
 	SDL_Quit();
 }
 
@@ -48,22 +47,20 @@ void arch_init(void)
 
 	key_init();
 
-	int system = SDLAUDIO_SYSTEM;
-	if (!GameArg.SndDisableSdlMixer)
-		system = SDLMIXER_SYSTEM;
-	digi_select_system( system );
+	digi_select_system();
 
-	if (!GameArg.SndNoSound)
+	if (!CGameArg.SndNoSound)
 		digi_init();
 
 	mouse_init();
 
-	if (!GameArg.CtlNoJoystick)
+	if (!CGameArg.CtlNoJoystick)
 		joy_init();
 
-	if ((t = gr_init(0)) != 0)
+	if ((t = gr_init()) != 0)
 		Error(TXT_CANT_INIT_GFX,t);
 
 	atexit(arch_close);
 }
 
+}

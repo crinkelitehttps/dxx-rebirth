@@ -25,10 +25,11 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
+#include <cstdint>
 #include <SDL_keysym.h>
 #include "pstypes.h"
 #include "maths.h"
-#include "event.h"
+#include "fwd-event.h"
 
 #define KEY_BUFFER_SIZE 16
 #define KEY_REPEAT_DELAY 400
@@ -40,11 +41,12 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 struct SDL_KeyboardEvent;
 
+namespace dcx {
+
 //==========================================================================
 // This installs the int9 vector and initializes the keyboard in buffered
 // ASCII mode. key_close simply undoes that.
 extern void key_init();
-extern void key_close();
 
 // Time in seconds when last key was pressed...
 extern fix64 keyd_time_when_last_pressed;
@@ -55,12 +57,31 @@ extern array<unsigned char, KEY_BUFFER_SIZE> unicode_frame_buffer;
 extern void key_flush();    // Clears the 256 char buffer
 extern int event_key_get(const d_event &event);	// Get the keycode from the EVENT_KEY_COMMAND event
 extern int event_key_get_raw(const d_event &event);	// same as above but without mod states
-extern unsigned char key_ascii();
+unsigned char key_ascii();
 
+class pressed_keys
+{
 // Set to 1 if the key is currently down, else 0
-extern volatile unsigned char keyd_pressed[256];
-extern volatile unsigned char keyd_last_pressed;
-extern volatile unsigned char keyd_last_released;
+	uint8_t modifier_cache;
+	array<uint8_t, 256> pressed;
+public:
+	static constexpr unsigned modifier_shift = 8;
+	void update_pressed(std::size_t i, uint8_t p)
+	{
+		pressed[i] = p;
+	}
+	void update(std::size_t, uint8_t);
+	uint8_t operator[](const std::size_t i) const
+	{
+		return pressed[i];
+	}
+	unsigned get_modifiers() const
+	{
+		return modifier_cache << modifier_shift;
+	}
+};
+
+extern pressed_keys keyd_pressed;
 
 extern void key_toggle_repeat(int enable);
 void key_handler(struct SDL_KeyboardEvent *kevent);
@@ -204,5 +225,7 @@ struct key_props
 };
 
 extern const array<key_props, 256> key_properties;
+
+}
 
 #endif

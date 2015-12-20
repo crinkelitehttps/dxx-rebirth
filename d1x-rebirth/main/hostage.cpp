@@ -39,18 +39,26 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "text.h"
 #include "piggy.h"
 
-hostage_data 		Hostages[MAX_HOSTAGES];						// Data for each hostage in mine
+#include "dxxsconf.h"
+#include "compiler-range_for.h"
+
+namespace dsx {
+
+array<hostage_data, MAX_HOSTAGES> 		Hostages;						// Data for each hostage in mine
 
 //------------------- Useful macros and variables ---------------
 
 int hostage_is_valid( int hostage_num )	{
 	if ( hostage_num < 0 ) return 0;
 	if ( hostage_num >= MAX_HOSTAGES ) return 0;
-	if ( Hostages[hostage_num].objnum < 0 ) return 0;
 	if ( Hostages[hostage_num].objnum > Highest_object_index ) return 0;
-	if ( Objects[Hostages[hostage_num].objnum].type != OBJ_HOSTAGE ) return 0;
-	if ( Objects[Hostages[hostage_num].objnum].signature != Hostages[hostage_num].objsig ) return 0;
-	if ( get_hostage_id(&Objects[Hostages[hostage_num].objnum]) != hostage_num) return 0;
+	const auto &&objp = vcobjptr(Hostages[hostage_num].objnum);
+	if (objp->type != OBJ_HOSTAGE)
+		return 0;
+	if (objp->signature != Hostages[hostage_num].objsig)
+		return 0;
+	if (get_hostage_id(objp) != hostage_num)
+		return 0;
 	return 1;
 }
 
@@ -84,9 +92,9 @@ void hostage_init_info(const vobjptridx_t objnum)
 void hostage_init_all()
 {
 	// Initialize all their values...
-	for (int i=0; i<MAX_HOSTAGES; i++ ) {
-		Hostages[i].objnum = object_none;
-		Hostages[i].objsig = -1;
+	range_for (auto &i, Hostages)
+	{
+		i.objnum = object_none;
 		//Hostages[i].type = 0;
 		//Hostages[i].sound_num = -1;
 	}
@@ -102,16 +110,12 @@ void hostage_compress_all()	{
 			newslot = hostage_get_next_slot();
 			if ( newslot < i )	{
 				Hostages[newslot] = Hostages[i];
-				set_hostage_id(&Objects[Hostages[newslot].objnum], newslot);
+				set_hostage_id(vobjptr(Hostages[newslot].objnum), newslot);
 				Hostages[i].objnum = object_none;
 				i = 0;		// start over
 			}
 		}
 	}
-
-	for (int i=0; i<MAX_HOSTAGES; i++ ) {
-		if ( hostage_is_valid(i) )	
-			;
-	}
 }
 
+}

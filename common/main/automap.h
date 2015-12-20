@@ -29,22 +29,29 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #ifdef __cplusplus
 #include <cstddef>
-#include "fwdsegment.h"
+#include "fwd-segment.h"
 #include "dxxsconf.h"
 #include "compiler-array.h"
 
+namespace dcx {
 extern int Automap_active;
-
+}
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 void do_automap();
 extern void automap_clear_visited();
+}
+#endif
+namespace dcx {
 extern array<ubyte, MAX_SEGMENTS> Automap_visited;
+}
 
 #if defined(DXX_BUILD_DESCENT_II)
-#include "objnum.h"
+#include "fwd-object.h"
 #include "ntstring.h"
+#include "fwd-window.h"
 
-struct vms_vector;
-
+namespace dsx {
 void DropBuddyMarker(vobjptr_t objp);
 void InitMarkerInput();
 window_event_result MarkerInputMessage(int key);
@@ -58,6 +65,7 @@ extern marker_message_text_t Marker_input;
 extern marker_messages_array_t MarkerMessage;
 extern array<objnum_t, NUM_MARKERS>  MarkerObject;
 extern ubyte DefiningMarkerMessage;
+}
 #endif
 
 #endif

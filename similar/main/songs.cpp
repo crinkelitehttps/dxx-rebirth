@@ -43,6 +43,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "u_mem.h"
 #include "args.h"
 #include "physfsx.h"
+#include "game.h"
 
 int Songs_initialized = 0;
 static int Song_playing = -1; // -1 if no song playing, else the Descent song number
@@ -102,9 +103,8 @@ static void songs_init()
 
 		for (i = SONG_FIRST_LEVEL_SONG; i < predef; i++) {
 			snprintf(BIMSongs[i].filename, sizeof(BIMSongs[i].filename), "game%02d.hmp", i - SONG_FIRST_LEVEL_SONG + 1);
-			if (!PHYSFSX_exists(BIMSongs[i].filename,1))
-				snprintf(BIMSongs[i].filename, sizeof(BIMSongs[i].filename), "game%d.hmp", i - SONG_FIRST_LEVEL_SONG);
-			if (!PHYSFSX_exists(BIMSongs[i].filename,1))
+			if (!PHYSFSX_exists(BIMSongs[i].filename,1) &&
+				!PHYSFSX_exists((snprintf(BIMSongs[i].filename, sizeof(BIMSongs[i].filename), "game%d.hmp", i - SONG_FIRST_LEVEL_SONG), BIMSongs[i].filename), 1))
 			{
 				memset(BIMSongs[i].filename, '\0', sizeof(BIMSongs[i].filename)); // music not available
 				break;
@@ -114,7 +114,7 @@ static void songs_init()
 	else
 	{
 		PHYSFSX_gets_line_t<81> inputline;
-		while (!PHYSFS_eof(fp) && PHYSFSX_fgets(inputline, fp))
+		while (PHYSFSX_fgets(inputline, fp))
 		{
 			if ( strlen( inputline ) )
 			{
@@ -158,7 +158,7 @@ static void songs_init()
 		GameCfg.MusicType = MUSIC_TYPE_NONE;
 
 	// If SDL_Mixer is not supported (or deactivated), switch to no-music type if SDL_mixer-related music type was selected
-	if (GameArg.SndDisableSdlMixer)
+	if (CGameArg.SndDisableSdlMixer)
 	{
 #ifndef _WIN32
 		if (GameCfg.MusicType == MUSIC_TYPE_BUILTIN)
@@ -306,16 +306,14 @@ static int songs_have_cd()
 #if defined(DXX_BUILD_DESCENT_I)
 static void redbook_repeat_func()
 {
-	stop_time();
+	pause_game_world_time p;
 	RBAPlayTracks(Redbook_playing, 0, redbook_repeat_func);
-	start_time();
 }
 #elif defined(DXX_BUILD_DESCENT_II)
 static void play_credits_track()
 {
-	stop_time();
+	pause_game_world_time p;
 	songs_play_song(SONG_CREDITS, 1);
-	start_time();
 }
 #endif
 
@@ -453,10 +451,9 @@ int songs_play_song( int songnum, int repeat )
 
 static void redbook_first_song_func()
 {
-	stop_time();
+	pause_game_world_time p;
 	Song_playing = -1; // Playing Redbook tracks will not modify Song_playing. To repeat we must reset this so songs_play_level_song does not think we want to re-play the same song again.
 	songs_play_level_song(1, 0);
-	start_time();
 }
 
 // play track given by levelnum (depending on the music type and it's playing behaviour) or increment/decrement current track number via offset value

@@ -25,7 +25,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
-#include "fwdvalptridx.h"
+#include <cstdint>
+#include "fwd-segment.h"
 
 #ifdef __cplusplus
 
@@ -46,13 +47,15 @@ extern int wall_remove_blastable();
 
 // Adds a wall. (visually)
 extern int wall_add_to_curside();
-extern int wall_add_to_markedside(sbyte type);
+int wall_add_to_markedside(int8_t type);
  
 // Removes a wall. (visually)
 extern int wall_remove();
 
 // Removes a specific side.
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 int wall_remove_side(vsegptridx_t seg, short side);
+#endif
 
 extern int bind_wall_to_control_center();
 

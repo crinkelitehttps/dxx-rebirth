@@ -23,30 +23,28 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-#ifndef _HOSTAGE_H
-#define _HOSTAGE_H
+#pragma once
 
 #ifdef __cplusplus
-
+#include "fwd-object.h"
+#include "compiler-array.h"
 
 #define HOSTAGE_SIZE        i2f(5)  // 3d size of a hostage
 
 #define MAX_HOSTAGE_TYPES   1       //only one hostage bitmap
 #if defined(DXX_BUILD_DESCENT_I)
+namespace dsx {
+
 #define MAX_HOSTAGES				10		//max per any one level
 
 // 1 per hostage
 struct hostage_data
 {
 	objnum_t		objnum;
-	int		objsig;
+	object_signature_t objsig;
 };
 
-extern hostage_data Hostages[MAX_HOSTAGES];
-
-//returns true if something drew
-int do_hostage_effects();
+extern array<hostage_data, MAX_HOSTAGES> Hostages;
 
 #ifdef EDITOR
 void hostage_init_all();
@@ -55,6 +53,7 @@ int hostage_is_valid( int hostage_num );
 int hostage_object_is_valid(vobjptridx_t objnum);
 void hostage_init_info(vobjptridx_t objnum);
 #endif
+}
 #elif defined(DXX_BUILD_DESCENT_II)
 #ifdef EDITOR
 static inline void hostage_init_all() {}
@@ -62,13 +61,18 @@ static inline void hostage_init_info(const objnum_t &) {}
 #endif
 #endif
 
-extern int N_hostage_types;
+namespace dcx {
 
-extern int Hostage_vclip_num[MAX_HOSTAGE_TYPES];    // for each type of hostage
+extern unsigned N_hostage_types;
+extern array<int, MAX_HOSTAGE_TYPES> Hostage_vclip_num;    // for each type of hostage
 
+}
+
+namespace dsx {
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 void draw_hostage(vobjptridx_t obj);
+#endif
 void hostage_rescue();
+}
 
 #endif
-
-#endif /* _HOSTAGE_H */

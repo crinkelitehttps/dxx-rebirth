@@ -23,6 +23,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gr.h"
 #include "ui.h"
 
+namespace dcx {
+
 void Hline(short x1, short x2, short y )
 {
 	gr_uline( i2f(x1), i2f(y), i2f(x2), i2f(y) );
@@ -35,9 +37,9 @@ void Vline(short y1, short y2, short x )
 
 void ui_string_centered( short x, short y, const char * s )
 {
-	int height, width, avg;
+	int height, width;
 
-	gr_get_string_size(s, &width, &height, &avg );
+	gr_get_string_size(s, &width, &height, nullptr);
 
 	//baseline = height-grd_curcanv->cv_font->ft_baseline;
 
@@ -120,3 +122,4 @@ void ui_draw_line_in( short x1, short y1, short x2, short y2 )
 
 
 
+}

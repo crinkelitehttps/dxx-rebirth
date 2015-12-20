@@ -40,9 +40,10 @@
 #include "compiler-array.h"
 #include "compiler-static_assert.h"
 #include "compiler-type_traits.h"
+#include "partial_range.h"
 
 #ifdef DXX_HAVE_BUILTIN_CONSTANT_P
-#define _DXX_PHYSFS_CHECK_SIZE_CONSTANT(S,v)	(__builtin_constant_p((S) > v) && (S) > v)
+#define _DXX_PHYSFS_CHECK_SIZE_CONSTANT(S,v)	DXX_CONSTANT_TRUE((S) > (v))
 #define _DXX_PHYSFS_CHECK_SIZE(S,C,v)	_DXX_PHYSFS_CHECK_SIZE_CONSTANT(static_cast<size_t>(S) * static_cast<size_t>(C), v)
 #define DXX_PHYSFS_CHECK_READ_SIZE_OBJECT_SIZE(S,C,v)	\
 	(void)(__builtin_object_size(v, 1) != static_cast<size_t>(-1) && _DXX_PHYSFS_CHECK_SIZE(S,C,__builtin_object_size(v, 1)) && (DXX_ALWAYS_ERROR_FUNCTION(dxx_trap_overwrite, "read size exceeds element size"), 0))
@@ -68,7 +69,10 @@
 	((void)(DXX_PHYSFS_CHECK_WRITE_ELEMENT_SIZE_CONSTANT(S,C),	\
 	DXX_PHYSFS_CHECK_WRITE_SIZE_ARRAY_SIZE(S,C), 0))	\
 
+namespace dcx {
+
 template <typename V>
+__attribute_always_inline()
 static inline typename tt::enable_if<tt::is_integral<V>::value, PHYSFS_sint64>::type PHYSFSX_check_read(PHYSFS_file *file, V *v, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	static_assert(tt::is_pod<V>::value, "non-POD integral value read");
@@ -77,6 +81,7 @@ static inline typename tt::enable_if<tt::is_integral<V>::value, PHYSFS_sint64>::
 }
 
 template <typename V>
+__attribute_always_inline()
 static inline typename tt::enable_if<!tt::is_integral<V>::value, PHYSFS_sint64>::type PHYSFSX_check_read(PHYSFS_file *file, V *v, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	static_assert(tt::is_pod<V>::value, "non-POD non-integral value read");
@@ -84,16 +89,8 @@ static inline typename tt::enable_if<!tt::is_integral<V>::value, PHYSFS_sint64>:
 	return PHYSFS_read(file, v, S, C);
 }
 
-template <typename V>
-static inline typename tt::enable_if<tt::is_array<V>::value, PHYSFS_sint64>::type PHYSFSX_check_read(PHYSFS_file *file, V &v, PHYSFS_uint32 S, PHYSFS_uint32 C)
-{
-	typedef typename tt::remove_extent<V>::type V0;
-	static_assert(tt::is_pod<V0>::value, "C array of non-POD elements read");
-	DXX_PHYSFS_CHECK_READ_SIZE_ARRAY_SIZE(S, C);
-	return PHYSFSX_check_read(file, &v[0], S, C);
-}
-
 template <typename V, std::size_t N>
+__attribute_always_inline()
 static inline PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, array<V, N> &v, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	static_assert(tt::is_pod<V>::value, "C++ array of non-POD elements read");
@@ -102,18 +99,14 @@ static inline PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, array<V, N> &v
 }
 
 template <typename V, typename D>
+__attribute_always_inline()
 static inline PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, const std::unique_ptr<V, D> &v, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	return PHYSFSX_check_read(file, v.get(), S, C);
 }
 
 template <typename V>
-static inline PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, const RAIIdmem<V> &v, PHYSFS_uint32 S, PHYSFS_uint32 C)
-{
-	return PHYSFSX_check_read(file, v.get(), S, C);
-}
-
-template <typename V>
+__attribute_always_inline()
 static inline typename tt::enable_if<tt::is_integral<V>::value, PHYSFS_sint64>::type PHYSFSX_check_write(PHYSFS_file *file, const V *v, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	static_assert(tt::is_pod<V>::value, "non-POD integral value written");
@@ -123,6 +116,7 @@ static inline typename tt::enable_if<tt::is_integral<V>::value, PHYSFS_sint64>::
 }
 
 template <typename V>
+__attribute_always_inline()
 static inline typename tt::enable_if<!tt::is_integral<V>::value, PHYSFS_sint64>::type PHYSFSX_check_write(PHYSFS_file *file, const V *v, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	static_assert(tt::is_pod<V>::value, "non-POD non-integral value written");
@@ -131,15 +125,7 @@ static inline typename tt::enable_if<!tt::is_integral<V>::value, PHYSFS_sint64>:
 }
 
 template <typename V, std::size_t N>
-static inline typename tt::enable_if<tt::is_array<V>::value, PHYSFS_sint64>::type PHYSFSX_check_write(PHYSFS_file *file, const V (&v)[N], PHYSFS_uint32 S, PHYSFS_uint32 C)
-{
-	typedef typename tt::remove_extent<V>::type V0;
-	static_assert(tt::is_pod<V0>::value, "C array of non-POD elements written");
-	DXX_PHYSFS_CHECK_WRITE_CONSTANTS(S,C);
-	return PHYSFSX_check_write(file, &v[0], S, C);
-}
-
-template <typename V, std::size_t N>
+__attribute_always_inline()
 static inline PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, const array<V, N> &v, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	static_assert(tt::is_pod<V>::value, "C++ array of non-POD elements written");
@@ -148,30 +134,23 @@ static inline PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, const array<V
 }
 
 template <typename T, typename D>
+__attribute_always_inline()
 static inline PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, const std::unique_ptr<T, D> &p, PHYSFS_uint32 S, PHYSFS_uint32 C)
 {
 	return PHYSFSX_check_write(file, p.get(), S, C);
 }
 
 template <typename V>
-static inline PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, const RAIIdmem<V> &v, PHYSFS_uint32 S, PHYSFS_uint32 C)
-{
-	return PHYSFSX_check_write(file, v.get(), S, C);
-}
+PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, exact_type<V> v, PHYSFS_uint32 S, PHYSFS_uint32 C) = delete;
+template <typename V>
+PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, exact_type<V> v, PHYSFS_uint32 S, PHYSFS_uint32 C) = delete;
 
 template <typename V>
-PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, exact_type<V> v, PHYSFS_uint32 S, PHYSFS_uint32 C) DXX_CXX11_EXPLICIT_DELETE;
+PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, V **v, PHYSFS_uint32 S, PHYSFS_uint32 C) = delete;
 template <typename V>
-PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, exact_type<V> v, PHYSFS_uint32 S, PHYSFS_uint32 C) DXX_CXX11_EXPLICIT_DELETE;
-
-template <typename V>
-PHYSFS_sint64 PHYSFSX_check_read(PHYSFS_file *file, V **v, PHYSFS_uint32 S, PHYSFS_uint32 C) DXX_CXX11_EXPLICIT_DELETE;
-template <typename V>
-PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, V **v, PHYSFS_uint32 S, PHYSFS_uint32 C) DXX_CXX11_EXPLICIT_DELETE;
+PHYSFS_sint64 PHYSFSX_check_write(PHYSFS_file *file, V **v, PHYSFS_uint32 S, PHYSFS_uint32 C) = delete;
 #define PHYSFS_read(F,V,S,C)	PHYSFSX_check_read(F,V,S,C)
 #define PHYSFS_write(F,V,S,C)	PHYSFSX_check_write(F,V,S,C)
-
-bool PHYSFSX_init(int argc, char *argv[]);
 
 static inline PHYSFS_sint16 PHYSFSX_readSXE16(PHYSFS_file *file, int swap)
 {
@@ -340,7 +319,7 @@ public:
 		}
 };
 
-const PHYSFSX_fgets_t PHYSFSX_fgets{};
+constexpr PHYSFSX_fgets_t PHYSFSX_fgets{};
 
 static inline int PHYSFSX_printf(PHYSFS_file *file, const char *format, ...) __attribute_format_printf(2, 3);
 static inline int PHYSFSX_printf(PHYSFS_file *file, const char *format, ...)
@@ -370,12 +349,12 @@ static inline int PHYSFSX_writeVector(PHYSFS_file *file, const vms_vector &v)
 }
 
 #define define_read_helper(T,N,F)	\
-	static inline T N(const char *func, const unsigned line, PHYSFS_file *file)	\
+	static inline T N(const char *filename, const unsigned line, const char *func, PHYSFS_file *file)	\
 	{	\
 		T i;	\
 		if (!(F)(file, &i))	\
 		{	\
-			(Error)(func, line, "reading " #T " in " #N "() at %lu", static_cast<unsigned long>((PHYSFS_tell)(file)));	\
+			(Error)(filename, line, func, "reading " #T " in " #N "() at %lu", static_cast<unsigned long>((PHYSFS_tell)(file)));	\
 		}	\
 		return i;	\
 	}
@@ -386,44 +365,44 @@ static inline sbyte PHYSFSX_readS8(PHYSFS_file *file, sbyte *b)
 }
 
 define_read_helper(sbyte, PHYSFSX_readByte, PHYSFSX_readS8);
-#define PHYSFSX_readByte(F)	((PHYSFSX_readByte)(__func__, __LINE__, (F)))
+#define PHYSFSX_readByte(F)	((PHYSFSX_readByte)(__FILE__, __LINE__, __func__, (F)))
 
 define_read_helper(int, PHYSFSX_readInt, PHYSFS_readSLE32);
-#define PHYSFSX_readInt(F)	((PHYSFSX_readInt)(__func__, __LINE__, (F)))
+#define PHYSFSX_readInt(F)	((PHYSFSX_readInt)(__FILE__, __LINE__, __func__, (F)))
 
 define_read_helper(int16_t, PHYSFSX_readShort, PHYSFS_readSLE16);
-#define PHYSFSX_readShort(F)	((PHYSFSX_readShort)(__func__, __LINE__, (F)))
+#define PHYSFSX_readShort(F)	((PHYSFSX_readShort)(__FILE__, __LINE__, __func__, (F)))
 
 define_read_helper(fix, PHYSFSX_readFix, PHYSFS_readSLE32);
-#define PHYSFSX_readFix(F)	((PHYSFSX_readFix)(__func__, __LINE__, (F)))
+#define PHYSFSX_readFix(F)	((PHYSFSX_readFix)(__FILE__, __LINE__, __func__, (F)))
 
 define_read_helper(fixang, PHYSFSX_readFixAng, PHYSFS_readSLE16);
-#define PHYSFSX_readFixAng(F)	((PHYSFSX_readFixAng)(__func__, __LINE__, (F)))
+#define PHYSFSX_readFixAng(F)	((PHYSFSX_readFixAng)(__FILE__, __LINE__, __func__, (F)))
 
-static inline void PHYSFSX_readVector(const char *func, const unsigned line, PHYSFS_file *file, vms_vector &v)
+static inline void PHYSFSX_readVector(const char *filename, const unsigned line, const char *func, PHYSFS_file *file, vms_vector &v)
 {
-	v.x = (PHYSFSX_readFix)(func, line, file);
-	v.y = (PHYSFSX_readFix)(func, line, file);
-	v.z = (PHYSFSX_readFix)(func, line, file);
+	v.x = (PHYSFSX_readFix)(filename, line, func, file);
+	v.y = (PHYSFSX_readFix)(filename, line, func, file);
+	v.z = (PHYSFSX_readFix)(filename, line, func, file);
 }
-#define PHYSFSX_readVector(F,V)	PHYSFSX_readVector(__func__, __LINE__, (F), (V))
+#define PHYSFSX_readVector(F,V)	PHYSFSX_readVector(__FILE__, __LINE__, __func__, (F), (V))
 
-static inline void PHYSFSX_readAngleVec(const char *func, const unsigned line, vms_angvec *v, PHYSFS_file *file)
+static inline void PHYSFSX_readAngleVec(const char *filename, const unsigned line, const char *func, vms_angvec *v, PHYSFS_file *file)
 {
-	v->p = (PHYSFSX_readFixAng)(func, line, file);
-	v->b = (PHYSFSX_readFixAng)(func, line, file);
-	v->h = (PHYSFSX_readFixAng)(func, line, file);
+	v->p = (PHYSFSX_readFixAng)(filename, line, func, file);
+	v->b = (PHYSFSX_readFixAng)(filename, line, func, file);
+	v->h = (PHYSFSX_readFixAng)(filename, line, func, file);
 }
-#define PHYSFSX_readAngleVec(V,F)	((PHYSFSX_readAngleVec(__func__, __LINE__, (V), (F))))
+#define PHYSFSX_readAngleVec(V,F)	((PHYSFSX_readAngleVec(__FILE__, __LINE__, __func__, (V), (F))))
 
-static inline void PHYSFSX_readMatrix(const char *func, const unsigned line, vms_matrix *m,PHYSFS_file *file)
+static inline void PHYSFSX_readMatrix(const char *filename, const unsigned line, const char *func, vms_matrix *m,PHYSFS_file *file)
 {
-	(PHYSFSX_readVector)(func, line, file, m->rvec);
-	(PHYSFSX_readVector)(func, line, file, m->uvec);
-	(PHYSFSX_readVector)(func, line, file, m->fvec);
+	(PHYSFSX_readVector)(filename, line, func, file, m->rvec);
+	(PHYSFSX_readVector)(filename, line, func, file, m->uvec);
+	(PHYSFSX_readVector)(filename, line, func, file, m->fvec);
 }
 
-#define PHYSFSX_readMatrix(M,F)	((PHYSFSX_readMatrix)(__func__, __LINE__, (M), (F)))
+#define PHYSFSX_readMatrix(M,F)	((PHYSFSX_readMatrix)(__FILE__, __LINE__, __func__, (M), (F)))
 
 #define PHYSFSX_contfile_init PHYSFSX_addRelToSearchPath
 #define PHYSFSX_contfile_close PHYSFSX_removeRelFromSearchPath
@@ -467,68 +446,62 @@ public:
 		bool operator!=(T) const = delete;
 };
 
-class PHYSFS_list_deleter
-{
-public:
-	void operator()(char **list) const
-	{
-		PHYSFS_freeList(list);
-	}
-};
-
-typedef std::unique_ptr<char *[], PHYSFS_list_deleter> PHYSFS_list_t;
-
 typedef char file_extension_t[5];
 __attribute_nonnull()
 __attribute_warn_unused_result
-int PHYSFSX_checkMatchingExtension(const char *filename, const file_extension_t *exts, const uint_fast32_t count);
+int PHYSFSX_checkMatchingExtension(const char *filename, const partial_range_t<const file_extension_t *>);
+
+__attribute_nonnull()
+__attribute_warn_unused_result
+static inline int PHYSFSX_checkMatchingExtension(const char *filename, const file_extension_t *exts, const uint_fast32_t count)
+{
+	return PHYSFSX_checkMatchingExtension(filename, unchecked_partial_range(exts, count));
+}
 
 template <std::size_t count>
 __attribute_nonnull()
 __attribute_warn_unused_result
 static inline int PHYSFSX_checkMatchingExtension(const array<file_extension_t, count> &exts, const char *filename)
 {
-	return PHYSFSX_checkMatchingExtension(filename, exts.data(), count);
+	return PHYSFSX_checkMatchingExtension(filename, exts);
 }
 
 extern int PHYSFSX_addRelToSearchPath(const char *relname, int add_to_end);
 extern int PHYSFSX_removeRelFromSearchPath(const char *relname);
 extern int PHYSFSX_fsize(const char *hogname);
 extern void PHYSFSX_listSearchPathContent();
-extern int PHYSFSX_checkSupportedArchiveTypes();
-extern int PHYSFSX_getRealPath(const char *stdPath, char *realPath);
+int PHYSFSX_getRealPath(const char *stdPath, char *realPath, std::size_t);
+
+template <std::size_t N>
+static inline int PHYSFSX_getRealPath(const char *stdPath, char (&realPath)[N])
+{
+	return PHYSFSX_getRealPath(stdPath, realPath, N);
+}
+
+template <std::size_t N>
+static inline int PHYSFSX_getRealPath(const char *stdPath, array<char, N> &realPath)
+{
+	return PHYSFSX_getRealPath(stdPath, realPath.data(), N);
+}
+
 extern int PHYSFSX_isNewPath(const char *path);
 extern int PHYSFSX_rename(const char *oldpath, const char *newpath);
 
-__attribute_nonnull()
-__attribute_warn_unused_result
-PHYSFS_list_t PHYSFSX_findFiles(const char *path, const file_extension_t *exts, uint_fast32_t count);
-
-template <std::size_t count>
-__attribute_nonnull()
-__attribute_warn_unused_result
-static inline PHYSFS_list_t PHYSFSX_findFiles(const char *path, const array<file_extension_t, count> &exts)
-{
-	return PHYSFSX_findFiles(path, exts.data(), count);
-}
-
-__attribute_nonnull()
-__attribute_warn_unused_result
-PHYSFS_list_t PHYSFSX_findabsoluteFiles(const char *path, const char *realpath, const file_extension_t *exts, uint_fast32_t count);
-
-template <std::size_t count>
-__attribute_nonnull()
-__attribute_warn_unused_result
-static inline PHYSFS_list_t PHYSFSX_findabsoluteFiles(const char *path, const char *realpath, const array<file_extension_t, count> &exts)
-{
-	return PHYSFSX_findabsoluteFiles(path, realpath, exts.data(), count);
-}
-
-extern PHYSFS_sint64 PHYSFSX_getFreeDiskSpace();
-extern int PHYSFSX_exists(const char *filename, int ignorecase);
+#define PHYSFSX_exists(F,I)	((I) ? PHYSFSX_exists_ignorecase(F) : PHYSFS_exists(F))
+int PHYSFSX_exists_ignorecase(const char *filename);
 RAIIPHYSFS_File PHYSFSX_openReadBuffered(const char *filename);
 RAIIPHYSFS_File PHYSFSX_openWriteBuffered(const char *filename);
 extern void PHYSFSX_addArchiveContent();
 extern void PHYSFSX_removeArchiveContent();
+}
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+
+bool PHYSFSX_init(int argc, char *argv[]);
+int PHYSFSX_checkSupportedArchiveTypes();
+
+}
+#endif
 
 #endif

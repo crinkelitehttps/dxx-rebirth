@@ -40,7 +40,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "dxxerror.h"
 #include "kdefs.h"
 #include	"object.h"
-#include "polyobj.h"
+#include "robot.h"
 #include "game.h"
 #include "ai.h"
 #include "bm.h"
@@ -71,28 +71,31 @@ static void show_objects_in_segment(const vcsegptr_t sp)
 }
 
 //returns the number of the first object in a segment, skipping the player
-static int get_first_object(const vsegptr_t seg)
+static objnum_t get_first_object(const vsegptr_t seg)
 {
-	int id;
-
-	id = seg->objects;
-
-	if (id == (ConsoleObject-Objects))
-		id = Objects[id].next;
-
+	const auto id = seg->objects;
+	if (id == object_none)
+		return object_none;
+	const auto &&o = vobjptr(id);
+	if (o == ConsoleObject)
+		return o->next;
 	return id;
 }
 
 //returns the number of the next object in a segment, skipping the player
-static int get_next_object(const vsegptr_t seg,objnum_t id)
+static objnum_t get_next_object(const vsegptr_t seg,objnum_t id)
 {
-	if (id==object_none || (id=Objects[id].next)==object_none)
+	if (id == object_none)
 		return get_first_object(seg);
-
-	if (id == (ConsoleObject-Objects))
-		return get_next_object(seg,id);
-
-	return id;
+	for (auto o = vobjptr(id);;)
+	{
+		id = o->next;
+		if (id == object_none)
+			return get_first_object(seg);
+		o = vobjptr(id);
+		if (o != ConsoleObject)
+			return id;
+	}
 }
 
 
@@ -170,14 +173,14 @@ int place_object(const vsegptridx_t segp, const vms_vector &object_pos, short ob
 			{
 				segnum_t hide_segment;
 			if (Markedsegp)
-				hide_segment = Markedsegp-Segments;
+				hide_segment = Markedsegp;
 			else
 				hide_segment = segment_none;
 			//	robots which lunge forward to attack cannot have behavior type still.
 			if (Robot_info[get_robot_id(obj)].attack_type)
-				init_ai_object(obj, AIB_NORMAL, hide_segment);
+				init_ai_object(obj, ai_behavior::AIB_NORMAL, hide_segment);
 			else
-				init_ai_object(obj, AIB_STILL, hide_segment);
+				init_ai_object(obj, ai_behavior::AIB_STILL, hide_segment);
 			}
 			break;
 		}
@@ -273,8 +276,11 @@ static int compute_num_players(void)
 	int	count = 0;
 
 	range_for (const auto i, highest_valid(Objects))
-		if (Objects[i].type == OBJ_PLAYER)
+	{
+		const auto &&objp = vcobjptr(static_cast<objnum_t>(i));
+		if (objp->type == OBJ_PLAYER)
 			count++;
+	}
 
 	return count;
 
@@ -286,8 +292,10 @@ int ObjectMakeCoop(void)
 	Assert(Cur_object_index < MAX_OBJECTS);
 //	Assert(Objects[Cur_object_index.type == OBJ_PLAYER);
 
-	if (Objects[Cur_object_index].type == OBJ_PLAYER ) {
-		Objects[Cur_object_index].type = OBJ_COOP;
+	const auto &&objp = vobjptr(Cur_object_index);
+	if (objp->type == OBJ_PLAYER)
+	{
+		objp->type = OBJ_COOP;
 		editor_status("You just made a player object COOPERATIVE");
 	} else
 		editor_status("This is not a player object");
@@ -320,7 +328,7 @@ int ObjectPlaceObject(void)
 	rval = place_object(Cursegp, cur_object_loc, Cur_object_type, Cur_object_id);
 
 	if (old_cur_object_index != Cur_object_index)
-		Objects[Cur_object_index].rtype.pobj_info.tmap_override = -1;
+		vobjptr(Cur_object_index)->rtype.pobj_info.tmap_override = -1;
 
 	return rval;
 
@@ -348,19 +356,15 @@ int ObjectPlaceObjectTmap(void)
 //	------------------------------------------------------------------------------------------------------
 int ObjectSelectNextinSegment(void)
 {
-	segment *objsegp;
-
-
 	//update_due_to_new_segment();
 
 	//Assert(Cur_object_seg == Cursegp);
 
+	const vsegptr_t objsegp = Cursegp;
 	if (Cur_object_index == object_none) {
-		objsegp = Cursegp;
 		Cur_object_index = objsegp->objects;
 	} else {
-		objsegp = Cursegp;
-		if (Objects[Cur_object_index].segnum != Cursegp-Segments)
+		if (Objects[Cur_object_index].segnum != Cursegp)
 			Cur_object_index = objsegp->objects;
 	}
 
@@ -387,8 +391,10 @@ int ObjectSelectNextInMine()
 		Cur_object_index++;
 		if (Cur_object_index>= MAX_OBJECTS ) Cur_object_index= 0;
 
-		if ((Objects[Cur_object_index ].type != OBJ_NONE) && (Cur_object_index != (ConsoleObject-Objects)) )	{
-			Cursegp = &Segments[Objects[Cur_object_index ].segnum];
+		const auto &&objp = vcobjptr(Cur_object_index);
+		if (objp->type != OBJ_NONE && objp != ConsoleObject)
+		{
+			Cursegp = segptridx(objp->segnum);
 			med_create_new_segment_from_cursegp();
 			//Cur_object_seg = Cursegp;
 			return 1;
@@ -405,12 +411,13 @@ int ObjectSelectNextInMine()
 int ObjectSelectPrevInMine()
 {	int i;
 	for (i=0;i<MAX_OBJECTS;i++) {
-		Cur_object_index--;
-		if (Cur_object_index < 0 )
+		if (!(Cur_object_index --))
 			Cur_object_index = MAX_OBJECTS-1;
 
-		if ((Objects[Cur_object_index ].type != OBJ_NONE) && (Cur_object_index != (ConsoleObject-Objects)) )	{
-			Cursegp = &Segments[Objects[Cur_object_index ].segnum];
+		const auto &&objp = vcobjptr(Cur_object_index);
+		if (objp->type != OBJ_NONE && objp != ConsoleObject)
+		{
+			Cursegp = segptridx(objp->segnum);
 			med_create_new_segment_from_cursegp();
 			//Cur_object_seg = Cursegp;
 			return 1;
@@ -453,9 +460,7 @@ static int move_object_within_mine(const vobjptridx_t obj, const vms_vector &new
 	range_for (const auto segnum, highest_valid(Segments))
 	{
 		const auto segp = vsegptridx(segnum);
-		segmasks result = get_seg_masks(obj->pos, segp, 0, __FILE__, __LINE__);
-
-		if (result.centermask == 0) {
+		if (get_seg_masks(obj->pos, segp, 0).centermask == 0) {
 			int	fate;
 			fvi_info	hit_info;
 			fvi_query fq;
@@ -488,7 +493,7 @@ static int move_object_within_mine(const vobjptridx_t obj, const vms_vector &new
 //	Return 0 if object is in expected segment, else return 1
 static int verify_object_seg(const vobjptridx_t objp, const vms_vector &newpos)
 {
-	segmasks result = get_seg_masks(newpos, objp->segnum, objp->size, __FILE__, __LINE__);
+	const auto &&result = get_seg_masks(newpos, vcsegptr(objp->segnum), objp->size);
 	if (result.facemask == 0)
 		return 0;
 	else
@@ -507,7 +512,7 @@ int	ObjectMoveForward(void)
 
 	auto obj = vobjptridx(Cur_object_index);
 
-	extract_forward_vector_from_segment(&Segments[obj->segnum], fvec);
+	extract_forward_vector_from_segment(vcsegptr(obj->segnum), fvec);
 	vm_vec_normalize(fvec);
 
 	const auto newpos = vm_vec_add(obj->pos, vm_vec_scale(fvec, OBJ_SCALE));
@@ -532,7 +537,7 @@ int	ObjectMoveBack(void)
 
 	auto obj = vobjptridx(Cur_object_index);
 
-	extract_forward_vector_from_segment(&Segments[obj->segnum], fvec);
+	extract_forward_vector_from_segment(vcsegptr(obj->segnum), fvec);
 	vm_vec_normalize(fvec);
 
 	const auto newpos = vm_vec_sub(obj->pos, vm_vec_scale(fvec, OBJ_SCALE));
@@ -557,7 +562,7 @@ int	ObjectMoveLeft(void)
 
 	auto obj = vobjptridx(Cur_object_index);
 
-	extract_right_vector_from_segment(&Segments[obj->segnum], rvec);
+	extract_right_vector_from_segment(vcsegptr(obj->segnum), rvec);
 	vm_vec_normalize(rvec);
 
 	const auto newpos = vm_vec_sub(obj->pos, vm_vec_scale(rvec, OBJ_SCALE));
@@ -582,7 +587,7 @@ int	ObjectMoveRight(void)
 
 	auto obj = vobjptridx(Cur_object_index);
 
-	extract_right_vector_from_segment(&Segments[obj->segnum], rvec);
+	extract_right_vector_from_segment(vcsegptr(obj->segnum), rvec);
 	vm_vec_normalize(rvec);
 
 	const auto newpos = vm_vec_add(obj->pos, vm_vec_scale(rvec, OBJ_SCALE));
@@ -605,7 +610,8 @@ int	ObjectSetDefault(void)
 		return 1;
 	}
 
-	compute_segment_center(Objects[Cur_object_index].pos, &Segments[Objects[Cur_object_index].segnum]);
+	const auto &&objp = vobjptr(Cur_object_index);
+	compute_segment_center(objp->pos, vcsegptr(objp->segnum));
 
 	Update_flags |= UF_WORLD_CHANGED;
 
@@ -625,7 +631,7 @@ int	ObjectMoveUp(void)
 
 	auto obj = vobjptridx(Cur_object_index);
 
-	extract_up_vector_from_segment(&Segments[obj->segnum], uvec);
+	extract_up_vector_from_segment(vcsegptr(obj->segnum), uvec);
 	vm_vec_normalize(uvec);
 
 	const auto newpos = vm_vec_add(obj->pos, vm_vec_scale(uvec, OBJ_SCALE));
@@ -648,9 +654,9 @@ int	ObjectMoveDown(void)
 		return 1;
 	}
 
-	auto obj = &Objects[Cur_object_index];
+	const auto &&obj = vobjptridx(Cur_object_index);
 
-	extract_up_vector_from_segment(&Segments[obj->segnum], uvec);
+	extract_up_vector_from_segment(vcsegptr(obj->segnum), uvec);
 	vm_vec_normalize(uvec);
 
 	const auto newpos = vm_vec_sub(obj->pos, vm_vec_scale(uvec, OBJ_SCALE));
@@ -689,7 +695,7 @@ static int rotate_object(const vobjptridx_t obj, int p, int b, int h)
 
 static void reset_object(const vobjptridx_t obj)
 {
-	med_extract_matrix_from_segment(&Segments[obj->segnum],&obj->orient);
+	med_extract_matrix_from_segment(vcsegptr(obj->segnum), &obj->orient);
 }
 
 int ObjectResetObject()
@@ -704,7 +710,7 @@ int ObjectResetObject()
 
 int ObjectFlipObject()
 {
-	vms_matrix *m=&Objects[Cur_object_index].orient;
+	const auto m = &vobjptr(Cur_object_index)->orient;
 
 	vm_vec_negate(m->uvec);
 	vm_vec_negate(m->rvec);
@@ -752,9 +758,8 @@ int ObjectIncreaseHeadingBig()	{return rotate_object(Cur_object_index, 0, 0, (RO
 
 static void move_object_to_position(const vobjptridx_t objp, const vms_vector &newpos)
 {
-	segmasks result = get_seg_masks(newpos, objp->segnum, objp->size, __FILE__, __LINE__);
-
-	if (result.facemask == 0) {
+	if (get_seg_masks(newpos, vcsegptr(objp->segnum), objp->size).facemask == 0)
+	{
 		objp->pos = newpos;
 	} else {
 		if (verify_object_seg(objp, newpos)) {
@@ -764,7 +769,7 @@ static void move_object_to_position(const vobjptridx_t objp, const vms_vector &n
 			fvi_info	hit_info;
 
 			temp_viewer_obj = *Viewer;
-			auto viewer_segnum = find_object_seg(&temp_viewer_obj);
+			auto viewer_segnum = find_object_seg(vobjptr(Viewer));
 			temp_viewer_obj.segnum = viewer_segnum;
 
 			//	If the viewer is outside the mine, get him in the mine!
@@ -824,8 +829,7 @@ static void move_object_to_position(const vobjptridx_t objp, const vms_vector &n
 
 				objp->pos = hit_info.hit_pnt;
 				auto new_segnum = find_object_seg(objp);
-				Assert(new_segnum != segment_none);
-				obj_relink(objp, new_segnum);
+				obj_relink(objp, vsegptridx(new_segnum));
 			} else {
 				editor_status("Attempted to move object out of mine.  Object not moved.");
 			}
@@ -837,8 +841,9 @@ static void move_object_to_position(const vobjptridx_t objp, const vms_vector &n
 
 static void move_object_to_vector(const vms_vector &vec_through_screen, fix delta_distance)
 {
-	const auto result = vm_vec_scale_add(Viewer->pos, vec_through_screen, vm_vec_dist(Viewer->pos, Objects[Cur_object_index].pos) + delta_distance);
-	move_object_to_position(vobjptridx(Cur_object_index), result);
+	const auto &&objp = vobjptridx(Cur_object_index);
+	const auto result = vm_vec_scale_add(Viewer->pos, vec_through_screen, vm_vec_dist(Viewer->pos, objp->pos) + delta_distance);
+	move_object_to_position(objp, result);
 }
 
 static void move_object_to_mouse_click_delta(fix delta_distance)
@@ -874,7 +879,7 @@ int	ObjectMoveNearer(void)
 
 //	move_object_to_mouse_click_delta(-4*F1_0);		//	Move four units closer to eye
 
-	const auto result = vm_vec_normalized(vm_vec_sub(Objects[Cur_object_index].pos, Viewer->pos));
+	const auto &&result = vm_vec_normalized(vm_vec_sub(vcobjptr(Cur_object_index)->pos, Viewer->pos));
 	move_object_to_vector(result, -4*F1_0);
 
 	return 1;	
@@ -889,7 +894,7 @@ int	ObjectMoveFurther(void)
 
 //	move_object_to_mouse_click_delta(+4*F1_0);		//	Move four units further from eye
 
-	const auto result = vm_vec_normalized(vm_vec_sub(Objects[Cur_object_index].pos, Viewer->pos));
+	const auto &&result = vm_vec_normalized(vm_vec_sub(vcobjptr(Cur_object_index)->pos, Viewer->pos));
 	move_object_to_vector(result, 4*F1_0);
 
 	return 1;	

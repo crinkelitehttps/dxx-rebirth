@@ -33,6 +33,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "console.h"
 #include "u_mem.h"
 
+namespace dcx {
+
 #define MEMSTATS 0
 #define FULL_MEM_CHECKING 1
 
@@ -57,10 +59,8 @@ static int free_list[MAX_INDEX];
 static int num_blocks = 0;
 
 static int Initialized = 0;
-
 static int LargestIndex = 0;
-
-int out_of_memory = 0;
+static int out_of_memory = 0;
 
 void mem_init()
 {
@@ -130,8 +130,7 @@ void *mem_malloc(size_t size, const char * var, const char * filename, unsigned 
 		//con_printf(CON_CRITICAL, "\tBlock '%s' created in %s, line %d.", Varname[id], Filename[id], LineNum[id] );
 		Error( "MEM_OUT_OF_SLOTS" );
 	}
-
-	ptr = malloc( size+CHECKSIZE );
+	ptr = malloc(size + DXX_DEBUG_BIAS_MEMORY_ALLOCATION + CHECKSIZE);
 
 	if (ptr==NULL)
 	{
@@ -140,7 +139,7 @@ void *mem_malloc(size_t size, const char * var, const char * filename, unsigned 
 		con_printf(CON_CRITICAL, "\tBlock '%s' created in %s, line %d.", Varname[id], Filename[id], LineNum[id] );
 		Error( "MEM_OUT_OF_MEMORY" );
 	}
-
+	ptr = reinterpret_cast<char *>(ptr) + DXX_DEBUG_BIAS_MEMORY_ALLOCATION;
 	MallocBase[id] = ptr;
 	MallocSize[id] = size;
 	Varname[id] = var;
@@ -238,7 +237,6 @@ void mem_free( void * buffer )
 		Int3();
 		return;
 	}
-
 	id = mem_find_id( buffer );
 
 	if (id==-1 &&  (!out_of_memory))
@@ -253,6 +251,7 @@ void mem_free( void * buffer )
 	
 	BytesMalloced -= MallocSize[id];
 
+	buffer = reinterpret_cast<char *>(buffer) - DXX_DEBUG_BIAS_MEMORY_ALLOCATION;
 	free( buffer );
 
 	Present[id] = 0;
@@ -316,11 +315,10 @@ void mem_display_blocks()
 		if (Present[i]==1 &&  (!out_of_memory))
 		{
 			numleft++;
-			if (GameArg.DbgShowMemInfo)	{
+			if (CGameArg.DbgShowMemInfo)	{
 				con_printf(CON_CRITICAL, "\nMEM_LEAKAGE: Memory block has not been freed." );
 				PrintInfo( i );
 			}
-			mem_free( (void *)MallocBase[i] );
 		}
 	}
 
@@ -344,9 +342,6 @@ static int Initialized = 0;
 static unsigned int SmallestAddress = 0xFFFFFFF;
 static unsigned int LargestAddress = 0x0;
 static unsigned int BytesMalloced = 0;
-
-#define CHECKSIZE 16
-#define CHECKBYTE 0xFC
 
 void mem_init()
 {
@@ -382,7 +377,7 @@ void mem_display_blocks()
 		con_printf(CON_CRITICAL, "\nMEM_LEAKAGE: %d bytes of memory have not been freed.", BytesMalloced );
 	}
 
-	if (GameArg.DbgShowMemInfo)	{
+	if (CGameArg.DbgShowMemInfo)	{
 		con_printf(CON_CRITICAL, "\n\nMEMORY USAGE:" );
 		con_printf(CON_CRITICAL, "  %u Kbytes dynamic data", (LargestAddress-SmallestAddress+512)/1024 );
 		con_printf(CON_CRITICAL, "  %u Kbytes code/static data.", (SmallestAddress-(4*1024*1024)+512)/1024 );
@@ -397,3 +392,5 @@ void mem_validate_heap()
 
 #endif
 #endif
+
+}

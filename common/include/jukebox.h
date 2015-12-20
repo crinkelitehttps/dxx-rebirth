@@ -4,24 +4,23 @@
  * project's Git history.  See COPYING.txt at the top level for license
  * terms and a link to the Git history.
  */
-#ifndef __JUKEBOX_H__
-#define __JUKEBOX_H__
+
+#pragma once
 
 #include "physfsx.h"
 
 #ifdef __cplusplus
 
-extern const array<file_extension_t, 6> jukebox_exts;
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dcx {
+extern const array<file_extension_t, 5> jukebox_exts;
 
 void jukebox_unload();
+}
+namespace dsx {
 void jukebox_load();
 int jukebox_play();
-char *jukebox_current();
-int jukebox_is_loaded();
-int jukebox_is_playing();
-int jukebox_numtracks();
-void jukebox_list();
-
+}
 #endif
 
 #endif

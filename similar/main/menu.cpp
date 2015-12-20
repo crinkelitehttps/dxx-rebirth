@@ -38,6 +38,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "bm.h"
 #include "screens.h"
 #include "joy.h"
+#include "player.h"
 #include "vecmat.h"
 #include "effects.h"
 #include "game.h"
@@ -86,6 +87,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #ifdef OGL
 #include "ogl_init.h"
 #endif
+#include "physfs_list.h"
 
 #include "dxxsconf.h"
 #include "compiler-make_unique.h"
@@ -200,13 +202,13 @@ static int MakeNewPlayerFile(int allow_abort)
 {
 	int x;
 	char filename[PATH_MAX];
-	callsign_t text = Players[Player_num].callsign;
+	callsign_t text = get_local_player().callsign;
 
 try_again:
 	{
-		array<newmenu_item, 1> m{
+		array<newmenu_item, 1> m{{
 			nm_item_input(text.buffer()),
-		};
+		}};
 	Newmenu_allowed_chars = playername_allowed_chars;
 		x = newmenu_do( NULL, TXT_ENTER_PILOT_NAME, m, unused_newmenu_subfunction, unused_newmenu_userdata );
 	}
@@ -233,7 +235,7 @@ try_again:
 	if ( !new_player_config() )
 		goto try_again;			// They hit Esc during New player config
 
-	Players[Player_num].callsign = text;
+	get_local_player().callsign = text;
 
 	write_player_file();
 
@@ -313,7 +315,7 @@ static int player_menu_handler( listbox *lb,const d_event &event, char **list )
 			}
 			else
 			{
-				Players[Player_num].callsign.copy_lower(items[citem], strlen(items[citem]));
+				get_local_player().callsign.copy_lower(items[citem], strlen(items[citem]));
 			}
 			break;
 		}
@@ -338,24 +340,22 @@ static int player_menu_handler( listbox *lb,const d_event &event, char **list )
 //Inputs the player's name, without putting up the background screen
 int RegisterPlayer()
 {
-	const char **m;
-	char **f;
-	static const array<file_extension_t, 1> types{"plr"};
+	static const array<file_extension_t, 1> types{{"plr"}};
 	int i = 0, NumItems;
 	int citem = 0;
 	int allow_abort_flag = 1;
 
-	if (!*static_cast<const char *>(Players[Player_num].callsign))
+	if (!*static_cast<const char *>(get_local_player().callsign))
 	{
 		if (!*static_cast<const char *>(GameCfg.LastPlayer))
 		{
-			Players[Player_num].callsign = "player";
+			get_local_player().callsign = "player";
 			allow_abort_flag = 0;
 		}
 		else
 		{
 			// Read the last player's name from config file, not lastplr.txt
-			Players[Player_num].callsign = GameCfg.LastPlayer;
+			get_local_player().callsign = GameCfg.LastPlayer;
 		}
 	}
 
@@ -372,7 +372,8 @@ int RegisterPlayer()
 	for (NumItems = 0; list[NumItems] != NULL; NumItems++) {}
 	NumItems++;		// for TXT_CREATE_NEW
 
-	MALLOC(m, const char *, NumItems);
+	RAIIdmem<const char *[]> m;
+	MALLOC(m, const char *[], NumItems);
 	if (m == NULL)
 	{
 		return 0;
@@ -380,18 +381,18 @@ int RegisterPlayer()
 
 	m[i++] = TXT_CREATE_NEW;
 
-	for (f = list.get(); *f; f++)
+	range_for (const auto f, list)
 	{
 		char *p;
 
-		size_t lenf = strlen(*f);
+		size_t lenf = strlen(f);
 		if (lenf > FILENAME_LEN-1 || lenf < 5) // sorry guys, can only have up to eight chars for the player name
 		{
 			NumItems--;
 			continue;
 		}
-		m[i++] = *f;
-		p = strchr(*f, '.');
+		m[i++] = f;
+		p = strchr(f, '.');
 		if (p)
 			*p = '\0';		// chop the .plr
 	}
@@ -406,11 +407,10 @@ int RegisterPlayer()
 	qsort(&m[1], NumItems - 1, sizeof(char *), (int (*)( const void *, const void * ))string_array_sort_func);
 
 	for ( i=0; i<NumItems; i++ )
-		if (!d_stricmp(static_cast<const char *>(Players[Player_num].callsign), m[i]) )
+		if (!d_stricmp(static_cast<const char *>(get_local_player().callsign), m[i]) )
 			citem = i;
 
-	newmenu_listbox1(TXT_SELECT_PILOT, NumItems, m, allow_abort_flag, citem, player_menu_handler, list.release());
-
+	newmenu_listbox1(TXT_SELECT_PILOT, NumItems, m.release(), allow_abort_flag, citem, player_menu_handler, list.release());
 	return 1;
 }
 
@@ -420,9 +420,10 @@ static void draw_copyright()
 	gr_set_current_canvas(NULL);
 	gr_set_curfont(GAME_FONT);
 	gr_set_fontcolor(BM_XRGB(6,6,6),-1);
-	gr_string(0x8000,SHEIGHT-LINE_SPACING,TXT_COPYRIGHT);
+	const auto &&line_spacing = LINE_SPACING;
+	gr_string(0x8000, SHEIGHT - line_spacing, TXT_COPYRIGHT);
 	gr_set_fontcolor( BM_XRGB(25,0,0), -1);
-	gr_string(0x8000,SHEIGHT-(LINE_SPACING*2),DESCENT_VERSION);
+	gr_string(0x8000, SHEIGHT - (line_spacing * 2), DESCENT_VERSION);
 }
 
 // ------------------------------------------------------------------------
@@ -435,7 +436,7 @@ static int main_menu_handler(newmenu *menu,const d_event &event, int *menu_choic
 		case EVENT_WINDOW_ACTIVATED:
 			load_palette(MENU_PALETTE,0,1);		//get correct palette
 
-			if (!*static_cast<const char *>(Players[Player_num].callsign))
+			if (!*static_cast<const char *>(get_local_player().callsign))
 				RegisterPlayer();
 			else
 				keyd_time_when_last_pressed = timer_query();		// .. 20 seconds from now!
@@ -586,7 +587,7 @@ int do_option ( int select)
 			select_demo();
 			break;
 		case MENU_LOAD_GAME:
-			state_restore_all(0, 0, nullptr, 0);
+			state_restore_all(0, secret_restore::none, nullptr, blind_save::no);
 			break;
 		#ifdef EDITOR
 		case MENU_EDITOR:
@@ -767,7 +768,7 @@ int select_demo(void)
 	// Sort by name
 	qsort(list.get(), NumItems, sizeof(char *), (int (*)( const void *, const void * ))string_array_sort_func);
 
-	auto clist = (const char **) list.get();
+	auto clist = const_cast<const char **>(list.get());
 	newmenu_listbox1(TXT_SELECT_DEMO, NumItems, clist, 1, 0, demo_menu_handler, list.release());
 
 	return 1;
@@ -776,13 +777,13 @@ int select_demo(void)
 static int do_difficulty_menu()
 {
 	int s;
-	array<newmenu_item, NDL> m{
+	array<newmenu_item, NDL> m{{
 		nm_item_menu(MENU_DIFFICULTY_TEXT(0)),
 		nm_item_menu(MENU_DIFFICULTY_TEXT(1)),
 		nm_item_menu(MENU_DIFFICULTY_TEXT(2)),
 		nm_item_menu(MENU_DIFFICULTY_TEXT(3)),
 		nm_item_menu(MENU_DIFFICULTY_TEXT(4)),
-	};
+	}};
 
 	s = newmenu_do1( NULL, TXT_DIFFICULTY_LEVEL, m.size(), &m.front(), unused_newmenu_subfunction, unused_newmenu_userdata, Difficulty_level);
 
@@ -818,10 +819,10 @@ int do_new_game_menu()
 		while (!valid)
 		{
 			array<char, 10> num_text{"1"};
-			array<newmenu_item, 2> m{
+			array<newmenu_item, 2> m{{
 				nm_item_text(info_text),
 				nm_item_input(num_text),
-			};
+			}};
 			choice = newmenu_do( NULL, TXT_SELECT_START_LEV, m, unused_newmenu_subfunction, unused_newmenu_userdata );
 
 			if (choice==-1 || m[1].text[0]==0)
@@ -851,20 +852,15 @@ int do_new_game_menu()
 static void do_sound_menu();
 static void input_config();
 static void change_res();
+static void hud_config();
 static void graphics_config();
-static void do_misc_menu();
+static void gameplay_config();
 
 #define DXX_OPTIONS_MENU(VERB)	\
-	DXX_##VERB##_MENU("Sound effects & music...", sfx)	\
-	DXX_##VERB##_TEXT("", blank1)	\
+	DXX_##VERB##_MENU("Sound & music...", sfx)	\
 	DXX_##VERB##_MENU(TXT_CONTROLS_, controls)	\
-	DXX_##VERB##_TEXT("", blank2)	\
-	DXX_##VERB##_MENU("Screen resolution...", screen)	\
-	DXX_##VERB##_MENU("Graphics Options...", graphics)	\
-	DXX_##VERB##_TEXT("", blank3)	\
-	DXX_##VERB##_MENU("Primary autoselect ordering...", primary)	\
-	DXX_##VERB##_MENU("Secondary autoselect ordering...", secondary)	\
-	DXX_##VERB##_MENU("Misc Options...", misc)	\
+	DXX_##VERB##_MENU("Graphics...", graphics)	\
+	DXX_##VERB##_MENU("Gameplay...", misc)	\
 
 namespace {
 
@@ -884,7 +880,7 @@ public:
 
 }
 
-static int options_menuset(newmenu *menu,const d_event &event, options_menu_items *items)
+static int options_menuset(newmenu *, const d_event &event, options_menu_items *items)
 {
 	switch (event.type)
 	{
@@ -902,20 +898,11 @@ static int options_menuset(newmenu *menu,const d_event &event, options_menu_item
 				case options_menu_items::controls:
 					input_config();
 					break;
-				case options_menu_items::screen:
-					change_res();
-					break;
 				case options_menu_items::graphics:
 					graphics_config();
 					break;
-				case options_menu_items::primary:
-					ReorderPrimary();
-					break;
-				case options_menu_items::secondary:
-					ReorderSecondary();
-					break;
 				case options_menu_items::misc:
-					do_misc_menu();
+					gameplay_config();
 					break;
 			}
 			return 1;	// stay in menu until escape
@@ -944,17 +931,15 @@ static int gcd(int a, int b)
 
 void change_res()
 {
-	array<uint32_t, 50> modes;
-	u_int32_t new_mode = 0;
-	int i = 0, mc = 0, citem = -1, opt_cval = -1, opt_fullscr = -1;
+	array<screen_mode, 50> modes;
+	int i = 0, mc = 0, citem = -1;
 
-	unsigned num_presets = gr_list_modes(modes);
+	const auto num_presets = gr_list_modes(modes);
 
-	{
 	newmenu_item m[50+8];
 	char restext[50][12], crestext[12], casptext[12];
 
-	range_for (const auto i, partial_range(modes, num_presets))
+	range_for (const auto &i, partial_range(modes, num_presets))
 	{
 		snprintf(restext[mc], sizeof(restext[mc]), "%ix%i", SM_W(i), SM_H(i));
 
@@ -966,19 +951,19 @@ void change_res()
 
 	nm_set_item_text(m[mc], ""); mc++; // little space for overview
 	// the fields for custom resolution and aspect
-	opt_cval = mc;
+	const auto opt_cval = mc;
 	nm_set_item_radio(m[mc], "use custom values", (citem == -1), 0); mc++;
 	nm_set_item_text(m[mc], "resolution:"); mc++;
 	snprintf(crestext, sizeof(crestext), "%ix%i", SM_W(Game_screen_mode), SM_H(Game_screen_mode));
 	nm_set_item_input(m[mc], crestext);
-	modes[mc] = 0; mc++;
+	mc++;
 	nm_set_item_text(m[mc], "aspect:"); mc++;
 	snprintf(casptext, sizeof(casptext), "%ix%i", GameCfg.AspectY, GameCfg.AspectX);
 	nm_set_item_input(m[mc], casptext);
-	modes[mc] = 0; mc++;
+	mc++;
 	nm_set_item_text(m[mc], ""); mc++; // little space for overview
 	// fullscreen
-	opt_fullscr = mc;
+	const auto opt_fullscr = mc;
 	nm_set_item_checkbox(m[mc], "Fullscreen", gr_check_fullscreen());
 	mc++;
 
@@ -996,34 +981,51 @@ void change_res()
 	if (m[opt_fullscr].value != gr_check_fullscreen())
 		gr_toggle_fullscreen();
 
+	screen_mode new_mode;
 	if (i == opt_cval) // set custom resolution and aspect
 	{
-		u_int32_t cmode = Game_screen_mode, casp = Game_screen_mode;
-
-		if (!strchr(crestext, 'x'))
-			return;
-
-		cmode = SM(atoi(crestext), atoi(strchr(crestext, 'x')+1));
-		if (SM_W(cmode) < 320 || SM_H(cmode) < 200) // oh oh - the resolution is too small. Revert!
+		char *x;
+		unsigned long w = strtoul(crestext, &x, 10), h;
+		screen_mode cmode;
+		if (*x != 'x' || ((h = strtoul(x + 1, &x, 10)), *x))
 		{
+			nm_messagebox(TXT_WARNING, 1, "OK", "Entered resolution is bad.\nReverting ...");
+			cmode = {};
+		}
+		else if (w < 320 || h < 200)
+		{
+			// oh oh - the resolution is too small. Revert!
 			nm_messagebox( TXT_WARNING, 1, "OK", "Entered resolution is too small.\nReverting ..." );
-			cmode = new_mode;
+			cmode = {};
 		}
-
-		casp = cmode;
-		if (strchr(casptext, 'x')) // we even have a custom aspect set up
+		else
 		{
-			casp = SM(atoi(casptext), atoi(strchr(casptext, 'x')+1));
+			cmode.width = w;
+			cmode.height = h;
 		}
-		GameCfg.AspectY = SM_W(casp)/gcd(SM_W(casp),SM_H(casp));
-		GameCfg.AspectX = SM_H(casp)/gcd(SM_W(casp),SM_H(casp));
+		auto casp = cmode;
+		w = strtoul(casptext, &x, 10);
+		if (*x != 'x' || ((h = strtoul(x + 1, &x, 10)), *x))
+		{
+			nm_messagebox(TXT_WARNING, 1, "OK", "Aspect resolution is bad.\nIgnoring ...");
+		}
+		else
+		{
+			// we even have a custom aspect set up
+			casp.width = w;
+			casp.height = h;
+		}
+		const auto g = gcd(SM_W(casp), SM_H(casp));
+		GameCfg.AspectY = SM_W(casp) / g;
+		GameCfg.AspectX = SM_H(casp) / g;
 		new_mode = cmode;
 	}
 	else if (i >= 0 && i < num_presets) // set preset resolution
 	{
 		new_mode = modes[i];
-		GameCfg.AspectY = SM_W(new_mode)/gcd(SM_W(new_mode),SM_H(new_mode));
-		GameCfg.AspectX = SM_H(new_mode)/gcd(SM_W(new_mode),SM_H(new_mode));
+		const auto g = gcd(SM_W(new_mode), SM_H(new_mode));
+		GameCfg.AspectY = SM_W(new_mode) / g;
+		GameCfg.AspectX = SM_H(new_mode) / g;
 	}
 
 	// clean up and apply everything
@@ -1041,102 +1043,281 @@ void change_res()
 		}
 	}
 	game_init_render_buffers(SM_W(Game_screen_mode), SM_H(Game_screen_mode));
+}
+
+static void input_config_keyboard()
+{
+#define DXX_INPUT_SENSITIVITY(VERB,OPT,VAL)	\
+	DXX_##VERB##_SLIDER(TXT_TURN_LR, opt_##OPT##_turn_lr, VAL[0], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_PITCH_UD, opt_##OPT##_pitch_ud, VAL[1], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_SLIDE_LR, opt_##OPT##_slide_lr, VAL[2], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_SLIDE_UD, opt_##OPT##_slide_ud, VAL[3], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_BANK_LR, opt_##OPT##_bank_lr, VAL[4], 0, 16)	\
+
+#define DXX_INPUT_CONFIG_MENU(VERB)	\
+	DXX_##VERB##_TEXT("Keyboard Sensitivity:", opt_label_kb)	\
+	DXX_INPUT_SENSITIVITY(VERB,kb,PlayerCfg.KeyboardSens)	             \
+
+
+	class menu_items
+	{
+	public:
+		enum
+		{
+			DXX_INPUT_CONFIG_MENU(ENUM)
+		};
+		array<newmenu_item, DXX_INPUT_CONFIG_MENU(COUNT)> m;
+		menu_items()
+		{
+			DXX_INPUT_CONFIG_MENU(ADD);
+		}
+	};
+#undef DXX_INPUT_CONFIG_MENU
+	menu_items items;
+	newmenu_do1(nullptr, "Keyboard Calibration", items.m.size(), items.m.data(), unused_newmenu_subfunction, unused_newmenu_userdata, 1);
+
+	constexpr uint_fast32_t keysens = items.opt_label_kb + 1;
+	const auto &m = items.m;
+
+	for (unsigned i = 0; i < 5; i++)
+	{
+		PlayerCfg.KeyboardSens[i] = m[keysens+i].value;
 	}
 }
 
-static void input_config_sensitivity()
+static void input_config_mouse()
 {
-	newmenu_item m[33];
-	int i = 0, nitems = 0, keysens = 0, joysens = 0, joydead = 0, mousesens = 0, mousefsdead;
+#define DXX_INPUT_SENSITIVITY(VERB,OPT,VAL)	                           \
+	DXX_##VERB##_SLIDER(TXT_TURN_LR, opt_##OPT##_turn_lr, VAL[0], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_PITCH_UD, opt_##OPT##_pitch_ud, VAL[1], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_SLIDE_LR, opt_##OPT##_slide_lr, VAL[2], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_SLIDE_UD, opt_##OPT##_slide_ud, VAL[3], 0, 16)	\
+	DXX_##VERB##_SLIDER(TXT_BANK_LR, opt_##OPT##_bank_lr, VAL[4], 0, 16)	\
 
-	nm_set_item_text(m[nitems++], "Keyboard Sensitivity:");
-	keysens = nitems;
-	nm_set_item_slider(m[nitems], TXT_TURN_LR, PlayerCfg.KeyboardSens[0], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_PITCH_UD, PlayerCfg.KeyboardSens[1], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_LR, PlayerCfg.KeyboardSens[2], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_UD, PlayerCfg.KeyboardSens[3], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_BANK_LR, PlayerCfg.KeyboardSens[4], 0, 16); nitems++;
-	nm_set_item_text(m[nitems++], "");
-	nm_set_item_text(m[nitems++], "Joystick Sensitivity:");
-	joysens = nitems;
-	nm_set_item_slider(m[nitems], TXT_TURN_LR, PlayerCfg.JoystickSens[0], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_PITCH_UD, PlayerCfg.JoystickSens[1], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_LR, PlayerCfg.JoystickSens[2], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_UD, PlayerCfg.JoystickSens[3], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_BANK_LR, PlayerCfg.JoystickSens[4], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_THROTTLE, PlayerCfg.JoystickSens[5], 0, 16); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	nm_set_item_text(m[nitems], "Joystick Deadzone:"); nitems++;
-	joydead = nitems;
-	nm_set_item_slider(m[nitems], TXT_TURN_LR, PlayerCfg.JoystickDead[0], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_PITCH_UD, PlayerCfg.JoystickDead[1], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_LR, PlayerCfg.JoystickDead[2], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_UD, PlayerCfg.JoystickDead[3], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_BANK_LR, PlayerCfg.JoystickDead[4], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_THROTTLE, PlayerCfg.JoystickDead[5], 0, 16); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	nm_set_item_text(m[nitems], "Mouse Sensitivity:"); nitems++;
-	mousesens = nitems;
-	nm_set_item_slider(m[nitems], TXT_TURN_LR, PlayerCfg.MouseSens[0], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_PITCH_UD, PlayerCfg.MouseSens[1], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_LR, PlayerCfg.MouseSens[2], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_SLIDE_UD, PlayerCfg.MouseSens[3], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_BANK_LR, PlayerCfg.MouseSens[4], 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], TXT_THROTTLE, PlayerCfg.MouseSens[5], 0, 16); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	nm_set_item_text(m[nitems], "Mouse FlightSim Deadzone:"); nitems++;
-	mousefsdead = nitems;
-	nm_set_item_slider(m[nitems], "X/Y", PlayerCfg.MouseFSDead, 0, 16); nitems++;
+#define DXX_INPUT_THROTTLE_SENSITIVITY(VERB,OPT,VAL)	\
+	DXX_INPUT_SENSITIVITY(VERB,OPT,VAL)	\
+	DXX_##VERB##_SLIDER(TXT_THROTTLE, opt_##OPT##_throttle, VAL[5], 0, 16)	\
 
-	newmenu_do1(NULL, "SENSITIVITY & DEADZONE", nitems, m, unused_newmenu_subfunction, unused_newmenu_userdata, 1);
+#define DXX_INPUT_CONFIG_MENU(VERB)	                                   \
+	DXX_##VERB##_TEXT("Mouse Sensitivity:", opt_label_ms)	             \
+	DXX_INPUT_THROTTLE_SENSITIVITY(VERB,ms,PlayerCfg.MouseSens)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_ms)	\
+	DXX_##VERB##_TEXT("Mouse Overrun Buffer:", opt_label_mo)	\
+	DXX_INPUT_THROTTLE_SENSITIVITY(VERB,mo,PlayerCfg.MouseOverrun)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_mo)	\
+	DXX_##VERB##_TEXT("Mouse FlightSim Deadzone:", opt_label_mfsd)	\
+	DXX_##VERB##_SLIDER("X/Y", opt_mfsd_deadzone, PlayerCfg.MouseFSDead, 0, 16)	\
 
-	for (i = 0; i <= 5; i++)
+	class menu_items
 	{
-		if (i < 5)
-			PlayerCfg.KeyboardSens[i] = m[keysens+i].value;
-		PlayerCfg.JoystickSens[i] = m[joysens+i].value;
-		PlayerCfg.JoystickDead[i] = m[joydead+i].value;
+	public:
+		enum
+		{
+			DXX_INPUT_CONFIG_MENU(ENUM)
+		};
+		array<newmenu_item, DXX_INPUT_CONFIG_MENU(COUNT)> m;
+		menu_items()
+		{
+			DXX_INPUT_CONFIG_MENU(ADD);
+		}
+	};
+#undef DXX_INPUT_CONFIG_MENU
+	menu_items items;
+	newmenu_do1(nullptr, "Mouse Calibration", items.m.size(), items.m.data(), unused_newmenu_subfunction, unused_newmenu_userdata, 1);
+
+	constexpr uint_fast32_t mousesens = items.opt_label_ms + 1;
+    constexpr uint_fast32_t mouseoverrun = items.opt_label_mo + 1;
+	const auto &m = items.m;
+
+	for (unsigned i = 0; i <= 5; i++)
+	{
+		
 		PlayerCfg.MouseSens[i] = m[mousesens+i].value;
+        PlayerCfg.MouseOverrun[i] = m[mouseoverrun+i].value;
 	}
+	constexpr uint_fast32_t mousefsdead = items.opt_mfsd_deadzone;
 	PlayerCfg.MouseFSDead = m[mousefsdead].value;
 }
 
-static int opt_ic_usejoy = 0, opt_ic_usemouse = 0, opt_ic_confkey = 0, opt_ic_confjoy = 0, opt_ic_confmouse = 0, opt_ic_confweap = 0, opt_ic_mouseflightsim = 0, opt_ic_joymousesens = 0, opt_ic_grabinput = 0, opt_ic_mousefsgauge = 0, opt_ic_help0 = 0, opt_ic_help1 = 0, opt_ic_help2 = 0;
-static int input_config_menuset(newmenu *menu,const d_event &event, const unused_newmenu_userdata_t *)
+#if MAX_AXES_PER_JOYSTICK
+static void input_config_joystick()
 {
-	newmenu_item *items = newmenu_get_items(menu);
+#define DXX_INPUT_CONFIG_MENU(VERB)	                                   \
+	DXX_##VERB##_TEXT("Joystick Sensitivity:", opt_label_js)	          \
+	DXX_INPUT_THROTTLE_SENSITIVITY(VERB,js,PlayerCfg.JoystickSens)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_js)	\
+	DXX_##VERB##_TEXT("Joystick Linearity:", opt_label_jl)	\
+	DXX_INPUT_THROTTLE_SENSITIVITY(VERB,jl,PlayerCfg.JoystickLinear)	  \
+	DXX_##VERB##_TEXT("", opt_label_blank_jl)	\
+	DXX_##VERB##_TEXT("Joystick Linear Speed:", opt_label_jp)	\
+	DXX_INPUT_THROTTLE_SENSITIVITY(VERB,jp,PlayerCfg.JoystickSpeed)	   \
+	DXX_##VERB##_TEXT("", opt_label_blank_jp)	\
+	DXX_##VERB##_TEXT("Joystick Deadzone:", opt_label_jd)	\
+	DXX_INPUT_THROTTLE_SENSITIVITY(VERB,jd,PlayerCfg.JoystickDead)	    \
+
+	class menu_items
+	{
+	public:
+		enum
+		{
+			DXX_INPUT_CONFIG_MENU(ENUM)
+		};
+		array<newmenu_item, DXX_INPUT_CONFIG_MENU(COUNT)> m;
+		menu_items()
+		{
+			DXX_INPUT_CONFIG_MENU(ADD);
+		}
+	};
+#undef DXX_INPUT_CONFIG_MENU
+#undef DXX_INPUT_THROTTLE_SENSITIVITY
+#undef DXX_INPUT_SENSITIVITY
+	menu_items items;
+	newmenu_do1(nullptr, "Joystick Calibration", items.m.size(), items.m.data(), unused_newmenu_subfunction, unused_newmenu_userdata, 1);
+
+	constexpr uint_fast32_t joysens = items.opt_label_js + 1;
+	constexpr uint_fast32_t joylin = items.opt_label_jl + 1;
+	constexpr uint_fast32_t joyspd = items.opt_label_jp + 1;
+	constexpr uint_fast32_t joydead = items.opt_label_jd + 1;
+	const auto &m = items.m;
+
+	for (unsigned i = 0; i <= 5; i++)
+	{
+		PlayerCfg.JoystickLinear[i] = m[joylin+i].value;
+		PlayerCfg.JoystickSpeed[i] = m[joyspd+i].value;
+		PlayerCfg.JoystickSens[i] = m[joysens+i].value;
+		PlayerCfg.JoystickDead[i] = m[joydead+i].value;
+	}
+}
+#endif
+
+namespace {
+
+class input_config_menu_items
+{
+#if MAX_JOYSTICKS
+#define DXX_INPUT_CONFIG_JOYSTICK_ITEM(I)	I
+#else
+#define DXX_INPUT_CONFIG_JOYSTICK_ITEM(I)
+#endif
+
+#if MAX_AXES_PER_JOYSTICK
+#define DXX_INPUT_CONFIG_JOYSTICK_AXIS_ITEM(I)	I
+#else
+#define DXX_INPUT_CONFIG_JOYSTICK_AXIS_ITEM(I)
+#endif
+
+#define DXX_INPUT_CONFIG_MENU(VERB)	\
+	DXX_INPUT_CONFIG_JOYSTICK_ITEM(DXX_##VERB##_CHECK("Use joystick", opt_ic_usejoy, PlayerCfg.ControlType & CONTROL_USING_JOYSTICK))	\
+	DXX_##VERB##_CHECK("Use mouse", opt_ic_usemouse, PlayerCfg.ControlType & CONTROL_USING_MOUSE)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_use)	\
+	DXX_##VERB##_MENU(TXT_CUST_KEYBOARD, opt_ic_confkey)	\
+	DXX_INPUT_CONFIG_JOYSTICK_ITEM(DXX_##VERB##_MENU("Customize Joystick", opt_ic_confjoy))	\
+	DXX_##VERB##_MENU("Customize Mouse", opt_ic_confmouse)	\
+	DXX_##VERB##_MENU("Customize Weapon Keys", opt_ic_confweap)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_customize)	\
+	DXX_##VERB##_TEXT("Mouse Control Type:", opt_label_mouse_control_type)	\
+	DXX_##VERB##_RADIO("Normal", opt_mouse_control_normal, PlayerCfg.MouseFlightSim == 0, optgrp_mouse_control_type)	\
+	DXX_##VERB##_RADIO("FlightSim", opt_mouse_control_flightsim, PlayerCfg.MouseFlightSim == 1, optgrp_mouse_control_type)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_mouse_control_type)	\
+	DXX_##VERB##_MENU("Keyboard Calibration", opt_ic_keyboard)	        \
+	DXX_##VERB##_MENU("Mouse Calibration", opt_ic_mouse)	              \
+	DXX_INPUT_CONFIG_JOYSTICK_AXIS_ITEM(DXX_##VERB##_MENU("Joystick Calibration", opt_ic_joystick))	         \
+	DXX_##VERB##_TEXT("", opt_label_blank_sensitivity_deadzone)	\
+	DXX_##VERB##_CHECK("Keep Keyboard/Mouse focus", opt_ic_grabinput, CGameCfg.Grabinput)	\
+	DXX_##VERB##_CHECK("Mouse FlightSim Indicator", opt_ic_mousefsgauge, PlayerCfg.MouseFSIndicator)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_focus)	\
+	DXX_##VERB##_TEXT("When dead, respawn by pressing:", opt_label_respawn_mode)	\
+	DXX_##VERB##_RADIO("Any key", opt_respawn_any_key, PlayerCfg.RespawnMode == RespawnPress::Any, optgrp_respawn_mode)	\
+	DXX_##VERB##_RADIO("Fire keys (pri., sec., flare)", opt_respawn_fire_key, PlayerCfg.RespawnMode == RespawnPress::Fire, optgrp_respawn_mode)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_respawn)	\
+	DXX_##VERB##_MENU("GAME SYSTEM KEYS", opt_ic_help0)	\
+	DXX_##VERB##_MENU("NETGAME SYSTEM KEYS", opt_ic_help1)	\
+	DXX_##VERB##_MENU("DEMO SYSTEM KEYS", opt_ic_help2)	\
+
+public:
+	enum
+	{
+		optgrp_mouse_control_type,
+		optgrp_respawn_mode,
+	};
+	enum
+	{
+		DXX_INPUT_CONFIG_MENU(ENUM)
+	};
+	array<newmenu_item, DXX_INPUT_CONFIG_MENU(COUNT)> m;
+	input_config_menu_items()
+	{
+		DXX_INPUT_CONFIG_MENU(ADD);
+	}
+	static int menuset(newmenu *, const d_event &event, input_config_menu_items *pitems);
+#undef DXX_INPUT_CONFIG_MENU
+#undef DXX_INPUT_CONFIG_JOYSTICK_AXIS_ITEM
+#undef DXX_INPUT_CONFIG_JOYSTICK_ITEM
+};
+
+}
+
+int input_config_menu_items::menuset(newmenu *, const d_event &event, input_config_menu_items *pitems)
+{
+	const auto &items = pitems->m;
 	switch (event.type)
 	{
 		case EVENT_NEWMENU_CHANGED:
 		{
-			auto &citem = static_cast<const d_change_event &>(event).citem;
+			const auto citem = static_cast<const d_change_event &>(event).citem;
+#if MAX_JOYSTICKS
 			if (citem == opt_ic_usejoy)
-				(items[citem].value)?(PlayerCfg.ControlType|=CONTROL_USING_JOYSTICK):(PlayerCfg.ControlType&=~CONTROL_USING_JOYSTICK);
+			{
+				constexpr auto flag = CONTROL_USING_JOYSTICK;
+				if (items[citem].value)
+					PlayerCfg.ControlType |= flag;
+				else
+					PlayerCfg.ControlType &= ~flag;
+			}
+#endif
 			if (citem == opt_ic_usemouse)
-				(items[citem].value)?(PlayerCfg.ControlType|=CONTROL_USING_MOUSE):(PlayerCfg.ControlType&=~CONTROL_USING_MOUSE);
-			if (citem == opt_ic_mouseflightsim)
+			{
+				constexpr auto flag = CONTROL_USING_MOUSE;
+				if (items[citem].value)
+					PlayerCfg.ControlType |= flag;
+				else
+					PlayerCfg.ControlType &= ~flag;
+			}
+			if (citem == opt_mouse_control_normal)
 				PlayerCfg.MouseFlightSim = 0;
-			if (citem == opt_ic_mouseflightsim+1)
+			if (citem == opt_mouse_control_flightsim)
 				PlayerCfg.MouseFlightSim = 1;
 			if (citem == opt_ic_grabinput)
-				GameCfg.Grabinput = items[citem].value;
+				CGameCfg.Grabinput = items[citem].value;
 			if (citem == opt_ic_mousefsgauge)
 				PlayerCfg.MouseFSIndicator = items[citem].value;
+			else if (citem == opt_respawn_any_key)
+				PlayerCfg.RespawnMode = RespawnPress::Any;
+			else if (citem == opt_respawn_fire_key)
+				PlayerCfg.RespawnMode = RespawnPress::Fire;
 			break;
 		}
 		case EVENT_NEWMENU_SELECTED:
 		{
-			auto &citem = static_cast<const d_select_event &>(event).citem;
+			const auto citem = static_cast<const d_select_event &>(event).citem;
 			if (citem == opt_ic_confkey)
-				kconfig(0, "KEYBOARD");
+				kconfig(kconfig_type::keyboard);
+#if MAX_JOYSTICKS
 			if (citem == opt_ic_confjoy)
-				kconfig(1, "JOYSTICK");
+				kconfig(kconfig_type::joystick);
+#endif
 			if (citem == opt_ic_confmouse)
-				kconfig(2, "MOUSE");
+				kconfig(kconfig_type::mouse);
 			if (citem == opt_ic_confweap)
-				kconfig(3, "WEAPON KEYS");
-			if (citem == opt_ic_joymousesens)
-				input_config_sensitivity();
+				kconfig(kconfig_type::rebirth);
+			if (citem == opt_ic_keyboard)
+				input_config_keyboard();
+			if (citem == opt_ic_mouse)
+				input_config_mouse();
+#if MAX_AXES_PER_JOYSTICK
+			if (citem == opt_ic_joystick)
+				input_config_joystick();
+#endif
 			if (citem == opt_ic_help0)
 				show_help();
 			if (citem == opt_ic_help1)
@@ -1155,109 +1336,156 @@ static int input_config_menuset(newmenu *menu,const d_event &event, const unused
 
 void input_config()
 {
-	newmenu_item m[20];
-	int nitems = 0;
-
-	opt_ic_usejoy = nitems;
-	nm_set_item_checkbox(m[nitems], "USE JOYSTICK", (PlayerCfg.ControlType&CONTROL_USING_JOYSTICK));
-	nitems++;
-	opt_ic_usemouse = nitems;
-	nm_set_item_checkbox(m[nitems], "USE MOUSE", (PlayerCfg.ControlType&CONTROL_USING_MOUSE));
-	nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	opt_ic_confkey = nitems;
-	nm_set_item_menu(m[nitems], "CUSTOMIZE KEYBOARD"); nitems++;
-	opt_ic_confjoy = nitems;
-	nm_set_item_menu(m[nitems], "CUSTOMIZE JOYSTICK"); nitems++;
-	opt_ic_confmouse = nitems;
-	nm_set_item_menu(m[nitems], "CUSTOMIZE MOUSE"); nitems++;
-	opt_ic_confweap = nitems;
-	nm_set_item_menu(m[nitems], "CUSTOMIZE WEAPON KEYS"); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	nm_set_item_text(m[nitems], "MOUSE CONTROL TYPE:"); nitems++;
-	opt_ic_mouseflightsim = nitems;
-	nm_set_item_radio(m[nitems], "normal", !PlayerCfg.MouseFlightSim, 0); nitems++;
-	nm_set_item_radio(m[nitems], "FlightSim", PlayerCfg.MouseFlightSim, 0); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	opt_ic_joymousesens = nitems;
-	nm_set_item_menu(m[nitems], "SENSITIVITY & DEADZONE"); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	opt_ic_grabinput = nitems;
-	nm_set_item_checkbox(m[nitems], "Keep Keyboard/Mouse focus", GameCfg.Grabinput);
-	nitems++;
-	opt_ic_mousefsgauge = nitems;
-	nm_set_item_checkbox(m[nitems], "Mouse FlightSim Indicator", PlayerCfg.MouseFSIndicator);
-	nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	opt_ic_help0 = nitems;
-	nm_set_item_menu(m[nitems], "GAME SYSTEM KEYS"); nitems++;
-	opt_ic_help1 = nitems;
-	nm_set_item_menu(m[nitems], "NETGAME SYSTEM KEYS"); nitems++;
-	opt_ic_help2 = nitems;
-	nm_set_item_menu(m[nitems], "DEMO SYSTEM KEYS"); nitems++;
-
-	newmenu_do1(NULL, TXT_CONTROLS, nitems, m, input_config_menuset, unused_newmenu_userdata, 3);
+	input_config_menu_items menu_items;
+	newmenu_do1(nullptr, TXT_CONTROLS, menu_items.m.size(), menu_items.m.data(), &input_config_menu_items::menuset, &menu_items, menu_items.opt_ic_confkey);
 }
 
 static void reticle_config()
 {
 #ifdef OGL
-	newmenu_item m[18];
+#define DXX_RETICLE_TYPE_OGL(VERB)	\
+	DXX_##VERB##_RADIO("Classic Reboot", opt_reticle_classic_reboot, 0, optgrp_reticle)
 #else
-	newmenu_item m[17];
+#define DXX_RETICLE_TYPE_OGL(VERB)
 #endif
-	int nitems = 0, i, opt_ret_type, opt_ret_rgba, opt_ret_size;
-	nm_set_item_text(m[nitems], "Reticle Type:"); nitems++;
-	opt_ret_type = nitems;
-	nm_set_item_radio(m[nitems], "Classic", 0, 0); nitems++;
-#ifdef OGL
-	nm_set_item_radio(m[nitems], "Classic Reboot", 0, 0); nitems++;
-#endif
-	nm_set_item_radio(m[nitems], "None", 0, 0); nitems++;
-	nm_set_item_radio(m[nitems], "X", 0, 0); nitems++;
-	nm_set_item_radio(m[nitems], "Dot", 0, 0); nitems++;
-	nm_set_item_radio(m[nitems], "Circle", 0, 0); nitems++;
-	nm_set_item_radio(m[nitems], "Cross V1", 0, 0); nitems++;
-	nm_set_item_radio(m[nitems], "Cross V2", 0, 0); nitems++;
-	nm_set_item_radio(m[nitems], "Angle", 0, 0); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	nm_set_item_text(m[nitems], "Reticle Color:"); nitems++;
-	opt_ret_rgba = nitems;
-	nm_set_item_slider(m[nitems], "Red", (PlayerCfg.ReticleRGBA[0]/2), 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], "Green", (PlayerCfg.ReticleRGBA[1]/2), 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], "Blue", (PlayerCfg.ReticleRGBA[2]/2), 0, 16); nitems++;
-	nm_set_item_slider(m[nitems], "Alpha", (PlayerCfg.ReticleRGBA[3]/2), 0, 16); nitems++;
-	nm_set_item_text(m[nitems], ""); nitems++;
-	opt_ret_size = nitems;
-	nm_set_item_slider(m[nitems], "Reticle Size:", PlayerCfg.ReticleSize, 0, 4); nitems++;
+#define DXX_RETICLE_CONFIG_MENU(VERB)	\
+	DXX_##VERB##_TEXT("Reticle Type:", opt_label_reticle_type)	\
+	DXX_##VERB##_RADIO("Classic", opt_reticle_classic, 0, optgrp_reticle)	\
+	DXX_RETICLE_TYPE_OGL(VERB)	\
+	DXX_##VERB##_RADIO("None", opt_reticle_none, 0, optgrp_reticle)	\
+	DXX_##VERB##_RADIO("X", opt_reticle_x, 0, optgrp_reticle)	\
+	DXX_##VERB##_RADIO("Dot", opt_reticle_dot, 0, optgrp_reticle)	\
+	DXX_##VERB##_RADIO("Circle", opt_reticle_circle, 0, optgrp_reticle)	\
+	DXX_##VERB##_RADIO("Cross V1", opt_reticle_cross1, 0, optgrp_reticle)	\
+	DXX_##VERB##_RADIO("Cross V2", opt_reticle_cross2, 0, optgrp_reticle)	\
+	DXX_##VERB##_RADIO("Angle", opt_reticle_angle, 0, optgrp_reticle)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_reticle_type)	\
+	DXX_##VERB##_TEXT("Reticle Color:", opt_label_reticle_color)	\
+	DXX_##VERB##_SCALE_SLIDER("Red", opt_reticle_color_red, PlayerCfg.ReticleRGBA[0], 0, 16, 2)	\
+	DXX_##VERB##_SCALE_SLIDER("Green", opt_reticle_color_green, PlayerCfg.ReticleRGBA[1], 0, 16, 2)	\
+	DXX_##VERB##_SCALE_SLIDER("Blue", opt_reticle_color_blue, PlayerCfg.ReticleRGBA[2], 0, 16, 2)	\
+	DXX_##VERB##_SCALE_SLIDER("Alpha", opt_reticle_color_alpha, PlayerCfg.ReticleRGBA[3], 0, 16, 2)	\
+	DXX_##VERB##_TEXT("", opt_label_blank_reticle_color)	\
+	DXX_##VERB##_SLIDER("Reticle Size:", opt_label_reticle_size, PlayerCfg.ReticleSize, 0, 4)	\
 
-	i = PlayerCfg.ReticleType;
+	class menu_items
+	{
+	public:
+		enum
+		{
+			optgrp_reticle,
+		};
+		enum
+		{
+			DXX_RETICLE_CONFIG_MENU(ENUM)
+		};
+		array<newmenu_item, DXX_RETICLE_CONFIG_MENU(COUNT)> m;
+		menu_items()
+		{
+			DXX_RETICLE_CONFIG_MENU(ADD);
+		}
+		void read()
+		{
+			DXX_RETICLE_CONFIG_MENU(READ);
+		}
+	};
+#undef DXX_RETICLE_CONFIG_MENU
+#undef DXX_RETICLE_TYPE_OGL
+	menu_items items;
+	auto i = PlayerCfg.ReticleType;
 #ifndef OGL
 	if (i > 1) i--;
 #endif
-	m[opt_ret_type+i].value=1;
+	items.m[items.opt_reticle_classic + i].value = 1;
 
-	newmenu_do1( NULL, "Reticle Options", nitems, m, unused_newmenu_subfunction, unused_newmenu_userdata, 1 );
+	newmenu_do1(nullptr, "Reticle Customization", items.m.size(), items.m.data(), unused_newmenu_subfunction, unused_newmenu_userdata, 1);
 
-#ifdef OGL
-	for (i = 0; i < 9; i++)
-		if (m[i+opt_ret_type].value)
-			PlayerCfg.ReticleType = i;
-#else
-	for (i = 0; i < 8; i++)
-		if (m[i+opt_ret_type].value)
-			PlayerCfg.ReticleType = i;
-	if (PlayerCfg.ReticleType > 1) PlayerCfg.ReticleType++;
+	for (uint_fast32_t i = items.opt_reticle_classic; i != items.opt_label_blank_reticle_type; ++i)
+		if (items.m[i].value)
+		{
+#ifndef OGL
+			if (i != items.opt_reticle_classic)
+				++i;
 #endif
-	for (i = 0; i < 4; i++)
-		PlayerCfg.ReticleRGBA[i] = (m[i+opt_ret_rgba].value*2);
-	PlayerCfg.ReticleSize = m[opt_ret_size].value;
+			PlayerCfg.ReticleType = i - items.opt_reticle_classic;
+			break;
+		}
+	items.read();
+}
+
+#if defined(DXX_BUILD_DESCENT_I)
+#define DXX_GAME_SPECIFIC_HUDOPTIONS(VERB)	\
+	DXX_##VERB##_CHECK("Always-on Bomb Counter",opt_d2bomb,PlayerCfg.BombGauge)	\
+
+#elif defined(DXX_BUILD_DESCENT_II)
+enum {
+	optgrp_missileview,
+};
+#define DXX_GAME_SPECIFIC_HUDOPTIONS(VERB)	\
+	DXX_##VERB##_TEXT("Missile view:", opt_missileview_label)	\
+	DXX_##VERB##_RADIO("Disabled", opt_missileview_none, PlayerCfg.MissileViewEnabled == MissileViewMode::None, optgrp_missileview)	\
+	DXX_##VERB##_RADIO("Only own missiles", opt_missileview_selfonly, PlayerCfg.MissileViewEnabled == MissileViewMode::EnabledSelfOnly, optgrp_missileview)	\
+	DXX_##VERB##_RADIO("Friendly missiles, preferring self", opt_missileview_selfandallies, PlayerCfg.MissileViewEnabled == MissileViewMode::EnabledSelfAndAllies, optgrp_missileview)	\
+	DXX_##VERB##_CHECK("Show guided missile in main display", opt_guidedbigview,PlayerCfg.GuidedInBigWindow )	\
+
+#endif
+#define DXX_HUD_MENU_OPTIONS(VERB)	\
+        DXX_##VERB##_MENU("Reticle Customization...", opt_hud_reticlemenu)	\
+	DXX_##VERB##_CHECK("Screenshots without HUD",opt_screenshot,PlayerCfg.PRShot)	\
+	DXX_##VERB##_CHECK("No redundant pickup messages",opt_redundant,PlayerCfg.NoRedundancy)	\
+	DXX_##VERB##_CHECK("Show Player chat only (Multi)",opt_playerchat,PlayerCfg.MultiMessages)	\
+	DXX_##VERB##_CHECK("Cloak/Invulnerability Timers",opt_cloakinvultimer,PlayerCfg.CloakInvulTimer)	\
+	DXX_GAME_SPECIFIC_HUDOPTIONS(VERB)	\
+
+enum {
+	DXX_HUD_MENU_OPTIONS(ENUM)
+};
+
+static int hud_config_menuset(newmenu *, const d_event &event, const unused_newmenu_userdata_t *)
+{
+	switch (event.type)
+	{
+		case EVENT_NEWMENU_SELECTED:
+		{
+			auto &citem = static_cast<const d_select_event &>(event).citem;
+                        if (citem == opt_hud_reticlemenu)
+                                reticle_config();
+			return 1;		// stay in menu
+		}
+
+		default:
+			break;
+	}
+
+	return 0;
+}
+
+void hud_config()
+{
+	int i = 0;
+
+	do {
+		newmenu_item m[DXX_HUD_MENU_OPTIONS(COUNT)];
+		DXX_HUD_MENU_OPTIONS(ADD);
+		i = newmenu_do1( NULL, "Hud Options", sizeof(m)/sizeof(*m), m, hud_config_menuset, unused_newmenu_userdata, 0 );
+		DXX_HUD_MENU_OPTIONS(READ);
+#if defined(DXX_BUILD_DESCENT_II)
+		PlayerCfg.MissileViewEnabled = m[opt_missileview_selfandallies].value
+			? MissileViewMode::EnabledSelfAndAllies
+			: (m[opt_missileview_selfonly].value
+				? MissileViewMode::EnabledSelfOnly
+				: MissileViewMode::None);
+#endif
+	} while( i>-1 );
+
 }
 
 #define DXX_GRAPHICS_MENU(VERB)	\
-	DXX_OGL0_GRAPHICS_MENU(VERB)	\
+	DXX_##VERB##_MENU("Screen resolution...", opt_gr_screenres)	\
+	DXX_##VERB##_MENU("HUD Options...", opt_gr_hudmenu)	\
 	DXX_##VERB##_SLIDER(TXT_BRIGHTNESS, opt_gr_brightness, gr_palette_get_gamma(), 0, 16)	\
-	DXX_##VERB##_MENU("Reticle Options...", opt_gr_reticlemenu)	\
+	DXX_##VERB##_TEXT("", blank1)	\
+	DXX_OGL0_GRAPHICS_MENU(VERB)	\
 	DXX_OGL1_GRAPHICS_MENU(VERB)	\
 	DXX_##VERB##_CHECK("FPS Counter", opt_gr_fpsindi, GameCfg.FPSIndicator)	\
 
@@ -1272,12 +1500,12 @@ enum {
 	DXX_##VERB##_RADIO("Trilinear", opt_filter_trilinear, 0, optgrp_texfilt)	\
 	DXX_##VERB##_RADIO("Anisotropic", opt_filter_anisotropic, 0, optgrp_texfilt)	\
 	D2X_OGL_GRAPHICS_MENU(VERB)	\
-	DXX_##VERB##_TEXT("", blank1)	\
+	DXX_##VERB##_TEXT("", blank2)	\
 
 #define DXX_OGL1_GRAPHICS_MENU(VERB)	\
 	DXX_##VERB##_CHECK("Transparency Effects", opt_gr_alphafx, PlayerCfg.AlphaEffects)	\
 	DXX_##VERB##_CHECK("Colored Dynamic Light", opt_gr_dynlightcolor, PlayerCfg.DynLightColor)	\
-	DXX_##VERB##_CHECK("VSync", opt_gr_vsync, GameCfg.VSync)	\
+	DXX_##VERB##_CHECK("VSync", opt_gr_vsync, CGameCfg.VSync)	\
 	DXX_##VERB##_CHECK("4x multisampling", opt_gr_multisample, GameCfg.Multisample)	\
 
 #if defined(DXX_BUILD_DESCENT_I)
@@ -1296,15 +1524,17 @@ enum {
 	DXX_GRAPHICS_MENU(ENUM)
 };
 
-static int graphics_config_menuset(newmenu *menu,const d_event &event, const unused_newmenu_userdata_t *)
+static int graphics_config_menuset(newmenu *, const d_event &event, newmenu_item *const items)
 {
-	newmenu_item *items = newmenu_get_items(menu);
 	switch (event.type)
 	{
 		case EVENT_NEWMENU_CHANGED:
 		{
 			auto &citem = static_cast<const d_change_event &>(event).citem;
+			if (citem == opt_gr_brightness)
+				gr_palette_set_gamma(items[citem].value);
 #ifdef OGL
+			else
 			if (citem == opt_filter_anisotropic && ogl_maxanisotropy <= 1.0)
 			{
 				nm_messagebox( TXT_ERROR, 1, TXT_OK, "Anisotropic Filtering not\nsupported by your hardware/driver.");
@@ -1312,15 +1542,15 @@ static int graphics_config_menuset(newmenu *menu,const d_event &event, const unu
 				items[opt_filter_anisotropic].value = 0;
 			}
 #endif
-			if ( citem == opt_gr_brightness)
-				gr_palette_set_gamma(items[citem].value);
 			break;
 		}
 		case EVENT_NEWMENU_SELECTED:
 		{
 			auto &citem = static_cast<const d_select_event &>(event).citem;
-			if (citem == opt_gr_reticlemenu)
-				reticle_config();
+                        if (citem == opt_gr_screenres)
+                                change_res();
+			if (citem == opt_gr_hudmenu)
+				hud_config();
 			return 1;		// stay in menu
 		}
 
@@ -1337,19 +1567,19 @@ void graphics_config()
 	DXX_GRAPHICS_MENU(ADD);
 
 #ifdef OGL
-	m[opt_gr_texfilt+GameCfg.TexFilt].value=1;
+	m[opt_filter_none+CGameCfg.TexFilt].value=1;
 #endif
 
-	newmenu_do1(nullptr, "Graphics Options", m.size(), m.data(), graphics_config_menuset, unused_newmenu_userdata, 1);
+	newmenu_do1(nullptr, "Graphics Options", m.size(), m.data(), graphics_config_menuset, m.data(), 0);
 
 #ifdef OGL
-	if (GameCfg.VSync != m[opt_gr_vsync].value || GameCfg.Multisample != m[opt_gr_multisample].value)
+	if (CGameCfg.VSync != m[opt_gr_vsync].value || GameCfg.Multisample != m[opt_gr_multisample].value)
 		nm_messagebox( NULL, 1, TXT_OK, "Setting VSync or 4x Multisample\nrequires restart on some systems.");
 
 	for (uint_fast32_t i = 0; i != 4; ++i)
-		if (m[i+opt_gr_texfilt].value)
+		if (m[i+opt_filter_none].value)
 		{
-			GameCfg.TexFilt = i;
+			CGameCfg.TexFilt = i;
 			break;
 		}
 #if defined(DXX_BUILD_DESCENT_II)
@@ -1357,7 +1587,7 @@ void graphics_config()
 #endif
 	PlayerCfg.AlphaEffects = m[opt_gr_alphafx].value;
 	PlayerCfg.DynLightColor = m[opt_gr_dynlightcolor].value;
-	GameCfg.VSync = m[opt_gr_vsync].value;
+	CGameCfg.VSync = m[opt_gr_vsync].value;
 	GameCfg.Multisample = m[opt_gr_multisample].value;
 #endif
 	GameCfg.GammaLevel = m[opt_gr_brightness].value;
@@ -1369,6 +1599,8 @@ void graphics_config()
 }
 
 #if PHYSFS_VER_MAJOR >= 2
+namespace {
+
 struct browser
 {
 	const char	*title;			// The title - needed for making another listbox when changing directory
@@ -1382,6 +1614,8 @@ struct browser
 	char	view_path[PATH_MAX];	// The absolute path we're currently looking at
 };
 
+}
+
 static void list_dir_el(void *vb, const char *, const char *fname)
 {
 	browser *b = reinterpret_cast<browser *>(vb);
@@ -1389,7 +1623,7 @@ static void list_dir_el(void *vb, const char *, const char *fname)
 	if (!r)
 		r = "";
 	if (!strcmp(r, b->view_path) && (PHYSFS_isDirectory(fname) || PHYSFSX_checkMatchingExtension(fname, b->ext_list, b->ext_count))
-#if defined(__MACH__) && defined(__APPLE__)
+#if defined(__APPLE__) && defined(__MACH__)
 		&& d_stricmp(fname, "Volumes")	// this messes things up, use '..' instead
 #endif
 		)
@@ -1433,9 +1667,9 @@ static int select_file_handler(listbox *menu,const d_event &event, browser *b)
 				char text[4] = "c";
 				int rval = 0;
 
-				array<newmenu_item, 1> m{
+				array<newmenu_item, 1> m{{
 					nm_item_input(text),
-				};
+				}};
 				rval = newmenu_do( NULL, "Enter drive letter", m, unused_newmenu_subfunction, unused_newmenu_userdata );
 				text[1] = '\0'; 
 				snprintf(newpath, sizeof(char)*PATH_MAX, "%s:%s", text, sep);
@@ -1470,7 +1704,7 @@ static int select_file_handler(listbox *menu,const d_event &event, browser *b)
 				
 				if (p == strstr(newpath, sep))	// Look at root directory next, if not already
 				{
-#if defined(__MACH__) && defined(__APPLE__)
+#if defined(__APPLE__) && defined(__MACH__)
 					if (!d_stricmp(p, "/Volumes"))
 						return 1;
 #endif
@@ -1478,7 +1712,7 @@ static int select_file_handler(listbox *menu,const d_event &event, browser *b)
 						p[len_sep] = '\0';
 					else
 					{
-#if defined(__MACH__) && defined(__APPLE__)
+#if defined(__APPLE__) && defined(__MACH__)
 						// For Mac OS X, list all active volumes if we leave the root
 						strcpy(newpath, "/Volumes");
 #else
@@ -1637,7 +1871,7 @@ int opt_sm_digivol = -1, opt_sm_musicvol = -1, opt_sm_revstereo = -1, opt_sm_mty
 #ifdef USE_SDLMIXER
 static int get_absolute_path(char *full_path, const char *rel_path)
 {
-	PHYSFSX_getRealPath(rel_path, full_path);
+	PHYSFSX_getRealPath(rel_path, full_path, PATH_MAX);
 	return 1;
 }
 
@@ -1726,7 +1960,7 @@ static int sound_menuset(newmenu *menu,const d_event &event, const unused_newmen
 #endif
 			if (citem == opt_sm_mtype3_lmpath)
 			{
-				static const array<file_extension_t, 1> ext_list{"m3u"};		// select a directory or M3U playlist
+				static const array<file_extension_t, 1> ext_list{{"m3u"}};		// select a directory or M3U playlist
 				select_file_recursive(
 					"Select directory or\nM3U playlist to\n play level music from" WINDOWS_DRIVE_CHANGE_TEXT,
 									  GameCfg.CMLevelMusicPath.data(), ext_list, 1,	// look in current music path for ext_list files and allow directory selection
@@ -1912,42 +2146,74 @@ void do_sound_menu()
 
 #if defined(DXX_BUILD_DESCENT_I)
 #define DXX_GAME_SPECIFIC_OPTIONS(VERB)	\
-	DXX_##VERB##_CHECK("Show D2-style Prox. Bomb Gauge",opt_d2bomb,PlayerCfg.BombGauge)	\
 
 #elif defined(DXX_BUILD_DESCENT_II)
 #define DXX_GAME_SPECIFIC_OPTIONS(VERB)	\
-	DXX_##VERB##_CHECK("Missile view",opt_missileview, PlayerCfg.MissileViewEnabled)	\
 	DXX_##VERB##_CHECK("Headlight on when picked up", opt_headlighton,PlayerCfg.HeadlightActiveDefault )	\
-	DXX_##VERB##_CHECK("Show guided missile in main display", opt_guidedbigview,PlayerCfg.GuidedInBigWindow )	\
 	DXX_##VERB##_CHECK("Escort robot hot keys",opt_escorthotkey,PlayerCfg.EscortHotKeys)	\
 	DXX_##VERB##_CHECK("Movie Subtitles",opt_moviesubtitle,GameCfg.MovieSubtitles)	\
 
 #endif
-#define DXX_MISC_MENU_OPTIONS(VERB)	\
+
+enum {
+	optgrp_autoselect_firing,
+};
+
+#define DXX_GAMEPLAY_MENU_OPTIONS(VERB)	\
 	DXX_##VERB##_CHECK("Ship auto-leveling",opt_autolevel, PlayerCfg.AutoLeveling)	\
 	DXX_##VERB##_CHECK("Persistent Debris",opt_persist_debris,PlayerCfg.PersistentDebris)	\
-	DXX_##VERB##_CHECK("Screenshots w/o HUD",opt_screenshot,PlayerCfg.PRShot)	\
-	DXX_##VERB##_CHECK("No redundant pickup messages",opt_redundant,PlayerCfg.NoRedundancy)	\
-	DXX_##VERB##_CHECK("Show Player chat only (Multi)",opt_playerchat,PlayerCfg.MultiMessages)	\
 	DXX_##VERB##_CHECK("No Rankings (Multi)",opt_noranking,PlayerCfg.NoRankings)	\
-	DXX_##VERB##_CHECK("Free Flight controls in Automap",opt_freeflight, PlayerCfg.AutomapFreeFlight)	\
-	DXX_##VERB##_CHECK("No Weapon Autoselect when firing",opt_noautoselect,PlayerCfg.NoFireAutoselect)	\
-	DXX_##VERB##_CHECK("Only Cycle Autoselect Weapons",opt_only_autoselect,PlayerCfg.CycleAutoselectOnly)	\
+	DXX_##VERB##_CHECK("Free Flight in Automap",opt_freeflight, PlayerCfg.AutomapFreeFlight)	\
 	DXX_GAME_SPECIFIC_OPTIONS(VERB)	\
+	DXX_##VERB##_TEXT("", opt_label_blank)	\
+        DXX_##VERB##_TEXT("Weapon Autoselect options:", opt_label_autoselect)	\
+	DXX_##VERB##_MENU("Primary ordering...", opt_gameplay_reorderprimary_menu)	\
+	DXX_##VERB##_MENU("Secondary ordering...", opt_gameplay_reordersecondary_menu)	\
+	DXX_##VERB##_TEXT("Autoselect while firing:", opt_autoselect_firing_label)	\
+	DXX_##VERB##_RADIO("Immediately", opt_autoselect_firing_immediate, PlayerCfg.NoFireAutoselect == FiringAutoselectMode::Immediate, optgrp_autoselect_firing)	\
+	DXX_##VERB##_RADIO("Never", opt_autoselect_firing_never, PlayerCfg.NoFireAutoselect == FiringAutoselectMode::Never, optgrp_autoselect_firing)	\
+	DXX_##VERB##_RADIO("When firing stops", opt_autoselect_firing_delayed, PlayerCfg.NoFireAutoselect == FiringAutoselectMode::Delayed, optgrp_autoselect_firing)	\
+	DXX_##VERB##_CHECK("Only Cycle Autoselect Weapons",opt_only_autoselect,PlayerCfg.CycleAutoselectOnly)	\
 
+enum {
+        DXX_GAMEPLAY_MENU_OPTIONS(ENUM)
+};
 
-void do_misc_menu()
+static int gameplay_config_menuset(newmenu *, const d_event &event, const unused_newmenu_userdata_t *)
 {
-	enum {
-		DXX_MISC_MENU_OPTIONS(ENUM)
-	};
+	switch (event.type)
+	{
+		case EVENT_NEWMENU_SELECTED:
+		{
+			auto &citem = static_cast<const d_select_event &>(event).citem;
+                        if (citem == opt_gameplay_reorderprimary_menu)
+                                ReorderPrimary();
+                        if (citem == opt_gameplay_reordersecondary_menu)
+                                ReorderSecondary();
+			return 1;		// stay in menu
+		}
+
+		default:
+			break;
+	}
+
+	return 0;
+}
+
+void gameplay_config()
+{
 	int i = 0;
 
 	do {
-		newmenu_item m[DXX_MISC_MENU_OPTIONS(COUNT)];
-		DXX_MISC_MENU_OPTIONS(ADD);
-		i = newmenu_do1( NULL, "Misc Options", sizeof(m)/sizeof(*m), m, unused_newmenu_subfunction, unused_newmenu_userdata, i );
-		DXX_MISC_MENU_OPTIONS(READ);
+		newmenu_item m[DXX_GAMEPLAY_MENU_OPTIONS(COUNT)];
+		DXX_GAMEPLAY_MENU_OPTIONS(ADD);
+                i = newmenu_do1( NULL, "Gameplay Options", sizeof(m)/sizeof(*m), m, gameplay_config_menuset, unused_newmenu_userdata, 0 );
+		DXX_GAMEPLAY_MENU_OPTIONS(READ);
+		PlayerCfg.NoFireAutoselect = m[opt_autoselect_firing_delayed].value
+			? FiringAutoselectMode::Delayed
+			: (m[opt_autoselect_firing_immediate].value
+				? FiringAutoselectMode::Immediate
+				: FiringAutoselectMode::Never);
 	} while( i>-1 );
 
 }
@@ -2018,7 +2284,7 @@ void do_options_menu()
 }
 
 #ifndef RELEASE
-static window_event_result polygon_models_viewer_handler(window *wind,const d_event &event, const unused_window_userdata_t *)
+static window_event_result polygon_models_viewer_handler(window *, const d_event &event, const unused_window_userdata_t *)
 {
 	static unsigned view_idx;
 	int key = 0;
@@ -2108,7 +2374,7 @@ static void polygon_models_viewer()
 		event_process();
 }
 
-static window_event_result gamebitmaps_viewer_handler(window *wind,const d_event &event, const unused_window_userdata_t *)
+static window_event_result gamebitmaps_viewer_handler(window *, const d_event &event, const unused_window_userdata_t *)
 {
 	static int view_idx = 0;
 	int key = 0;
@@ -2207,7 +2473,7 @@ public:
 
 }
 
-static int sandbox_menuset(newmenu *menu,const d_event &event, sandbox_menu_items *items)
+static int sandbox_menuset(newmenu *, const d_event &event, sandbox_menu_items *items)
 {
 	switch (event.type)
 	{

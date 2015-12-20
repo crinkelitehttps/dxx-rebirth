@@ -51,6 +51,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "centers.h"
 #include "piggy.h"
 #include "u_mem.h"
+#include "event.h"
 
 #include "compiler-make_unique.h"
 
@@ -60,6 +61,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 static UI_DIALOG 				*MainWindow = NULL;
 static int						CurrentHostageIndex = -1;
 static int						LastHostageIndex = -1;
+
+namespace {
 
 struct hostage_dialog
 {
@@ -71,6 +74,8 @@ struct hostage_dialog
 	fix 			vclip_animation_time;			// How long the rescue sequence has been playing
 	fix 			vclip_playback_speed;				// Calculated internally.  Frames/second of vclip.
 };
+
+}
 
 static int SelectPrevHostage()	{
 	int start=0;
@@ -154,7 +159,7 @@ static int PlaceHostage()	{
 	}
 
 	if (hostage_object_is_valid( Cur_object_index ) )	{
-		CurrentHostageIndex	= get_hostage_id(&Objects[Cur_object_index]);
+		CurrentHostageIndex	= get_hostage_id(vcobjptr(Cur_object_index));
 	} else {
 		Int3();		// Get John! (Object should be valid)
 		i=hostage_object_is_valid( Cur_object_index );	// For debugging only

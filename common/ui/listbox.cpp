@@ -29,12 +29,14 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "key.h"
 #include "timer.h"
 
+namespace dcx {
+
 static void gr_draw_sunken_border( short x1, short y1, short x2, short y2 );
 
 void ui_draw_listbox( UI_DIALOG *dlg, UI_GADGET_LISTBOX * listbox )
 {
 	int i, x, y, stop;
-	int w, h,  aw;
+	int w, h;
 
 	//if (listbox->current_item<0)
 	//    listbox->current_item=0;
@@ -90,9 +92,8 @@ void ui_draw_listbox( UI_DIALOG *dlg, UI_GADGET_LISTBOX * listbox )
 			else
 				gr_set_fontcolor( CBLACK, -1 );
 		}
-		gr_string(x + 2, y, listbox->list[i]);
-		gr_get_string_size(listbox->list[i], &w, &h, &aw);
-
+		gr_get_string_size(listbox->list[i], &w, &h, nullptr);
+		gr_string(x + 2, y, listbox->list[i], w, h);
 		y += h;
 	}
 
@@ -122,8 +123,8 @@ static void gr_draw_sunken_border( short x1, short y1, short x2, short y2 )
 
 std::unique_ptr<UI_GADGET_LISTBOX> ui_add_gadget_listbox(UI_DIALOG *dlg, short x, short y, short w, short h, short numitems, char **list)
 {
-	int tw, th, taw, i;
-	gr_get_string_size("*", &tw, &th, &taw );
+	int th, i;
+	gr_get_string_size("*", nullptr, &th, nullptr);
 
 	i = h / th;
 	h = i * th;
@@ -375,7 +376,7 @@ window_event_result ui_listbox_do( UI_DIALOG *dlg, UI_GADGET_LISTBOX * listbox,c
 	return rval;
 }
 
-void ui_listbox_change(UI_DIALOG *, UI_GADGET_LISTBOX *listbox, short numitems, char **list)
+void ui_listbox_change(UI_DIALOG *, UI_GADGET_LISTBOX *listbox, uint_fast32_t numitems, const char *const *list)
 {
 	int stop, start;
 	UI_GADGET_SCROLLBAR * scrollbar;
@@ -414,5 +415,7 @@ void ui_listbox_change(UI_DIALOG *, UI_GADGET_LISTBOX *listbox, short numitems, 
 	scrollbar->moved=0;
 	scrollbar->status=1;
 
+
+}
 
 }

@@ -17,14 +17,12 @@ AND AGREES TO THE TERMS HEREIN AND ACCEPTS THE SAME BY USE OF THIS FILE.
 COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 */
 
-
-
-#ifndef _RBAUDIO_H
-#define _RBAUDIO_H
+#pragma once
 
 #define RBA_MEDIA_CHANGED	-1
 
 #ifdef __cplusplus
+namespace dcx {
 
 struct RBACHANNELCTL
 {
@@ -48,7 +46,13 @@ extern void RBASetStereoAudio(RBACHANNELCTL *channels);
 extern void RBASetQuadAudio(RBACHANNELCTL *channels);
 extern void RBAGetAudioInfo(RBACHANNELCTL *channels);
 extern void RBASetChannelVolume(int channel, int volume);
+#ifdef __linux__
 extern void RBASetVolume(int volume);
+#else
+static inline void RBASetVolume(int)
+{
+}
+#endif
 extern int	RBAEnabled(void);
 extern void RBADisable(void);
 extern void RBAEnable(void);
@@ -68,6 +72,5 @@ unsigned long RBAGetDiscID();
 // List the tracks on the CD
 void RBAList(void);
 
-#endif
-
+}
 #endif

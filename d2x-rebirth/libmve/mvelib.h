@@ -14,7 +14,7 @@
 
 #ifdef __cplusplus
 #include <cstdint>
-#include <memory>
+#include <vector>
 #include "dxxsconf.h"
 #include "compiler-array.h"
 
@@ -24,15 +24,6 @@ extern mve_cb_Free mve_free;
 extern mve_cb_ShowFrame mve_showframe;
 extern mve_cb_SetPalette mve_setpalette;
 
-class MVE_chunk_deleter
-{
-public:
-	void operator()(uint8_t *p) const
-	{
-		mve_free(p);
-	}
-};
-
 /*
  * structure for maintaining info on a MVEFILE stream
  */
@@ -41,10 +32,8 @@ struct MVEFILE
 	MVEFILE();
 	~MVEFILE();
     void           *stream;
-	std::unique_ptr<uint8_t[], MVE_chunk_deleter> cur_chunk;
-    int             buf_size;
-    int             cur_fill;
-    int             next_segment;
+	std::vector<uint8_t> cur_chunk;
+	std::size_t next_segment;
 };
 
 /*
@@ -99,6 +88,17 @@ struct MVESTREAM
     void                       *context;
 	array<MVESEGMENTHANDLER, 32> handlers;
 };
+
+struct MVESTREAM_deleter_t
+{
+	void operator()(MVESTREAM *p) const
+	{
+		MVE_rmEndMovie(std::unique_ptr<MVESTREAM>(p));
+	}
+};
+
+typedef std::unique_ptr<MVESTREAM, MVESTREAM_deleter_t> MVESTREAM_ptr_t;
+int  MVE_rmPrepMovie(MVESTREAM_ptr_t &, void *stream, int x, int y, int track);
 
 /*
  * open an MVE stream

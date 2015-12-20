@@ -33,7 +33,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 int AssignTexture(void)
 {
    autosave_mine( mine_filename );
-   strcpy(undo_status[Autosave_count], "Assign Texture UNDONE.");
+	undo_status[Autosave_count] = "Assign Texture UNDONE.";
 
 	Cursegp->sides[Curside].tmap_num = CurrentTexture;
 
@@ -52,7 +52,7 @@ int AssignTexture2(void)
 	int texnum, orient, ctexnum, newtexnum;
 
    autosave_mine( mine_filename );
-   strcpy(undo_status[Autosave_count], "Assign Texture 2 UNDONE.");
+	undo_status[Autosave_count] = "Assign Texture 2 UNDONE.";
 
 	texnum = Cursegp->sides[Curside].tmap_num2 & 0x3FFF;
 	orient = ((Cursegp->sides[Curside].tmap_num2 & 0xC000) >> 14) & 3;
@@ -76,7 +76,7 @@ int AssignTexture2(void)
 int ClearTexture2(void)
 {
    autosave_mine( mine_filename );
-   strcpy(undo_status[Autosave_count], "Clear Texture 2 UNDONE.");
+	undo_status[Autosave_count] = "Clear Texture 2 UNDONE.";
 
 	Cursegp->sides[Curside].tmap_num2 = 0;
 
@@ -95,10 +95,10 @@ int ClearTexture2(void)
 static int propagate_textures_common(int uv_flag, int move_flag)
 {
    autosave_mine( mine_filename );
-   strcpy(undo_status[Autosave_count], "Propogate Textures UNDONE.");
-	
-	if (IS_CHILD(Cursegp->children[Curside]))
-		med_propagate_tmaps_to_segments(Cursegp, &Segments[Cursegp->children[Curside]], uv_flag);
+	undo_status[Autosave_count] = "Propagate Textures UNDONE.";
+	const auto c = Cursegp->children[Curside];
+	if (IS_CHILD(c))
+		med_propagate_tmaps_to_segments(Cursegp, vsegptridx(c), uv_flag);
 
 	if (move_flag)
 		SelectCurrentSegForward();
@@ -144,15 +144,19 @@ static int is_selected_segment(segnum_t segnum)
 //	-------------------------------------------------------------------------------------
 //	Auxiliary function for PropagateTexturesSelected.
 //	Recursive parse.
-static void pts_aux(segment *sp, visited_segment_bitarray_t &visited)
+static void pts_aux(const vsegptridx_t sp, visited_segment_bitarray_t &visited)
 {
-	visited[sp-Segments] = true;
+	visited[sp] = true;
 
 	for (int side=0; side<MAX_SIDES_PER_SEGMENT; side++) {
-		if (IS_CHILD(sp->children[side])) {
-			while ((!visited[sp->children[side]]) && is_selected_segment(sp->children[side])) {
-				med_propagate_tmaps_to_segments(sp,&Segments[sp->children[side]],0);
-				pts_aux(&Segments[sp->children[side]], visited);
+		const auto c = sp->children[side];
+		if (IS_CHILD(c))
+		{
+			const auto &&csegp = vsegptridx(c);
+			while (!visited[c] && is_selected_segment(c))
+			{
+				med_propagate_tmaps_to_segments(sp, csegp, 0);
+				pts_aux(csegp, visited);
 			}
 		}
 	}
@@ -164,10 +168,10 @@ static void pts_aux(segment *sp, visited_segment_bitarray_t &visited)
 int PropagateTexturesSelected(void)
 {
    autosave_mine( mine_filename );
-   strcpy(undo_status[Autosave_count], "Propogate Textures Selected UNDONE.");
+	undo_status[Autosave_count] = "Propogate Textures Selected UNDONE.";
 
 	visited_segment_bitarray_t visited;
-	visited[Cursegp-Segments] = true;
+	visited[Cursegp] = true;
 
 	pts_aux(Cursegp, visited);
 

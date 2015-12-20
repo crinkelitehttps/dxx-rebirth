@@ -23,25 +23,27 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _UI_H
-#define _UI_H
+#pragma once
 
 #include "dxxsconf.h"
-#include "event.h"
+#include "fwd-event.h"
 #include "fmtcheck.h"
 #include "u_mem.h"
 
 #ifdef __cplusplus
 #include <cstdint>
 #include <string>
+#include "fwd-gr.h"
 #include "varutil.h"
 #include "window.h"
 #include "compiler-array.h"
+#include "compiler-type_traits.h"
 #include "ntstring.h"
 
 struct grs_bitmap;
-struct grs_canvas;
 struct grs_font;
+
+namespace dcx {
 
 struct UI_KEYPAD {
 	typedef array<char, 100> buttontext_element_t;
@@ -63,7 +65,9 @@ struct UI_EVENT
 
 struct UI_GADGET
 {
-	short           kind;       \
+	uint8_t           kind;
+	short           x1,y1,x2,y2;
+	int             hotkey;
 	struct UI_GADGET  * prev;     \
 	struct UI_GADGET  * next;     \
 	struct UI_GADGET  * when_tab;  \
@@ -76,13 +80,11 @@ struct UI_GADGET
 	int             status;     \
 	int             oldstatus;  \
 	grs_subcanvas_ptr canvas;     \
-	int             hotkey;     \
-	short           x1,y1,x2,y2;
 };
 
 struct UI_GADGET_USERBOX : UI_GADGET
 {
-	static const uint8_t s_kind = 7;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 7>{};
 	short           width, height;
 	short           b1_held_down;
 	short           b1_clicked;
@@ -91,29 +93,29 @@ struct UI_GADGET_USERBOX : UI_GADGET
 	short           b1_drag_x1, b1_drag_y1;
 	short           b1_drag_x2, b1_drag_y2;
 	short           b1_done_dragging;
-	int             keypress;
 	short           mouse_onme;
 	short           mouse_x, mouse_y;
+	int             keypress;
 	grs_bitmap *    bitmap;
 };
 
 struct UI_GADGET_BUTTON : UI_GADGET
 {
-	static const uint8_t s_kind = 1;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 1>{};
 	std::string  text;
 	short           width, height;
 	short           position;
 	short           oldposition;
 	short           pressed;
+	uint8_t dim_if_no_function;
+	int				 hotkey1;
 	int          	 (*user_function)(void);
 	int          	 (*user_function1)(void);
-	int				 hotkey1;
-	int				 dim_if_no_function;
 };
 
 struct UI_GADGET_INPUTBOX : UI_GADGET
 {
-	static const uint8_t s_kind = 6;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 6>{};
 	RAIIdmem<char[]>  text;
 	short           width, height;
 	short           length;
@@ -126,7 +128,7 @@ struct UI_GADGET_INPUTBOX : UI_GADGET
 
 struct UI_GADGET_RADIO : UI_GADGET
 {
-	static const uint8_t s_kind = 4;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 4>{};
 	RAIIdmem<char[]>  text;
 	short           width, height;
 	short           position;
@@ -138,7 +140,7 @@ struct UI_GADGET_RADIO : UI_GADGET
 
 struct UI_GADGET_ICON : UI_GADGET
 {
-	static const uint8_t s_kind = 9;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 9>{};
 	RAIIdmem<char[]>  text;
 	short 		    width, height;
 	sbyte           flag;
@@ -151,7 +153,7 @@ struct UI_GADGET_ICON : UI_GADGET
 
 struct UI_GADGET_CHECKBOX : UI_GADGET
 {
-	static const uint8_t s_kind = 5;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 5>{};
 	RAIIdmem<char[]>  text;
 	short           width, height;
 	short           position;
@@ -163,7 +165,7 @@ struct UI_GADGET_CHECKBOX : UI_GADGET
 
 struct UI_GADGET_SCROLLBAR : UI_GADGET
 {
-	static const uint8_t s_kind = 3;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 3>{};
 	short           horz;
 	short           width, height;
 	int             start;
@@ -183,8 +185,8 @@ struct UI_GADGET_SCROLLBAR : UI_GADGET
 
 struct UI_GADGET_LISTBOX : UI_GADGET
 {
-	static const uint8_t s_kind = 2;
-	char            **list;
+	static constexpr auto s_kind = tt::integral_constant<uint8_t, 2>{};
+	const char            *const *list;
 	short           width, height;
 	int             num_items;
 	int             num_items_displayed;
@@ -230,6 +232,8 @@ extern grs_font_ptr ui_small_font;
 extern unsigned char CBLACK,CGREY,CWHITE,CBRIGHT,CRED;
 extern UI_GADGET * selected_gadget;
 
+#define Hline(x1,x2,y)	Hline(x1,y,x2)
+#define Vline(y1,y2,x)	Vline(x,y1,y2)
 extern void Hline(short x1, short x2, short y );
 extern void Vline(short y1, short y2, short x );
 extern void ui_string_centered( short x, short y, const char * s );
@@ -256,10 +260,12 @@ public:
 class unused_ui_userdata_t;
 static unused_ui_userdata_t *const unused_ui_userdata = nullptr;
 
+UI_DIALOG *untyped_ui_create_dialog(short x, short y, short w, short h, enum dialog_flags flags, ui_subfunction_t<void>::type callback, void *userdata, const void *createdata);
+
 template <typename T1, typename T2 = const void>
 UI_DIALOG * ui_create_dialog( short x, short y, short w, short h, enum dialog_flags flags, typename ui_subfunction_t<T1>::type callback, T1 *userdata, T2 *createdata = nullptr)
 {
-	return ui_create_dialog(x, y, w, h, flags, reinterpret_cast<ui_subfunction_t<void>::type>(callback), static_cast<void *>(userdata), static_cast<const void *>(createdata));
+	return untyped_ui_create_dialog(x, y, w, h, flags, reinterpret_cast<ui_subfunction_t<void>::type>(callback), static_cast<void *>(userdata), static_cast<const void *>(createdata));
 }
 
 template <typename T1, typename T2 = const void>
@@ -270,9 +276,6 @@ UI_DIALOG *ui_create_dialog(short x, short y, short w, short h, enum dialog_flag
 	return r;
 }
 
-template <>
-UI_DIALOG * ui_create_dialog( short x, short y, short w, short h, enum dialog_flags flags, ui_subfunction_t<void>::type callback, void *userdata, const void *createdata);
-
 extern struct window *ui_dialog_get_window(UI_DIALOG *dlg);
 extern void ui_dialog_set_current_canvas(UI_DIALOG *dlg);
 extern void ui_close_dialog( UI_DIALOG * dlg );
@@ -281,6 +284,7 @@ extern void ui_close_dialog( UI_DIALOG * dlg );
 
 void ui_gadget_add(UI_DIALOG *dlg, short x1, short y1, short x2, short y2, UI_GADGET *);
 template <typename T>
+__attribute_warn_unused_result
 static std::unique_ptr<T> ui_gadget_add(UI_DIALOG *dlg, short x1, short y1, short x2, short y2)
 {
 	std::unique_ptr<T> t{new T};
@@ -288,6 +292,7 @@ static std::unique_ptr<T> ui_gadget_add(UI_DIALOG *dlg, short x1, short y1, shor
 	ui_gadget_add(dlg, x1, y1, x2, y2, t.get());
 	return t;
 }
+__attribute_warn_unused_result
 std::unique_ptr<UI_GADGET_BUTTON> ui_add_gadget_button(UI_DIALOG * dlg, short x, short y, short w, short h, const char * text, int (*function_to_call)());
 extern void ui_gadget_delete_all( UI_DIALOG * dlg );
 window_event_result ui_gadget_send_event(UI_DIALOG *dlg, enum event_type type, UI_GADGET *gadget);
@@ -307,6 +312,7 @@ extern void ui_mega_process();
 
 extern void ui_get_button_size( const char * text, int * width, int * height );
 
+__attribute_warn_unused_result
 std::unique_ptr<UI_GADGET_SCROLLBAR> ui_add_gadget_scrollbar(UI_DIALOG * dlg, short x, short y, short w, short h, int start, int stop, int position, int window_size);
 window_event_result ui_scrollbar_do( UI_DIALOG *dlg, UI_GADGET_SCROLLBAR * scrollbar, const d_event &event );
 extern void ui_draw_scrollbar( UI_DIALOG *dlg, UI_GADGET_SCROLLBAR * scrollbar );
@@ -317,11 +323,13 @@ extern void ui_dprintf_at( UI_DIALOG * dlg, short x, short y, const char * forma
 #define ui_dprintf_at(A1,A2,A3,F,...)	dxx_call_printf_checked(ui_dprintf_at,ui_dputs_at,(A1,A2,A3),(F),##__VA_ARGS__)
 
 extern void ui_draw_radio( UI_DIALOG *dlg, UI_GADGET_RADIO * radio );
+__attribute_warn_unused_result
 std::unique_ptr<UI_GADGET_RADIO> ui_add_gadget_radio(UI_DIALOG * dlg, short x, short y, short w, short h, short group, const char * text);
 window_event_result ui_radio_do( UI_DIALOG *dlg, UI_GADGET_RADIO * radio, const d_event &event );
 extern void ui_radio_set_value(UI_GADGET_RADIO *radio, int value);
 
 extern void ui_draw_checkbox( UI_DIALOG *dlg, UI_GADGET_CHECKBOX * checkbox );
+__attribute_warn_unused_result
 std::unique_ptr<UI_GADGET_CHECKBOX> ui_add_gadget_checkbox(UI_DIALOG * dlg, short x, short y, short w, short h, short group, const char * text);
 window_event_result ui_checkbox_do( UI_DIALOG *dlg, UI_GADGET_CHECKBOX * checkbox, const d_event &event );
 extern void ui_checkbox_check(UI_GADGET_CHECKBOX * checkbox, int check);
@@ -330,13 +338,14 @@ extern UI_GADGET * ui_gadget_get_prev( UI_GADGET * gadget );
 extern UI_GADGET * ui_gadget_get_next( UI_GADGET * gadget );
 extern void ui_gadget_calc_keys( UI_DIALOG * dlg);
 
-extern void ui_listbox_change(UI_DIALOG *dlg, UI_GADGET_LISTBOX *listbox, short numitems, char **list);
-
+void ui_listbox_change(UI_DIALOG *dlg, UI_GADGET_LISTBOX *listbox, uint_fast32_t numitems, const char *const *list);
 
 extern void ui_draw_inputbox( UI_DIALOG *dlg, UI_GADGET_INPUTBOX * inputbox );
+__attribute_warn_unused_result
 std::unique_ptr<UI_GADGET_INPUTBOX> ui_add_gadget_inputbox(UI_DIALOG * dlg, short x, short y, short w, short h, const char * text);
 
 template <std::size_t SL, std::size_t L>
+__attribute_warn_unused_result
 static inline std::unique_ptr<UI_GADGET_INPUTBOX> ui_add_gadget_inputbox(UI_DIALOG * dlg, short x, short y, const char (&text)[L])
 {
 	static_assert(SL <= L, "SL too large");
@@ -348,15 +357,14 @@ extern void ui_inputbox_set_text(UI_GADGET_INPUTBOX *inputbox, const char *text)
 
 
 window_event_result ui_userbox_do( UI_DIALOG *dlg, UI_GADGET_USERBOX * userbox, const d_event &event );
+__attribute_warn_unused_result
 std::unique_ptr<UI_GADGET_USERBOX> ui_add_gadget_userbox(UI_DIALOG * dlg, short x, short y, short w, short h);
 extern void ui_draw_userbox( UI_DIALOG *dlg, UI_GADGET_USERBOX * userbox );
 
 
 int MenuX( int x, int y, int NumButtons, const char *const text[] );
 
-char **file_getdirlist(int *NumFiles, const char *dir);
-char **file_getfilelist(int *NumDirs, const char *filespec, const char *dir);
-int ui_get_filename( char * filename, const char * Filespec, const char * message  );
+int ui_get_filename(char (&filename)[PATH_MAX], const char *filespec, const char *message);
 
 
 void * ui_malloc( int size );
@@ -369,20 +377,11 @@ void ui_free( void * buffer );
 #define UI_STATUS_PLAYING   2
 #define UI_STATUS_FASTPLAY  3
 
-int ui_record_events( int NumberOfEvents, UI_EVENT * buffer, int Flags );
-int ui_play_events_realtime( int NumberOfEvents, UI_EVENT * buffer );
-int ui_play_events_fast( int NumberOfEvents, UI_EVENT * buffer );
-int ui_recorder_status();
-void ui_set_playback_speed( int speed );
-
-extern unsigned int ui_number_of_events;
-extern unsigned int ui_event_counter;
-
-
 int ui_get_file( char * filename, const char * Filespec  );
 
 void ui_draw_icon( UI_GADGET_ICON * icon );
 window_event_result ui_icon_do( UI_DIALOG *dlg, UI_GADGET_ICON * icon, const d_event &event );
+__attribute_warn_unused_result
 std::unique_ptr<UI_GADGET_ICON> ui_add_gadget_icon(UI_DIALOG * dlg, const char * text, short x, short y, short w, short h, int k,int (*f)());
 
 int DecodeKeyText( const char * text );
@@ -410,7 +409,6 @@ void ui_barbox_close();
 
 extern int ui_button_any_drawn;
 
-#endif
+}
 
 #endif
-

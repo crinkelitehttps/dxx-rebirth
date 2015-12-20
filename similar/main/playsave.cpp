@@ -23,6 +23,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#include <stdexcept>
 #include <stdio.h>
 #include <string.h>
 #if !defined(_MSC_VER) && !defined(macintosh)
@@ -49,7 +50,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "screens.h"
 #include "powerup.h"
 #include "makesig.h"
-#include "byteutil.h"
 #include "u_mem.h"
 #include "args.h"
 #include "vers_id.h"
@@ -68,6 +68,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define DifficultyStr "difficulty"
 #define GameFlagsStr "game_flags"
 #define AllowedItemsStr "AllowedItems"
+#define SpawnGrantedItemsStr "SpawnGrantedItems"
+#define DuplicatePrimariesStr "DuplicatePrimaries"
+#define DuplicateSecondariesStr "DuplicateSecondaries"
+#define DuplicateAccessoriesStr "DuplicateAccessories"
 #define AllowMarkerViewStr "Allow_marker_view"
 #define AlwaysLightingStr "AlwaysLighting"
 #define ShowEnemyNamesStr "ShowEnemyNames"
@@ -125,6 +129,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define KEYBOARD_HEADER_TEXT	"[keyboard]"
 #define SENSITIVITY_NAME_TEXT	"sensitivity"
 #define SENSITIVITY_VALUE_TEXT	"%d"
+#define LINEAR_NAME_TEXT	"linearity"
+#define LINEAR_VALUE_TEXT	"%d"
+#define SPEED_NAME_TEXT	        "speed"
+#define SPEED_VALUE_TEXT	"%d"
 #define DEADZONE_NAME_TEXT	"deadzone"
 #define DEADZONE_VALUE_TEXT	"%d"
 #define JOYSTICK_HEADER_TEXT	"[joystick]"
@@ -135,6 +143,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define MOUSE_FSDEAD_VALUE_TEXT	"%d"
 #define MOUSE_FSINDICATOR_NAME_TEXT	"fsindi"
 #define MOUSE_FSINDICATOR_VALUE_TEXT	"%d"
+#define MOUSE_OVERRUN_NAME_TEXT	"overrun"
 #define WEAPON_KEYv2_HEADER_TEXT	"[weapon keys v2]"
 #define WEAPON_KEYv2_VALUE_TEXT	"0x%x,0x%x,0x%x"
 #define COCKPIT_HEADER_TEXT "[cockpit]"
@@ -154,6 +163,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define TOGGLES_AUTOMAPFREEFLIGHT_NAME_TEXT "automapfreeflight"
 #define TOGGLES_NOFIREAUTOSELECT_NAME_TEXT "nofireautoselect"
 #define TOGGLES_CYCLEAUTOSELECTONLY_NAME_TEXT "cycleautoselectonly"
+#define TOGGLES_FRIENDMISSILEVIEW_NAME_TEXT "friendmissileview"
+#define TOGGLES_CLOAKINVULTIMER_NAME_TEXT "cloakinvultimer"
+#define TOGGLES_RESPAWN_ANY_KEY	"respawnkey"
 #define GRAPHICS_HEADER_TEXT "[graphics]"
 #define GRAPHICS_ALPHAEFFECTS_NAME_TEXT "alphaeffects"
 #define GRAPHICS_DYNLIGHTCOLOR_NAME_TEXT "dynlightcolor"
@@ -168,7 +180,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 struct player_config PlayerCfg;
 #if defined(DXX_BUILD_DESCENT_I)
 static void plyr_read_stats();
-saved_game_sw saved_games[N_SAVE_SLOTS];
+static array<saved_game_sw, N_SAVE_SLOTS> saved_games;
 #elif defined(DXX_BUILD_DESCENT_II)
 static inline void plyr_read_stats() {}
 static int get_lifetime_checksum (int a,int b);
@@ -196,8 +208,8 @@ static void check_weapon_reorder(array<ubyte, N> &w)
 int new_player_config()
 {
 #if defined(DXX_BUILD_DESCENT_I)
-	for (unsigned i=0;i < N_SAVE_SLOTS;i++)
-		saved_games[i].name[0] = 0;
+	range_for (auto &i, saved_games)
+		i.name[0] = 0;
 #endif
 	uint32_t iTrackerUid1 = time( NULL ) * d_rand();
 	uint32_t iTrackerUid2 = d_rand() * d_rand();
@@ -216,23 +228,26 @@ int new_player_config()
 	PlayerCfg.KeyboardSens[0] = PlayerCfg.KeyboardSens[1] = PlayerCfg.KeyboardSens[2] = PlayerCfg.KeyboardSens[3] = PlayerCfg.KeyboardSens[4] = 16;
 	PlayerCfg.JoystickSens[0] = PlayerCfg.JoystickSens[1] = PlayerCfg.JoystickSens[2] = PlayerCfg.JoystickSens[3] = PlayerCfg.JoystickSens[4] = PlayerCfg.JoystickSens[5] = 8;
 	PlayerCfg.JoystickDead[0] = PlayerCfg.JoystickDead[1] = PlayerCfg.JoystickDead[2] = PlayerCfg.JoystickDead[3] = PlayerCfg.JoystickDead[4] = PlayerCfg.JoystickDead[5] = 0;
+	PlayerCfg.JoystickLinear[0] = PlayerCfg.JoystickLinear[1] = PlayerCfg.JoystickLinear[2] = PlayerCfg.JoystickLinear[3] = PlayerCfg.JoystickLinear[4] = PlayerCfg.JoystickLinear[5] = 0;
+	PlayerCfg.JoystickSpeed[0] = PlayerCfg.JoystickSpeed[1] = PlayerCfg.JoystickSpeed[2] = PlayerCfg.JoystickSpeed[3] = PlayerCfg.JoystickSpeed[4] = PlayerCfg.JoystickSpeed[5] = 16;
 	PlayerCfg.MouseFlightSim = 0;
 	PlayerCfg.MouseSens[0] = PlayerCfg.MouseSens[1] = PlayerCfg.MouseSens[2] = PlayerCfg.MouseSens[3] = PlayerCfg.MouseSens[4] = PlayerCfg.MouseSens[5] = 8;
+        PlayerCfg.MouseOverrun[0] = PlayerCfg.MouseOverrun[1] = PlayerCfg.MouseOverrun[2] = PlayerCfg.MouseOverrun[3] = PlayerCfg.MouseOverrun[4] = PlayerCfg.MouseOverrun[5] = 0;
 	PlayerCfg.MouseFSDead = 0;
 	PlayerCfg.MouseFSIndicator = 1;
 	PlayerCfg.CockpitMode[0] = PlayerCfg.CockpitMode[1] = CM_FULL_COCKPIT;
 	PlayerCfg.ReticleType = RET_TYPE_CLASSIC;
 	PlayerCfg.ReticleRGBA[0] = RET_COLOR_DEFAULT_R; PlayerCfg.ReticleRGBA[1] = RET_COLOR_DEFAULT_G; PlayerCfg.ReticleRGBA[2] = RET_COLOR_DEFAULT_B; PlayerCfg.ReticleRGBA[3] = RET_COLOR_DEFAULT_A;
 	PlayerCfg.ReticleSize = 0;
-	PlayerCfg.HudMode = 0;
 	PlayerCfg.TrackerUID1 = iTrackerUid1;
 	PlayerCfg.TrackerUID2 = iTrackerUid2;
+	PlayerCfg.HudMode = HudType::Standard;
 #if defined(DXX_BUILD_DESCENT_I)
 	PlayerCfg.BombGauge = 1;
 #elif defined(DXX_BUILD_DESCENT_II)
 	PlayerCfg.Cockpit3DView[0]=CV_NONE;
 	PlayerCfg.Cockpit3DView[1]=CV_NONE;
-	PlayerCfg.MissileViewEnabled = 1;
+	PlayerCfg.MissileViewEnabled = MissileViewMode::EnabledSelfOnly;
 	PlayerCfg.HeadlightActiveDefault = 1;
 	PlayerCfg.GuidedInBigWindow = 0;
 	PlayerCfg.GuidebotName = "GUIDE-BOT";
@@ -245,8 +260,9 @@ int new_player_config()
 	PlayerCfg.MultiMessages = 0;
 	PlayerCfg.NoRankings = 0;
 	PlayerCfg.AutomapFreeFlight = 0;
-	PlayerCfg.NoFireAutoselect = 0;
+	PlayerCfg.NoFireAutoselect = FiringAutoselectMode::Immediate;
 	PlayerCfg.CycleAutoselectOnly = 0;
+        PlayerCfg.CloakInvulTimer = 0;
 	PlayerCfg.AlphaEffects = 0;
 	PlayerCfg.DynLightColor = 0;
 
@@ -308,22 +324,20 @@ static const char *splitword(char *line, char c)
 	return p;
 }
 
-static int read_player_dxx(const char *filename)
+static void read_player_dxx(const char *filename)
 {
-	int rc = 0;
-
 	plyr_read_stats();
 
 	auto f = PHYSFSX_openReadBuffered(filename);
-	if(!f || PHYSFS_eof(f))
-		return errno;
+	if (!f)
+		return;
 
-	for (PHYSFSX_gets_line_t<50> line; PHYSFSX_fgets(line,f) && !PHYSFS_eof(f);)
+	for (PHYSFSX_gets_line_t<50> line; PHYSFSX_fgets(line,f);)
 	{
 #if defined(DXX_BUILD_DESCENT_I)
 		if (!strcmp(line, WEAPON_REORDER_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line, f) && strcmp(line, END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -346,7 +360,7 @@ static int read_player_dxx(const char *filename)
 #endif
 		if (!strcmp(line,KEYBOARD_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line, f) && strcmp(line, END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -356,18 +370,20 @@ static int read_player_dxx(const char *filename)
 		}
 		else if (!strcmp(line,JOYSTICK_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line, f) && strcmp(line, END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
 					continue;
 				convert_pattern_array(SENSITIVITY_NAME_TEXT, PlayerCfg.JoystickSens, line, value) ||
+				convert_pattern_array(LINEAR_NAME_TEXT, PlayerCfg.JoystickLinear, line, value) ||
+				convert_pattern_array(SPEED_NAME_TEXT, PlayerCfg.JoystickSpeed, line, value) ||
 				convert_pattern_array(DEADZONE_NAME_TEXT, PlayerCfg.JoystickDead, line, value);
 			}
 		}
 		else if (!strcmp(line,MOUSE_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line, f) && strcmp(line, END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -375,6 +391,8 @@ static int read_player_dxx(const char *filename)
 				if(!strcmp(line,MOUSE_FLIGHTSIM_NAME_TEXT))
 					PlayerCfg.MouseFlightSim = atoi(value);
 				else if (convert_pattern_array(SENSITIVITY_NAME_TEXT, PlayerCfg.MouseSens, line, value))
+					;
+				else if (convert_pattern_array(MOUSE_OVERRUN_NAME_TEXT, PlayerCfg.MouseOverrun, line, value))
 					;
 				else if(!strcmp(line,MOUSE_FSDEAD_NAME_TEXT))
 					PlayerCfg.MouseFSDead = atoi(value);
@@ -384,7 +402,7 @@ static int read_player_dxx(const char *filename)
 		}
 		else if (!strcmp(line,WEAPON_KEYv2_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line,f) && strcmp(line,END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -420,7 +438,7 @@ static int read_player_dxx(const char *filename)
 		}
 		else if (!strcmp(line,COCKPIT_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line,f) && strcmp(line,END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -431,7 +449,7 @@ static int read_player_dxx(const char *filename)
 				else
 #endif
 				if(!strcmp(line,COCKPIT_HUD_NAME_TEXT))
-					PlayerCfg.HudMode = atoi(value);
+					PlayerCfg.HudMode = static_cast<HudType>(atoi(value));
 				else if(!strcmp(line,COCKPIT_RETICLE_TYPE_NAME_TEXT))
 					PlayerCfg.ReticleType = atoi(value);
 				else if(!strcmp(line,COCKPIT_RETICLE_COLOR_NAME_TEXT))
@@ -442,7 +460,7 @@ static int read_player_dxx(const char *filename)
 		}
 		else if (!strcmp(line,TOGGLES_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line,f) && strcmp(line,END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -467,14 +485,18 @@ static int read_player_dxx(const char *filename)
 				if(!strcmp(line,TOGGLES_AUTOMAPFREEFLIGHT_NAME_TEXT))
 					PlayerCfg.AutomapFreeFlight = atoi(value);
 				if(!strcmp(line,TOGGLES_NOFIREAUTOSELECT_NAME_TEXT))
-					PlayerCfg.NoFireAutoselect = atoi(value);
+					PlayerCfg.NoFireAutoselect = static_cast<FiringAutoselectMode>(atoi(value));
 				if(!strcmp(line,TOGGLES_CYCLEAUTOSELECTONLY_NAME_TEXT))
 					PlayerCfg.CycleAutoselectOnly = atoi(value);
+				if(!strcmp(line,TOGGLES_CLOAKINVULTIMER_NAME_TEXT))
+					PlayerCfg.CloakInvulTimer = atoi(value);
+				else if (!strcmp(line, TOGGLES_RESPAWN_ANY_KEY))
+					PlayerCfg.RespawnMode = static_cast<RespawnPress>(atoi(value));
 			}
 		}
 		else if (!strcmp(line,GRAPHICS_HEADER_TEXT))
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line,f) && strcmp(line,END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -488,7 +510,7 @@ static int read_player_dxx(const char *filename)
 		else if (!strcmp(line,PLX_VERSION_HEADER_TEXT)) // know the version this pilot was used last with - allow modifications
 		{
 			int v1=0,v2=0,v3=0;
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line,f) && strcmp(line,END_TEXT))
 			{
 				const char *value=splitword(line,'=');
 				if (!value)
@@ -512,7 +534,7 @@ static int read_player_dxx(const char *filename)
 #endif
 				}
 		}
-		else if (PHYSFS_eof(f) || !strcmp(line,END_TEXT))
+		else if (!strcmp(line,END_TEXT))
 		{
 			break;
 		}
@@ -522,12 +544,11 @@ static int read_player_dxx(const char *filename)
 		}
 		else
 		{
-			while(PHYSFSX_fgets(line,f) && !PHYSFS_eof(f) && strcmp(line,END_TEXT))
+			while(PHYSFSX_fgets(line,f) && strcmp(line,END_TEXT))
 			{
 			}
 		}
 	}
-	return rc;
 }
 
 #if defined(DXX_BUILD_DESCENT_I)
@@ -536,7 +557,7 @@ static const char effcode2[]="AObe)7Rn1 -+/zZ'0";
 static const char effcode3[]="aoeuidhtnAOEUIDH6";
 static const char effcode4[]="'/.;]<{=,+?|}->[3";
 
-static unsigned char * decode_stat(unsigned char *p,int *v,const char *effcode)
+static const uint8_t *decode_stat(const uint8_t *p,int *v,const char *effcode)
 {
 	unsigned char c;
 	int neg,i;
@@ -569,7 +590,7 @@ static void plyr_read_stats_v(int *k, int *d)
 	int k1=-1,k2=0,d1=-1,d2=0;
 	*k=0;*d=0;//in case the file doesn't exist.
 	memset(filename, '\0', PATH_MAX);
-	snprintf(filename,sizeof(filename),PLAYER_EFFECTIVENESS_FILENAME_FORMAT,static_cast<const char *>(Players[Player_num].callsign));
+	snprintf(filename,sizeof(filename),PLAYER_EFFECTIVENESS_FILENAME_FORMAT,static_cast<const char *>(get_local_player().callsign));
 	if (auto f = PHYSFSX_openReadBuffered(filename))
 	{
 		PHYSFSX_gets_line_t<256> line;
@@ -592,9 +613,9 @@ static void plyr_read_stats_v(int *k, int *d)
 			 PHYSFSX_fgets(line,f);
 			 const char *value=splitword(line,':');
 			 if(value && !strcmp(line,"key") && strlen(value)>10){
-				 unsigned char *p;
 				 if (value[0]=='0' && value[1]=='1'){
-					 if ((p=decode_stat((unsigned char*)value+3,&k1,effcode1))&&
+					 const uint8_t *p;
+					 if ((p=decode_stat(reinterpret_cast<const unsigned char *>(value + 3), &k1, effcode1))&&
 					     (p=decode_stat(p+1,&k2,effcode2))&&
 					     (p=decode_stat(p+1,&d1,effcode3))){
 						 decode_stat(p+1,&d2,effcode4);
@@ -618,9 +639,10 @@ void plyr_save_stats()
 {
 	int kills = PlayerCfg.NetlifeKills,deaths = PlayerCfg.NetlifeKilled, neg, i;
 	char filename[PATH_MAX];
-	unsigned char buf[16],buf2[16],a;
+	array<uint8_t, 16> buf, buf2;
+	uint8_t a;
 	memset(filename, '\0', PATH_MAX);
-	snprintf(filename,sizeof(filename),PLAYER_EFFECTIVENESS_FILENAME_FORMAT,static_cast<const char *>(Players[Player_num].callsign));
+	snprintf(filename,sizeof(filename),PLAYER_EFFECTIVENESS_FILENAME_FORMAT,static_cast<const char *>(get_local_player().callsign));
 	auto f = PHYSFSX_openWriteBuffered(filename);
 	if(!f)
 		return; //broken!
@@ -656,7 +678,7 @@ void plyr_save_stats()
 	else
 		i+='A';
 
-	PHYSFSX_printf(f,"%c%s %c%s ",i,buf,i,buf2);
+	PHYSFSX_printf(f,"%c%s %c%s ",i,buf.data(),i,buf2.data());
 
 	if (deaths < 0)
 	{
@@ -684,7 +706,7 @@ void plyr_save_stats()
 	else
 		i+='A';
 
-	PHYSFSX_printf(f,"%c%s %c%s\n",i,buf,i,buf2);
+	PHYSFSX_printf(f, "%c%s %c%s\n", i, buf.data(), i, buf2.data());
 }
 #endif
 
@@ -717,11 +739,14 @@ static int write_player_dxx(const char *filename)
 		PHYSFSX_printf(fout,END_TEXT "\n");
 		PHYSFSX_printf(fout,JOYSTICK_HEADER_TEXT "\n");
 		print_pattern_array(fout, SENSITIVITY_NAME_TEXT, PlayerCfg.JoystickSens);
+		print_pattern_array(fout, LINEAR_NAME_TEXT, PlayerCfg.JoystickLinear);
+		print_pattern_array(fout, SPEED_NAME_TEXT, PlayerCfg.JoystickSpeed);
 		print_pattern_array(fout, DEADZONE_NAME_TEXT, PlayerCfg.JoystickDead);
 		PHYSFSX_printf(fout,END_TEXT "\n");
 		PHYSFSX_printf(fout,MOUSE_HEADER_TEXT "\n");
 		PHYSFSX_printf(fout,MOUSE_FLIGHTSIM_NAME_TEXT "=" MOUSE_FLIGHTSIM_VALUE_TEXT "\n",PlayerCfg.MouseFlightSim);
 		print_pattern_array(fout, SENSITIVITY_NAME_TEXT, PlayerCfg.MouseSens);
+                print_pattern_array(fout, MOUSE_OVERRUN_NAME_TEXT, PlayerCfg.MouseOverrun);
 		PHYSFSX_printf(fout,MOUSE_FSDEAD_NAME_TEXT "=" MOUSE_FSDEAD_VALUE_TEXT "\n",PlayerCfg.MouseFSDead);
 		PHYSFSX_printf(fout,MOUSE_FSINDICATOR_NAME_TEXT "=" MOUSE_FSINDICATOR_VALUE_TEXT "\n",PlayerCfg.MouseFSIndicator);
 		PHYSFSX_printf(fout,END_TEXT "\n");
@@ -745,7 +770,7 @@ static int write_player_dxx(const char *filename)
 #if defined(DXX_BUILD_DESCENT_I)
 		PHYSFSX_printf(fout,COCKPIT_MODE_NAME_TEXT "=%i\n",PlayerCfg.CockpitMode[0]);
 #endif
-		PHYSFSX_printf(fout,COCKPIT_HUD_NAME_TEXT "=%i\n",PlayerCfg.HudMode);
+		PHYSFSX_printf(fout,COCKPIT_HUD_NAME_TEXT "=%u\n", static_cast<unsigned>(PlayerCfg.HudMode));
 		PHYSFSX_printf(fout,COCKPIT_RETICLE_TYPE_NAME_TEXT "=%i\n",PlayerCfg.ReticleType);
 		PHYSFSX_printf(fout,COCKPIT_RETICLE_COLOR_NAME_TEXT "=%i,%i,%i,%i\n",PlayerCfg.ReticleRGBA[0],PlayerCfg.ReticleRGBA[1],PlayerCfg.ReticleRGBA[2],PlayerCfg.ReticleRGBA[3]);
 		PHYSFSX_printf(fout,COCKPIT_RETICLE_SIZE_NAME_TEXT "=%i\n",PlayerCfg.ReticleSize);
@@ -762,8 +787,10 @@ static int write_player_dxx(const char *filename)
 		PHYSFSX_printf(fout,TOGGLES_MULTIMESSAGES_NAME_TEXT "=%i\n",PlayerCfg.MultiMessages);
 		PHYSFSX_printf(fout,TOGGLES_NORANKINGS_NAME_TEXT "=%i\n",PlayerCfg.NoRankings);
 		PHYSFSX_printf(fout,TOGGLES_AUTOMAPFREEFLIGHT_NAME_TEXT "=%i\n",PlayerCfg.AutomapFreeFlight);
-		PHYSFSX_printf(fout,TOGGLES_NOFIREAUTOSELECT_NAME_TEXT "=%i\n",PlayerCfg.NoFireAutoselect);
+		PHYSFSX_printf(fout,TOGGLES_NOFIREAUTOSELECT_NAME_TEXT "=%i\n",static_cast<unsigned>(PlayerCfg.NoFireAutoselect));
 		PHYSFSX_printf(fout,TOGGLES_CYCLEAUTOSELECTONLY_NAME_TEXT "=%i\n",PlayerCfg.CycleAutoselectOnly);
+                PHYSFSX_printf(fout,TOGGLES_CLOAKINVULTIMER_NAME_TEXT "=%i\n",PlayerCfg.CloakInvulTimer);
+		PHYSFSX_printf(fout,TOGGLES_RESPAWN_ANY_KEY "=%i\n",static_cast<unsigned>(PlayerCfg.RespawnMode));
 		PHYSFSX_printf(fout,END_TEXT "\n");
 		PHYSFSX_printf(fout,GRAPHICS_HEADER_TEXT "\n");
 		PHYSFSX_printf(fout,GRAPHICS_ALPHAEFFECTS_NAME_TEXT "=%i\n",PlayerCfg.AlphaEffects);
@@ -802,7 +829,7 @@ int read_player_file()
 	Assert(Player_num < MAX_PLAYERS);
 
 	memset(filename, '\0', PATH_MAX);
-	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plr"), static_cast<const char *>(Players[Player_num].callsign));
+	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plr"), static_cast<const char *>(get_local_player().callsign));
 	if (!PHYSFSX_exists(filename,0))
 		return ENOENT;
 	auto file = PHYSFSX_openReadBuffered(filename);
@@ -936,7 +963,20 @@ int read_player_file()
 	PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(sbyte)); // skip ReticleOn
 	PlayerCfg.CockpitMode[0] = PlayerCfg.CockpitMode[1] = (cockpit_mode_t)PHYSFSX_readByte(file);
 	PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(sbyte)); //skip Default_display_mode
-	PlayerCfg.MissileViewEnabled      = PHYSFSX_readByte(file);
+	{
+		auto i = PHYSFSX_readByte(file);
+		switch (i)
+		{
+			case static_cast<unsigned>(MissileViewMode::None):
+			case static_cast<unsigned>(MissileViewMode::EnabledSelfOnly):
+			case static_cast<unsigned>(MissileViewMode::EnabledSelfAndAllies):
+				break;
+			default:
+				i = 0;
+				break;
+		}
+		PlayerCfg.MissileViewEnabled = static_cast<MissileViewMode>(i);
+	}
 	PlayerCfg.HeadlightActiveDefault  = PHYSFSX_readByte(file);
 	PlayerCfg.GuidedInBigWindow      = PHYSFSX_readByte(file);
 	if (player_file_version >= 19)
@@ -1166,9 +1206,9 @@ void write_player_file()
 
 	errno_ret = WriteConfigFile();
 
-	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plx"), static_cast<const char *>(Players[Player_num].callsign));
+	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plx"), static_cast<const char *>(get_local_player().callsign));
 	write_player_dxx(filename);
-	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plr"), static_cast<const char *>(Players[Player_num].callsign));
+	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.plr"), static_cast<const char *>(get_local_player().callsign));
 	auto file = PHYSFSX_openWriteBuffered(filename);
 	if (!file)
 		return;
@@ -1243,7 +1283,7 @@ void write_player_file()
 	PHYSFSX_writeU8(file, PlayerCfg.ReticleType==RET_TYPE_NONE?0:1);
 	PHYSFSX_writeU8(file, PlayerCfg.CockpitMode[0]);
 	PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(PHYSFS_uint8)); // skip Default_display_mode
-	PHYSFSX_writeU8(file, PlayerCfg.MissileViewEnabled);
+	PHYSFSX_writeU8(file, static_cast<uint8_t>(PlayerCfg.MissileViewEnabled));
 	PHYSFSX_writeU8(file, PlayerCfg.HeadlightActiveDefault);
 	PHYSFSX_writeU8(file, PlayerCfg.GuidedInBigWindow);
 	PHYSFS_seek(file,PHYSFS_tell(file)+sizeof(PHYSFS_uint8)); // skip Automap_always_hires
@@ -1336,26 +1376,32 @@ static int get_lifetime_checksum (int a,int b)
 }
 #endif
 
+namespace dsx {
+
+template <uint_fast32_t shift, uint_fast32_t width>
+static void convert_duplicate_powerup_integer(packed_netduplicate_items &d, const char *value)
+{
+	/* Initialize 'i' to avoid bogus -Wmaybe-uninitialized at -Og on
+	 * gcc-4.9 */
+	unsigned i = 0;
+	if (convert_integer(i, value) && !(i & ~((1 << width) - 1)))
+		d.set_sub_field<shift, width>(i);
+}
+
 // read stored values from ngp file to netgame_info
 void read_netgame_profile(netgame_info *ng)
 {
 	char filename[PATH_MAX];
 
-	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.ngp"), static_cast<const char *>(Players[Player_num].callsign));
-	if (!PHYSFSX_exists(filename,0))
-		return;
-
+	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.ngp"), static_cast<const char *>(get_local_player().callsign));
 	auto file = PHYSFSX_openReadBuffered(filename);
 	if (!file)
 		return;
 
 	// NOTE that we do not set any defaults here or even initialize netgame_info. For flexibility, leave that to the function calling this.
-	while (!PHYSFS_eof(file))
+	for (PHYSFSX_gets_line_t<50> line; const char *const eol = PHYSFSX_fgets(line, file);)
 	{
-		PHYSFSX_gets_line_t<50> line;
-		PHYSFSX_fgets(line, file);
 		const auto lb = line.begin();
-		const auto eol = std::find(lb, line.end(), 0);
 		if (eol == line.end())
 			continue;
 		auto eq = std::find(lb, eol, '=');
@@ -1378,7 +1424,15 @@ void read_netgame_profile(netgame_info *ng)
 		}
 		else if (cmp(lb, eq, AllowedItemsStr))
 			convert_integer(ng->AllowedItems, value);
+		else if (cmp(lb, eq, SpawnGrantedItemsStr))
+			convert_integer(ng->SpawnGrantedItems.mask, value);
+		else if (cmp(lb, eq, DuplicatePrimariesStr))
+			convert_duplicate_powerup_integer<packed_netduplicate_items::primary_shift, packed_netduplicate_items::primary_width>(ng->DuplicatePowerups, value);
+		else if (cmp(lb, eq, DuplicateSecondariesStr))
+			convert_duplicate_powerup_integer<packed_netduplicate_items::secondary_shift, packed_netduplicate_items::secondary_width>(ng->DuplicatePowerups, value);
 #if defined(DXX_BUILD_DESCENT_II)
+		else if (cmp(lb, eq, DuplicateAccessoriesStr))
+			convert_duplicate_powerup_integer<packed_netduplicate_items::accessory_shift, packed_netduplicate_items::accessory_width>(ng->DuplicatePowerups, value);
 		else if (cmp(lb, eq, AllowMarkerViewStr))
 			convert_integer(ng->Allow_marker_view, value);
 		else if (cmp(lb, eq, AlwaysLightingStr))
@@ -1411,7 +1465,7 @@ void read_netgame_profile(netgame_info *ng)
 void write_netgame_profile(netgame_info *ng)
 {
 	char filename[PATH_MAX];
-	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.ngp"), static_cast<const char *>(Players[Player_num].callsign));
+	snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.8s.ngp"), static_cast<const char *>(get_local_player().callsign));
 	auto file = PHYSFSX_openWriteBuffered(filename);
 	if (!file)
 		return;
@@ -1422,7 +1476,11 @@ void write_netgame_profile(netgame_info *ng)
 	PHYSFSX_printf(file, DifficultyStr "=%i\n", ng->difficulty);
 	PHYSFSX_printf(file, GameFlagsStr "=%i\n", pack_game_flags(&ng->game_flag).value);
 	PHYSFSX_printf(file, AllowedItemsStr "=%i\n", ng->AllowedItems);
+	PHYSFSX_printf(file, SpawnGrantedItemsStr "=%i\n", ng->SpawnGrantedItems.mask);
+	PHYSFSX_printf(file, DuplicatePrimariesStr "=%u\n", static_cast<unsigned>(ng->DuplicatePowerups.get_primary_count()));
+	PHYSFSX_printf(file, DuplicateSecondariesStr "=%u\n", static_cast<unsigned>(ng->DuplicatePowerups.get_secondary_count()));
 #if defined(DXX_BUILD_DESCENT_II)
+	PHYSFSX_printf(file, DuplicateAccessoriesStr "=%u\n", static_cast<unsigned>(ng->DuplicatePowerups.get_accessory_count()));
 	PHYSFSX_printf(file, AllowMarkerViewStr "=%i\n", ng->Allow_marker_view);
 	PHYSFSX_printf(file, AlwaysLightingStr "=%i\n", ng->AlwaysLighting);
 #endif
@@ -1440,4 +1498,6 @@ void write_netgame_profile(netgame_info *ng)
 	PHYSFSX_printf(file, TrackerStr "=0\n");
 #endif
 	PHYSFSX_printf(file, NGPVersionStr "=%s\n",VERSION);
+}
+
 }

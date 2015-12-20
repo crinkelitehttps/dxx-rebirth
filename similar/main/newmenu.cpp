@@ -24,10 +24,11 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  */
 
 #include <stdio.h>
-#include <stdlib.h>
+#include <cstdlib>
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
+#include <functional>
 
 #include "pstypes.h"
 #include "dxxerror.h"
@@ -206,16 +207,17 @@ void nm_draw_background(int x1, int y1, int x2, int y2 )
 // Draw a left justfied string
 static void nm_string( int w1,int x, int y, const char * s, int tabs_flag)
 {
-	int w,h,aw,tx=0,t=0,i;
+	int w,t=0,i;
 	char *p,*s1,measure[2];
 	int XTabs[]={18,90,127,165,231,256};
 
 	p=s1=NULL;
 	RAIIdmem<char[]> s2(d_strdup(s));
 
+	const auto &&fspacx = FSPACX();
 	range_for (auto &i, XTabs)
 	{
-		i = FSPACX(i) + x;
+		i = fspacx(i) + x;
 	}
 
 	measure[1]=0;
@@ -228,10 +230,10 @@ static void nm_string( int w1,int x, int y, const char * s, int tabs_flag)
 		}
 	}
 
-	gr_get_string_size(s2.get(), &w, &h, &aw);
-
 	if (w1 > 0)
 		w = w1;
+	else
+		gr_get_string_size(s2.get(), &w, nullptr, nullptr);
 
 	if (tabs_flag) {
 		for (i=0;s2[i];i++) {
@@ -241,8 +243,9 @@ static void nm_string( int w1,int x, int y, const char * s, int tabs_flag)
 				continue;
 			}
 			measure[0]=s2[i];
-			gr_get_string_size(measure,&tx,&h,&aw);
-			gr_string(x,y,measure);
+			int tx, th;
+			gr_get_string_size(measure, &tx, &th, nullptr);
+			gr_string(x, y, measure, tx, th);
 			x+=tx;
 		}
 	}
@@ -250,9 +253,10 @@ static void nm_string( int w1,int x, int y, const char * s, int tabs_flag)
 		gr_string(x, y, s2.get());
 
 	if (!tabs_flag && p && (w1>0) ) {
-		gr_get_string_size(s1, &w, &h, &aw  );
+		int w, h;
+		gr_get_string_size(s1, &w, &h, nullptr);
 
-		gr_string( x+w1-w, y, s1 );
+		gr_string(x + w1 - w, y, s1, w, h);
 
 		*p = '\t';
 	}
@@ -261,7 +265,6 @@ static void nm_string( int w1,int x, int y, const char * s, int tabs_flag)
 // Draw a slider and it's string
 static void nm_string_slider( int w1,int x, int y, char * s )
 {
-	int w,h,aw;
 	char *p,*s1;
 
 	s1=NULL;
@@ -272,12 +275,12 @@ static void nm_string_slider( int w1,int x, int y, char * s )
 		s1 = p+1;
 	}
 
-	gr_get_string_size(s, &w, &h, &aw  );
 	gr_string( x, y, s );
 
 	if (p)	{
-		gr_get_string_size(s1, &w, &h, &aw  );
-		gr_string( x+w1-w, y, s1 );
+		int w, h;
+		gr_get_string_size(s1, &w, &h, nullptr);
+		gr_string(x + w1 - w, y, s1, w, h);
 
 		*p = '\t';
 	}
@@ -287,42 +290,44 @@ static void nm_string_slider( int w1,int x, int y, char * s )
 // Draw a left justfied string with black background.
 static void nm_string_black( int w1,int x, int y, const char * s )
 {
-	int w,h,aw;
-	gr_get_string_size(s, &w, &h, &aw  );
+	int w,h;
+	gr_get_string_size(s, &w, &h, nullptr);
 
 	if (w1 == 0) w1 = w;
 
 	gr_setcolor( BM_XRGB(5,5,5));
-	gr_rect( x - FSPACX(2), y-FSPACY(1), x+w1, y + h);
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacy = FSPACY();
+	gr_rect(x - fspacx(2), y - fspacy(1), x + w1, y + h);
 	gr_setcolor( BM_XRGB(2,2,2));
-	gr_rect( x - FSPACX(2), y - FSPACY(1), x, y + h );
+	gr_rect(x - fspacx(2), y - fspacy(1), x, y + h);
 	gr_setcolor( BM_XRGB(0,0,0));
-	gr_rect( x - FSPACX(1), y - FSPACY(1), x+w1 - FSPACX(1), y + h);
+	gr_rect(x - fspacx(1), y - fspacy(1), x + w1 - fspacx(1), y + h);
 
-	gr_string( x, y, s );
+	gr_string(x, y, s, w, h);
 }
 
 
 // Draw a right justfied string
 static void nm_rstring( int w1,int x, int y, const char * s )
 {
-	int w,h,aw;
-	gr_get_string_size(s, &w, &h, &aw  );
+	int w, h;
+	gr_get_string_size(s, &w, &h, nullptr);
 	x -= FSPACX(3);
 
 	if (w1 == 0) w1 = w;
-	gr_string( x-w, y, s );
+	gr_string(x - w, y, s, w, h);
 }
 
 static void nm_string_inputbox( int w, int x, int y, const char * text, int current )
 {
-	int w1,h1,aw;
+	int w1;
 
 	// even with variable char widths and a box that goes over the whole screen, we maybe never get more than 75 chars on the line
 	if (strlen(text)>75)
 		text+=strlen(text)-75;
 	while( *text )	{
-		gr_get_string_size(text, &w1, &h1, &aw  );
+		gr_get_string_size(text, &w1, nullptr, nullptr);
 		if ( w1 > w-FSPACX(10) )
 			text++;
 		else
@@ -341,23 +346,25 @@ static void draw_item( newmenu_item *item, int is_current, int tiny, int tabs_fl
 {
 	if (tiny)
 	{
-		if (is_current)
-			gr_set_fontcolor(gr_find_closest_color_current(57,49,20),-1);
-		else
-			gr_set_fontcolor(gr_find_closest_color_current(29,29,47),-1);
-
+		int r, g, b;
 		if (item->text[0]=='\t')
-			gr_set_fontcolor (gr_find_closest_color_current(63,63,63),-1);
+			r = g = b = 63;
+		else if (is_current)
+			r = 57, g = 49, b = 20;
+		else
+			r = g = 29, b = 47;
+		gr_set_fontcolor(gr_find_closest_color_current(r, g, b), -1);
 	}
 	else
 	{
 		gr_set_curfont(is_current?MEDIUM2_FONT:MEDIUM1_FONT);
         }
 
+	const int line_spacing = static_cast<int>(LINE_SPACING);
 	switch( item->type )	{
 		case NM_TYPE_TEXT:
 		case NM_TYPE_MENU:
-			nm_string( item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->text, tabs_flag );
+			nm_string(item->w, item->x, item->y - (line_spacing * scroll_offset), item->text, tabs_flag);
 			break;
 		case NM_TYPE_SLIDER:
 		{
@@ -371,42 +378,42 @@ static void draw_item( newmenu_item *item, int is_current, int tiny, int tabs_fl
 			}
 			i += snprintf(item->saved_text.data() + i, item->saved_text.size() - i, "%s", SLIDER_RIGHT);
 			item->saved_text[item->value+1+strlen(item->text)+1] = SLIDER_MARKER[0];
-			nm_string_slider(item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->saved_text.data());
+			nm_string_slider(item->w, item->x, item->y - (line_spacing * scroll_offset), item->saved_text.data());
 		}
 			break;
 		case NM_TYPE_INPUT_MENU:
 			if ( item->group==0 )
 			{
-				nm_string( item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->text, tabs_flag );
+				nm_string(item->w, item->x, item->y - (line_spacing * scroll_offset), item->text, tabs_flag);
 			} else {
-				nm_string_inputbox( item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->text, is_current );
+				nm_string_inputbox(item->w, item->x, item->y - (line_spacing * scroll_offset), item->text, is_current);
 			}
 			break;
 		case NM_TYPE_INPUT:
-			nm_string_inputbox( item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->text, is_current );
+			nm_string_inputbox(item->w, item->x, item->y - (line_spacing * scroll_offset), item->text, is_current);
 			break;
 		case NM_TYPE_CHECK:
-			nm_string( item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->text, tabs_flag );
+			nm_string(item->w, item->x, item->y - (line_spacing * scroll_offset), item->text, tabs_flag);
 			if (item->value)
-				nm_rstring( item->right_offset,item->x, item->y-(((int)LINE_SPACING)*scroll_offset), CHECKED_CHECK_BOX );
+				nm_rstring(item->right_offset, item->x, item->y - (line_spacing * scroll_offset), CHECKED_CHECK_BOX);
 			else
-				nm_rstring( item->right_offset,item->x, item->y-(((int)LINE_SPACING)*scroll_offset), NORMAL_CHECK_BOX );
+				nm_rstring(item->right_offset, item->x, item->y - (line_spacing * scroll_offset), NORMAL_CHECK_BOX);
 			break;
 		case NM_TYPE_RADIO:
-			nm_string( item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->text, tabs_flag );
+			nm_string(item->w, item->x, item->y - (line_spacing * scroll_offset), item->text, tabs_flag);
 			if (item->value)
-				nm_rstring( item->right_offset, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), CHECKED_RADIO_BOX );
+				nm_rstring(item->right_offset, item->x, item->y - (line_spacing * scroll_offset), CHECKED_RADIO_BOX);
 			else
-				nm_rstring( item->right_offset, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), NORMAL_RADIO_BOX );
+				nm_rstring(item->right_offset, item->x, item->y - (line_spacing * scroll_offset), NORMAL_RADIO_BOX);
 			break;
 		case NM_TYPE_NUMBER:
 		{
 			char text[sizeof("-2147483647")];
 			if (item->value < item->min_value) item->value=item->min_value;
 			if (item->value > item->max_value) item->value=item->max_value;
-			nm_string( item->w, item->x, item->y-(((int)LINE_SPACING)*scroll_offset), item->text, tabs_flag );
+			nm_string(item->w, item->x, item->y - (line_spacing * scroll_offset), item->text, tabs_flag);
 			snprintf(text, sizeof(text), "%d", item->value );
-			nm_rstring( item->right_offset,item->x, item->y-(((int)LINE_SPACING)*scroll_offset), text );
+			nm_rstring(item->right_offset,item->x, item->y - (line_spacing * scroll_offset), text);
 		}
 			break;
 	}
@@ -473,6 +480,25 @@ static void swap_menu_item_entries(newmenu_item &a, newmenu_item &b)
 	swap(a.value, b.value);
 }
 
+template <typename T>
+static void move_menu_item_entry(T &&t, newmenu_item *const items, uint_fast32_t citem, uint_fast32_t boundary)
+{
+	if (citem == boundary)
+		return;
+	auto a = &items[citem];
+	auto selected = std::make_pair(a->text, a->value);
+	for (; citem != boundary;)
+	{
+		citem = t(citem, 1);
+		auto &b = items[citem];
+		a->text = b.text;
+		a->value = b.value;
+		a = &b;
+	}
+	a->text = selected.first;
+	a->value = selected.second;
+}
+
 static int newmenu_save_selection_key(newmenu *menu, const d_event &event)
 {
 	auto k = event_key_get(event);
@@ -494,6 +520,12 @@ static int newmenu_save_selection_key(newmenu *menu, const d_event &event)
 				swap_menu_item_entries(a, b);
 			}
 			break;
+		case KEY_PAGEUP + KEY_SHIFTED:
+			move_menu_item_entry(std::minus<uint_fast32_t>(), menu->items, menu->citem, 0);
+			break;
+		case KEY_PAGEDOWN + KEY_SHIFTED:
+			move_menu_item_entry(std::plus<uint_fast32_t>(), menu->items, menu->citem, menu->nitems - 1);
+			break;
 	}
 	return 0;
 }
@@ -513,17 +545,7 @@ static int newmenu_save_selection_handler(newmenu *menu, const d_event &event, c
 // Basically the same as do2 but sets reorderitems flag for weapon priority menu a bit redundant to get lose of a global variable but oh well...
 void newmenu_doreorder( const char * title, const char * subtitle, uint_fast32_t nitems, newmenu_item * item)
 {
-	newmenu *menu;
-	window *wind;
-	menu = newmenu_do3( title, subtitle, nitems, item, newmenu_save_selection_handler, unused_newmenu_userdata, 0, NULL );
-	if (!menu)
-		return;
-	wind = menu->wind;	// avoid dereferencing a freed 'menu'
-
-	// newmenu_do2 and simpler get their own event loop
-	// This is so the caller doesn't have to provide a callback that responds to EVENT_NEWMENU_SELECTED
-	while (window_exists(wind))
-		event_process();
+	newmenu_do2(title, subtitle, nitems, item, newmenu_save_selection_handler, unused_newmenu_userdata, 0, nullptr);
 }
 
 #ifdef NEWMENU_MOUSE
@@ -543,11 +565,6 @@ int newmenu_get_nitems(newmenu *menu)
 int newmenu_get_citem(newmenu *menu)
 {
 	return menu->citem;
-}
-
-window *newmenu_get_window(newmenu *menu)
-{
-	return menu->wind;
 }
 
 namespace {
@@ -659,13 +676,15 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 
 			old_choice = menu->citem;
 
+			const auto &&fspacx = FSPACX();
 			if ((event.type == EVENT_MOUSE_BUTTON_DOWN) && !menu->all_text)
 			{
 				mouse_get_pos(&mx, &my, &mz);
+				const int line_spacing = static_cast<int>(LINE_SPACING);
 				for (i=menu->scroll_offset; i<menu->max_on_menu+menu->scroll_offset; i++ )	{
-					x1 = grd_curcanv->cv_bitmap.bm_x + menu->items[i].x-FSPACX(13) /*- menu->items[i].right_offset - 6*/;
-					x2 = x1 + menu->items[i].w+FSPACX(13);
-					y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[i].y - (((int)LINE_SPACING)*menu->scroll_offset);
+					x1 = grd_curcanv->cv_bitmap.bm_x + menu->items[i].x - fspacx(13) /*- menu->items[i].right_offset - 6*/;
+					x2 = x1 + menu->items[i].w + fspacx(13);
+					y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[i].y - (line_spacing * menu->scroll_offset);
 					y2 = y1 + menu->items[i].h;
 					if (((mx > x1) && (mx < x2)) && ((my > y1) && (my < y2))) {
 						if (i != menu->citem) {
@@ -711,7 +730,7 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 
 				// check possible scrollbar stuff first
 				if (menu->is_scroll_box) {
-					int arrow_width, arrow_height, aw, ScrollAllow=0;
+					int ScrollAllow=0;
 					static fix64 ScrollTime=0;
 					if (ScrollTime + F1_0/5 < timer_query())
 					{
@@ -720,8 +739,9 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 					}
 
 					if (menu->scroll_offset != 0) {
-						gr_get_string_size(UP_ARROW_MARKER, &arrow_width, &arrow_height, &aw);
-						x1 = grd_curcanv->cv_bitmap.bm_x+BORDERX-FSPACX(12);
+						int arrow_width, arrow_height;
+						gr_get_string_size(UP_ARROW_MARKER, &arrow_width, &arrow_height, nullptr);
+						x1 = grd_curcanv->cv_bitmap.bm_x + BORDERX - fspacx(12);
 						y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[menu->scroll_offset].y-(((int)LINE_SPACING)*menu->scroll_offset);
 						x2 = x1 + arrow_width;
 						y2 = y1 + arrow_height;
@@ -730,8 +750,9 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 						}
 					}
 					if (menu->scroll_offset+menu->max_displayable<menu->nitems) {
-						gr_get_string_size(DOWN_ARROW_MARKER, &arrow_width, &arrow_height, &aw);
-						x1 = grd_curcanv->cv_bitmap.bm_x+BORDERX-FSPACX(12);
+						int arrow_width, arrow_height;
+						gr_get_string_size(DOWN_ARROW_MARKER, &arrow_width, &arrow_height, nullptr);
+						x1 = grd_curcanv->cv_bitmap.bm_x + BORDERX - fspacx(12);
 						y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[menu->scroll_offset+menu->max_displayable-1].y-(((int)LINE_SPACING)*menu->scroll_offset);
 						x2 = x1 + arrow_width;
 						y2 = y1 + arrow_height;
@@ -741,10 +762,11 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 					}
 				}
 
+				const int line_spacing = static_cast<int>(LINE_SPACING);
 				for (i=menu->scroll_offset; i<menu->max_on_menu+menu->scroll_offset; i++ )	{
-					x1 = grd_curcanv->cv_bitmap.bm_x + menu->items[i].x-FSPACX(13);
-					x2 = x1 + menu->items[i].w+FSPACX(13);
-					y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[i].y - (((int)LINE_SPACING)*menu->scroll_offset);
+					x1 = grd_curcanv->cv_bitmap.bm_x + menu->items[i].x - fspacx(13);
+					x2 = x1 + menu->items[i].w + fspacx(13);
+					y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[i].y - (line_spacing * menu->scroll_offset);
 					y2 = y1 + menu->items[i].h;
 
 					if (((mx > x1) && (mx < x2)) && ((my > y1) && (my < y2)) && (menu->items[i].type != NM_TYPE_TEXT) ) {
@@ -756,7 +778,6 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 						if (citem.type == NM_TYPE_SLIDER)
 						{
 							char slider_text[NM_MAX_TEXT_LEN+1], *p, *s1;
-							int slider_width, height, aw, sleft_width, sright_width, smiddle_width;
 
 							strcpy(slider_text, citem.saved_text);
 							p = strchr(slider_text, '\t');
@@ -765,34 +786,25 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 								s1 = p+1;
 							}
 							if (p) {
-								gr_get_string_size(s1, &slider_width, &height, &aw);
-								gr_get_string_size(SLIDER_LEFT, &sleft_width, &height, &aw);
-								gr_get_string_size(SLIDER_RIGHT, &sright_width, &height, &aw);
-								gr_get_string_size(SLIDER_MIDDLE, &smiddle_width, &height, &aw);
+								int slider_width, sleft_width, sright_width, smiddle_width;
+								gr_get_string_size(s1, &slider_width, nullptr, nullptr);
+								gr_get_string_size(SLIDER_LEFT, &sleft_width, nullptr, nullptr);
+								gr_get_string_size(SLIDER_RIGHT, &sright_width, nullptr, nullptr);
+								gr_get_string_size(SLIDER_MIDDLE, &smiddle_width, nullptr, nullptr);
 
 								x1 = grd_curcanv->cv_bitmap.bm_x + citem.x + citem.w - slider_width;
 								x2 = x1 + slider_width + sright_width;
-								if (mx > x1 && mx < (x1 + sleft_width) && citem.value != citem.min_value)
-								{
-									citem.value = citem.min_value;
-									changed = 1;
-								}
-								else if (mx < x2 && mx > (x2 - sright_width) && citem.value != citem.max_value)
-								{
-									citem.value = citem.max_value;
-									changed = 1;
-								} else if ( (mx > (x1 + sleft_width)) && (mx < (x2 - sright_width)) ) {
-									int num_values, value_width, new_value;
-
-									num_values = citem.max_value - citem.min_value + 1;
-									value_width = (slider_width - sleft_width - sright_width) / num_values;
-									new_value = (mx - x1 - sleft_width) / value_width;
+								int new_value;
+								if (
+									(mx > x1 && mx < x1 + sleft_width && (new_value = citem.min_value, true)) ||
+									(mx < x2 && mx > x2 - sright_width && (new_value = citem.max_value, true)) ||
+									(mx > x1 + sleft_width && mx < x2 - sright_width - sleft_width && (new_value = (mx - x1 - sleft_width) / ((slider_width - sleft_width - sright_width) / (citem.max_value - citem.min_value + 1)), true))
+								)
 									if (citem.value != new_value)
 									{
 										citem.value = new_value;
 										changed = 1;
 									}
-								}
 								*p = '\t';
 							}
 						}
@@ -813,10 +825,11 @@ static window_event_result newmenu_mouse(window *wind,const d_event &event, newm
 			if ((event.type == EVENT_MOUSE_BUTTON_UP) && !menu->all_text && (menu->citem != -1) && (menu->items[menu->citem].type == NM_TYPE_MENU) )
 			{
 				mouse_get_pos(&mx, &my, &mz);
+				const int line_spacing = static_cast<int>(LINE_SPACING);
 				for (i=menu->scroll_offset; i<menu->max_on_menu+menu->scroll_offset; i++ )	{
-					x1 = grd_curcanv->cv_bitmap.bm_x + menu->items[i].x-FSPACX(13);
-					x2 = x1 + menu->items[i].w+FSPACX(13);
-					y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[i].y - (((int)LINE_SPACING)*menu->scroll_offset);
+					x1 = grd_curcanv->cv_bitmap.bm_x + menu->items[i].x - fspacx(13);
+					x2 = x1 + menu->items[i].w + fspacx(13);
+					y1 = grd_curcanv->cv_bitmap.bm_y + menu->items[i].y - (line_spacing * menu->scroll_offset);
 					y2 = y1 + menu->items[i].h;
 					if (((mx > x1) && (mx < x2)) && ((my > y1) && (my < y2))) {
 						if (Hack_DblClick_MenuMode) {
@@ -1166,7 +1179,6 @@ static void newmenu_create_structure( newmenu *menu )
 	int j,aw, tw, th, twidth,fm,right_offset;
 	int nmenus, nothers;
 	grs_canvas *save_canvas;
-	int string_width, string_height, average_width;
 
 	save_canvas = grd_curcanv;
 
@@ -1178,13 +1190,15 @@ static void newmenu_create_structure( newmenu *menu )
 
 	if ( menu->title )	{
 		gr_set_curfont(HUGE_FONT);
-		gr_get_string_size(menu->title,&string_width,&string_height,&average_width );
+		int string_width, string_height;
+		gr_get_string_size(menu->title, &string_width, &string_height, nullptr);
 		tw = string_width;
 		th = string_height;
 	}
 	if ( menu->subtitle )	{
 		gr_set_curfont(MEDIUM3_FONT);
-		gr_get_string_size(menu->subtitle,&string_width,&string_height,&average_width );
+		int string_width, string_height;
+		gr_get_string_size(menu->subtitle, &string_width, &string_height, nullptr);
 		if (string_width > tw )
 			tw = string_width;
 		th += string_height;
@@ -1198,10 +1212,13 @@ static void newmenu_create_structure( newmenu *menu )
 	menu->h = th;
 	nmenus = nothers = 0;
 
+	const auto &&fspacx = FSPACX();
+	const auto &&fspacy = FSPACY();
 	// Find menu height & width (store in w,h)
 	range_for (auto &i, menu->item_range())
 	{
 		i.y = menu->h;
+		int string_width, string_height, average_width;
 		gr_get_string_size(i.text,&string_width,&string_height,&average_width);
 		i.right_offset = 0;
 
@@ -1209,7 +1226,7 @@ static void newmenu_create_structure( newmenu *menu )
 
 		if (i.type == NM_TYPE_SLIDER)
 		{
-			int index,w1,h1,aw1;
+			int index,w1;
 			nothers++;
 			index = snprintf (i.saved_text.data(), i.saved_text.size(), "%s", SLIDER_LEFT);
 			for (uint_fast32_t j = (i.max_value - i.min_value + 1); j--;)
@@ -1217,7 +1234,7 @@ static void newmenu_create_structure( newmenu *menu )
 				index += snprintf(i.saved_text.data() + index, i.saved_text.size() - index, "%s", SLIDER_MIDDLE);
 			}
 			index += snprintf(i.saved_text.data() + index, i.saved_text.size() - index, "%s", SLIDER_RIGHT);
-			gr_get_string_size(i.saved_text.data(), &w1, &h1, &aw1);
+			gr_get_string_size(i.saved_text.data(), &w1, nullptr, nullptr);
 			string_width += w1 + aw;
 		}
 
@@ -1228,36 +1245,36 @@ static void newmenu_create_structure( newmenu *menu )
 
 		if (i.type == NM_TYPE_CHECK)
 		{
-			int w1,h1,aw1;
+			int w1;
 			nothers++;
-			gr_get_string_size(NORMAL_CHECK_BOX, &w1, &h1, &aw1  );
+			gr_get_string_size(NORMAL_CHECK_BOX, &w1, nullptr, nullptr);
 			i.right_offset = w1;
-			gr_get_string_size(CHECKED_CHECK_BOX, &w1, &h1, &aw1  );
+			gr_get_string_size(CHECKED_CHECK_BOX, &w1, nullptr, nullptr);
 			if (w1 > i.right_offset)
 				i.right_offset = w1;
 		}
 
 		if (i.type == NM_TYPE_RADIO)
 		{
-			int w1,h1,aw1;
+			int w1;
 			nothers++;
-			gr_get_string_size(NORMAL_RADIO_BOX, &w1, &h1, &aw1  );
+			gr_get_string_size(NORMAL_RADIO_BOX, &w1, nullptr, nullptr);
 			i.right_offset = w1;
-			gr_get_string_size(CHECKED_RADIO_BOX, &w1, &h1, &aw1  );
+			gr_get_string_size(CHECKED_RADIO_BOX, &w1, nullptr, nullptr);
 			if (w1 > i.right_offset)
 				i.right_offset = w1;
 		}
 
 		if (i.type == NM_TYPE_NUMBER)
 		{
-			int w1,h1,aw1;
+			int w1;
 			char test_text[20];
 			nothers++;
 			sprintf (test_text, "%d", i.max_value);
-			gr_get_string_size( test_text, &w1, &h1, &aw1 );
+			gr_get_string_size(test_text, &w1, nullptr, nullptr);
 			i.right_offset = w1;
 			sprintf (test_text, "%d", i.min_value);
-			gr_get_string_size( test_text, &w1, &h1, &aw1 );
+			gr_get_string_size(test_text, &w1, nullptr, nullptr);
 			if (w1 > i.right_offset)
 				i.right_offset = w1;
 		}
@@ -1265,7 +1282,7 @@ static void newmenu_create_structure( newmenu *menu )
 		if (i.type == NM_TYPE_INPUT || i.type == NM_TYPE_INPUT_MENU)
 		{
 			i.saved_text.copy_if(i.text);
-			string_width = i.text_len * FSPACX(8) + i.text_len;
+			string_width = i.text_len * fspacx(8) + i.text_len;
 			if (i.type == NM_TYPE_INPUT && string_width > MAX_TEXT_WIDTH)
 				string_width = MAX_TEXT_WIDTH;
 
@@ -1284,7 +1301,7 @@ static void newmenu_create_structure( newmenu *menu )
 			menu->w = string_width;		// Save maximum width
 		if ( average_width > aw )
 			aw = average_width;
-		menu->h += string_height+FSPACY(1);		// Find the height of all strings
+		menu->h += string_height + fspacy(1);		// Find the height of all strings
 	}
 
 	if (menu->nitems > menu->max_on_menu)
@@ -1394,7 +1411,6 @@ static window_event_result newmenu_draw(window *wind, newmenu *menu)
 	grs_canvas *menu_canvas = &window_get_canvas(*wind), *save_canvas = grd_curcanv;
 	int th = 0, ty, sx, sy;
 	int i;
-	int string_width, string_height, average_width;
 
 	if (menu->swidth != SWIDTH || menu->sheight != SHEIGHT || menu->fntscalex != FNTScaleX || menu->fntscalex != FNTScaleY)
 	{
@@ -1417,15 +1433,15 @@ static window_event_result newmenu_draw(window *wind, newmenu *menu)
 	if ( menu->title )	{
 		gr_set_curfont(HUGE_FONT);
 		gr_set_fontcolor( BM_XRGB(31,31,31), -1 );
-		gr_get_string_size(menu->title,&string_width,&string_height,&average_width );
+		int string_width, string_height;
+		gr_get_string_size(menu->title, &string_width, &string_height, nullptr);
 		th = string_height;
-		gr_string( 0x8000, ty, menu->title );
+		gr_string(0x8000, ty, menu->title, string_width, string_height);
 	}
 
 	if ( menu->subtitle )	{
 		gr_set_curfont(MEDIUM3_FONT);
 		gr_set_fontcolor( BM_XRGB(21,21,21), -1 );
-		gr_get_string_size(menu->subtitle,&string_width,&string_height,&average_width );
 		gr_string( 0x8000, ty+th, menu->subtitle );
 	}
 
@@ -1443,22 +1459,17 @@ static window_event_result newmenu_draw(window *wind, newmenu *menu)
 		menu->last_scroll_check=menu->scroll_offset;
 		gr_set_curfont(menu->tiny_mode?GAME_FONT:MEDIUM2_FONT);
 
-		sy=menu->items[menu->scroll_offset].y-(((int)LINE_SPACING)*menu->scroll_offset);
-		sx=BORDERX-FSPACX(12);
+		const int line_spacing = static_cast<int>(LINE_SPACING);
+		sy = menu->items[menu->scroll_offset].y - (line_spacing * menu->scroll_offset);
+		const auto &&fspacx = FSPACX();
+		sx = BORDERX - fspacx(12);
 
-		if (menu->scroll_offset!=0)
-			gr_string( sx, sy, UP_ARROW_MARKER );
-		else
-			gr_string( sx, sy, "  " );
+		gr_string(sx, sy, menu->scroll_offset ? UP_ARROW_MARKER : "  ");
 
-		sy=menu->items[menu->scroll_offset+menu->max_displayable-1].y-(((int)LINE_SPACING)*menu->scroll_offset);
-		sx=BORDERX-FSPACX(12);
+		sy = menu->items[menu->scroll_offset + menu->max_displayable - 1].y - (line_spacing * menu->scroll_offset);
+		sx = BORDERX - fspacx(12);
 
-		if (menu->scroll_offset+menu->max_displayable<menu->nitems)
-			gr_string( sx, sy, DOWN_ARROW_MARKER );
-		else
-			gr_string( sx, sy, "  " );
-
+		gr_string(sx, sy, (menu->scroll_offset + menu->max_displayable < menu->nitems) ? DOWN_ARROW_MARKER : "  ");
 	}
 
 	{
@@ -1529,8 +1540,7 @@ static window_event_result newmenu_handler(window *wind,const d_event &event, ne
 		case EVENT_KEY_COMMAND:
 			return newmenu_key_command(wind, event, menu);
 		case EVENT_IDLE:
-			timer_delay2(50);
-			return newmenu_mouse(wind, event, menu, -1);
+			break;
 		case EVENT_WINDOW_DRAW:
 			return newmenu_draw(wind, menu);
 		case EVENT_WINDOW_CLOSE:
@@ -1655,20 +1665,17 @@ const char **listbox_get_items(listbox *lb)
 	return lb->item;
 }
 
-int listbox_get_nitems(listbox *lb)
-{
-	return lb->nitems;
-}
-
 int listbox_get_citem(listbox *lb)
 {
 	return lb->citem;
 }
 
+#ifdef _WIN32
 window *listbox_get_window(listbox *lb)
 {
 	return lb->wind;
 }
+#endif
 
 void listbox_delete_item(listbox *lb, int item)
 {
@@ -1710,7 +1717,7 @@ static void update_scroll_position(listbox *lb)
 	if (lb->first_item < 0 ) lb->first_item = 0;
 }
 
-static window_event_result listbox_mouse(window *wind,const d_event &event, listbox *lb, int button)
+static window_event_result listbox_mouse(window *, const d_event &event, listbox *lb, int button)
 {
 	int i, mx, my, mz, x1, x2, y1, y2;
 
@@ -1720,16 +1727,16 @@ static window_event_result listbox_mouse(window *wind,const d_event &event, list
 		{
 			if (lb->mouse_state)
 			{
-				int w, h, aw;
-
 				mouse_get_pos(&mx, &my, &mz);
+				const auto &&line_spacing = LINE_SPACING;
 				for (i=lb->first_item; i<lb->first_item+LB_ITEMS_ON_SCREEN; i++ )	{
 					if (i >= lb->nitems)
 						break;
-					gr_get_string_size(lb->item[i], &w, &h, &aw  );
+					int h;
+					gr_get_string_size(lb->item[i], nullptr, &h, nullptr);
 					x1 = lb->box_x;
 					x2 = lb->box_x + lb->box_w;
-					y1 = (i-lb->first_item)*LINE_SPACING+lb->box_y;
+					y1 = (i - lb->first_item) * line_spacing + lb->box_y;
 					y2 = y1+h;
 					if ( ((mx > x1) && (mx < x2)) && ((my > y1) && (my < y2)) ) {
 						lb->citem = i;
@@ -1739,13 +1746,13 @@ static window_event_result listbox_mouse(window *wind,const d_event &event, list
 			}
 			else if (event.type == EVENT_MOUSE_BUTTON_UP)
 			{
-				int w, h, aw;
+				int h;
 
 				if (lb->citem < 0)
 					return window_event_result::ignored;
 
 				mouse_get_pos(&mx, &my, &mz);
-				gr_get_string_size(lb->item[lb->citem], &w, &h, &aw  );
+				gr_get_string_size(lb->item[lb->citem], nullptr, &h, nullptr);
 				x1 = lb->box_x;
 				x2 = lb->box_x + lb->box_w;
 				y1 = (lb->citem-lb->first_item)*LINE_SPACING+lb->box_y;
@@ -1794,7 +1801,7 @@ static window_event_result listbox_mouse(window *wind,const d_event &event, list
 	return window_event_result::ignored;
 }
 
-static window_event_result listbox_key_command(window *wind,const d_event &event, listbox *lb)
+static window_event_result listbox_key_command(window *, const d_event &event, listbox *lb)
 {
 	int key = event_key_get(event);
 	window_event_result rval = window_event_result::handled;
@@ -1873,18 +1880,19 @@ static void listbox_create_structure( listbox *lb)
 	gr_set_curfont(MEDIUM3_FONT);
 
 	lb->box_w = 0;
+	const auto &&fspacx = FSPACX();
 	range_for (auto &i, unchecked_partial_range(lb->item, lb->nitems))
 	{
-		int w, h, aw;
-		gr_get_string_size(i, &w, &h, &aw);
+		int w;
+		gr_get_string_size(i, &w, nullptr, nullptr);
 		if ( w > lb->box_w )
-			lb->box_w = w+FSPACX(10);
+			lb->box_w = w + fspacx(10);
 	}
 	lb->height = LINE_SPACING * LB_ITEMS_ON_SCREEN;
 
 	{
-		int w, h, aw;
-		gr_get_string_size( lb->title, &w, &h, &aw );
+		int w, h;
+		gr_get_string_size(lb->title, &w, &h, nullptr);
 		if ( w > lb->box_w )
 			lb->box_w = w;
 		lb->title_height = h+FSPACY(5);
@@ -1894,10 +1902,10 @@ static void listbox_create_structure( listbox *lb)
 	// The box is bigger than we can fit on the screen since at least one string is too long. Check how many chars we can fit on the screen (at least only - MEDIUM*_FONT is variable font!) so we can make a marquee-like effect.
 	if (lb->box_w + (BORDERX*2) > SWIDTH)
 	{
-		int w = 0, h = 0, aw = 0;
+		int w;
 
 		lb->box_w = SWIDTH - (BORDERX*2);
-		gr_get_string_size("O", &w, &h, &aw);
+		gr_get_string_size("O", &w, nullptr, nullptr);
 		lb->marquee_maxchars = lb->box_w/w;
 		lb->marquee_lasttime = timer_query();
 	}
@@ -1933,23 +1941,26 @@ static window_event_result listbox_draw(window *, listbox *lb)
 	gr_string( 0x8000, lb->box_y - lb->title_height, lb->title );
 
 	gr_setcolor( BM_XRGB( 0,0,0)  );
+	const auto &&line_spacing = LINE_SPACING;
 	for (i=lb->first_item; i<lb->first_item+LB_ITEMS_ON_SCREEN; i++ )	{
-		int y = (i-lb->first_item)*LINE_SPACING+lb->box_y;
+		int y = (i - lb->first_item) * line_spacing + lb->box_y;
+		const auto &&fspacx = FSPACX();
+		const auto &&fspacy = FSPACY();
 		if ( i >= lb->nitems )	{
 			gr_setcolor( BM_XRGB(5,5,5));
-			gr_rect( lb->box_x + lb->box_w - FSPACX(1), y-FSPACY(1), lb->box_x + lb->box_w, y + LINE_SPACING);
+			gr_rect(lb->box_x + lb->box_w - fspacx(1), y - fspacy(1), lb->box_x + lb->box_w, y + line_spacing);
 			gr_setcolor( BM_XRGB(2,2,2));
-			gr_rect( lb->box_x - FSPACX(1), y - FSPACY(1), lb->box_x, y + LINE_SPACING );
+			gr_rect(lb->box_x - fspacx(1), y - fspacy(1), lb->box_x, y + line_spacing);
 			gr_setcolor( BM_XRGB(0,0,0));
-			gr_rect( lb->box_x, y - FSPACY(1), lb->box_x + lb->box_w - FSPACX(1), y + LINE_SPACING);
+			gr_rect(lb->box_x, y - fspacy(1), lb->box_x + lb->box_w - fspacx(1), y + line_spacing);
 		} else {
 			gr_set_curfont(( i == lb->citem )?MEDIUM2_FONT:MEDIUM1_FONT);
 			gr_setcolor( BM_XRGB(5,5,5));
-			gr_rect( lb->box_x + lb->box_w - FSPACX(1), y-FSPACY(1), lb->box_x + lb->box_w, y + LINE_SPACING);
+			gr_rect(lb->box_x + lb->box_w - fspacx(1), y - fspacy(1), lb->box_x + lb->box_w, y + line_spacing);
 			gr_setcolor( BM_XRGB(2,2,2));
-			gr_rect( lb->box_x - FSPACX(1), y - FSPACY(1), lb->box_x, y + LINE_SPACING );
+			gr_rect(lb->box_x - fspacx(1), y - fspacy(1), lb->box_x, y + line_spacing);
 			gr_setcolor( BM_XRGB(0,0,0));
-			gr_rect( lb->box_x, y - FSPACY(1), lb->box_x + lb->box_w - FSPACX(1), y + LINE_SPACING);
+			gr_rect(lb->box_x, y - fspacy(1), lb->box_x + lb->box_w - fspacx(1), y + line_spacing);
 
 			if (lb->marquee_maxchars && strlen(lb->item[i]) > lb->marquee_maxchars)
 			{
@@ -1987,11 +1998,11 @@ static window_event_result listbox_draw(window *, listbox *lb)
 				{
 					snprintf(shrtstr.get(), lb->marquee_maxchars, "%s", lb->item[i]);
 				}
-				gr_string(lb->box_x+FSPACX(5), y, shrtstr.get());
+				gr_string(lb->box_x + fspacx(5), y, shrtstr.get());
 			}
 			else
 			{
-				gr_string( lb->box_x+FSPACX(5), y, lb->item[i]  );
+				gr_string(lb->box_x + fspacx(5), y, lb->item[i]);
 			}
 		}
 	}

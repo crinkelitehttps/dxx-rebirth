@@ -28,23 +28,22 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <cstddef>
 #include "dxxsconf.h"
 #include "fmtcheck.h"
-#if defined(DXX_BUILD_DESCENT_II)
-#include "fvi.h"
-#include "compiler-array.h"
-#endif
+#include "vecmat.h"
 
 #define	PARALLAX	0		//	If !0, then special debugging info for Parallax eyes only enabled.
 
 #ifdef __cplusplus
 #include "pstypes.h"
+#include "fwd-object.h"
+#include "fwd-segment.h"
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #include "countarray.h"
-#include "vecmat.h"
 #include "aistruct.h"
+#endif
 
+namespace dcx {
 struct point_seg;
-struct vobjptr_t;
-struct objptridx_t;
-struct vobjptridx_t;
+}
 struct PHYSFS_File;
 
 #define PLAYER_AWARENESS_INITIAL_TIME   (3*F1_0)
@@ -74,61 +73,63 @@ extern sbyte Boss_hit_this_frame;
 
 #define NUM_D2_BOSSES 8
 
-extern const ubyte Boss_teleports[NUM_D2_BOSSES];     // Set byte if this boss can teleport
-extern const ubyte Boss_spew_more[NUM_D2_BOSSES];     // Set byte if this boss can teleport
+typedef array<ubyte, NUM_D2_BOSSES> boss_flags_t;
+extern const boss_flags_t Boss_teleports;     // Set byte if this boss can teleport
+extern const boss_flags_t Boss_spew_more;     // Set byte if this boss can teleport
 //extern ubyte Boss_cloaks[NUM_D2_BOSSES];        // Set byte if this boss can cloak
-extern const ubyte Boss_spews_bots_energy[NUM_D2_BOSSES];     // Set byte if boss spews bots when hit by energy weapon.
-extern const ubyte Boss_spews_bots_matter[NUM_D2_BOSSES];     // Set byte if boss spews bots when hit by matter weapon.
-extern const ubyte Boss_invulnerable_energy[NUM_D2_BOSSES];   // Set byte if boss is invulnerable to energy weapons.
-extern const ubyte Boss_invulnerable_matter[NUM_D2_BOSSES];   // Set byte if boss is invulnerable to matter weapons.
-extern const ubyte Boss_invulnerable_spot[NUM_D2_BOSSES];     // Set byte if boss is invulnerable in all but a certain spot.  (Dot product fvec|vec_to_collision < BOSS_INVULNERABLE_DOT)
+extern const boss_flags_t Boss_spews_bots_energy;     // Set byte if boss spews bots when hit by energy weapon.
+extern const boss_flags_t Boss_spews_bots_matter;     // Set byte if boss spews bots when hit by matter weapon.
+extern const boss_flags_t Boss_invulnerable_energy;   // Set byte if boss is invulnerable to energy weapons.
+extern const boss_flags_t Boss_invulnerable_matter;   // Set byte if boss is invulnerable to matter weapons.
+extern const boss_flags_t Boss_invulnerable_spot;     // Set byte if boss is invulnerable in all but a certain spot.  (Dot product fvec|vec_to_collision < BOSS_INVULNERABLE_DOT)
 extern segnum_t Believed_player_seg;
-extern objnum_t Ai_last_missile_camera;
+extern object *Ai_last_missile_camera;
 #endif
 
 void create_awareness_event(vobjptr_t objp, player_awareness_type_t type);         // object *objp can create awareness of player, amount based on "type"
-#endif
 
 struct boss_special_segment_array_t : public count_array_t<segnum_t, MAX_BOSS_TELEPORT_SEGS> {};
 struct boss_teleport_segment_array_t : public boss_special_segment_array_t {};
 struct boss_gate_segment_array_t : public boss_special_segment_array_t {};
-
-extern fix64 Boss_cloak_start_time, Boss_cloak_end_time;
 extern boss_teleport_segment_array_t Boss_teleport_segs;
+ai_mode ai_behavior_to_mode(ai_behavior behavior);
+void do_ai_robot_hit(vobjptridx_t robot, player_awareness_type_t type);
+void init_ai_object(vobjptr_t objp, ai_behavior initial_mode, segnum_t hide_segment);
+
+extern fix64 Boss_cloak_start_time;
 extern fix64 Last_teleport_time;
-extern fix Boss_cloak_duration;
+constexpr fix Boss_cloak_duration = F1_0*7;
 extern sbyte Boss_dying;
 
 extern vms_vector Believed_player_pos;
 
 void move_towards_segment_center(vobjptr_t objp);
-extern objptridx_t gate_in_robot(int type, segnum_t segnum);
+objptridx_t gate_in_robot(int type, vsegptridx_t segnum);
 void do_ai_frame(vobjptridx_t objp);
-void init_ai_object(vobjptr_t objp, int initial_mode, segnum_t hide_segment);
 extern void do_ai_frame_all(void);
 extern void create_all_paths(void);
 void create_path_to_station(vobjptridx_t objp, int max_length);
 void ai_follow_path(vobjptridx_t objp, int player_visibility, const vms_vector *vec_to_player);
 void ai_turn_towards_vector(const vms_vector &vec_to_player, vobjptr_t obj, fix rate);
 extern void init_ai_objects(void);
-void do_ai_robot_hit(vobjptridx_t robot, int type);
 void create_n_segment_path(vobjptridx_t objp, int path_length, segnum_t avoid_seg);
 void create_n_segment_path_to_door(vobjptridx_t objp, int path_length, segnum_t avoid_seg);
+#endif
 void make_random_vector(vms_vector &vec);
-static inline vms_vector make_random_vector() __attribute_warn_unused_result;
+__attribute_warn_unused_result
 static inline vms_vector make_random_vector()
 {
 	vms_vector v;
 	return make_random_vector(v), v;
 }
 extern void init_robots_for_level(void);
-extern int ai_behavior_to_mode(int behavior);
 #if defined(DXX_BUILD_DESCENT_II)
 void create_path_to_segment(vobjptridx_t objp, segnum_t goalseg, int max_length, int safety_flag);
 int polish_path(vobjptridx_t objp, point_seg *psegs, int num_points);
 void move_towards_player(vobjptr_t objp, const vms_vector &vec_to_player);
 #endif
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 // max_length is maximum depth of path to create.
 // If -1, use default: MAX_DEPTH_TO_SEARCH_FOR_PLAYER
 void create_path_to_player(vobjptridx_t objp, int max_length, int safety_flag);
@@ -136,14 +137,12 @@ void attempt_to_resume_path(vobjptridx_t objp);
 
 // When a robot and a player collide, some robots attack!
 void do_ai_robot_hit_attack(vobjptridx_t robot, vobjptridx_t player, const vms_vector &collision_point);
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #if defined(DXX_BUILD_DESCENT_I)
 typedef vobjptr_t _ai_door_is_openable_objptr;
 #elif defined(DXX_BUILD_DESCENT_II)
 typedef objptr_t _ai_door_is_openable_objptr;
 #endif
 int ai_door_is_openable(_ai_door_is_openable_objptr objp, vcsegptr_t segp, int sidenum);
-#endif
 int player_is_visible_from_object(vobjptridx_t objp, vms_vector &pos, fix field_of_view, const vms_vector &vec_to_player);
 extern void ai_reset_all_paths(void);   // Reset all paths.  Call at the start of a level.
 int ai_multiplayer_awareness(vobjptridx_t objp, int awareness_level);
@@ -166,54 +165,46 @@ static inline void force_dump_ai_objects_all(const char *msg)
 
 void start_boss_death_sequence(vobjptr_t objp);
 extern void ai_init_boss_for_ship(void);
-extern int Boss_been_hit;
-extern fix AI_proc_time;
 
 #if defined(DXX_BUILD_DESCENT_II)
 extern fix Dist_to_last_fired_upon_player_pos;
 extern vms_vector Last_fired_upon_player_pos;
 
-#define ESCORT_GOAL_UNSPECIFIED -1
-
-#define ESCORT_GOAL_UNSPECIFIED -1
-#define ESCORT_GOAL_BLUE_KEY    1
-#define ESCORT_GOAL_GOLD_KEY    2
-#define ESCORT_GOAL_RED_KEY     3
-#define ESCORT_GOAL_CONTROLCEN  4
-#define ESCORT_GOAL_EXIT        5
+enum escort_goal_t
+{
+	ESCORT_GOAL_UNSPECIFIED = -1,
+	ESCORT_GOAL_BLUE_KEY = 1,
+	ESCORT_GOAL_GOLD_KEY = 2,
+	ESCORT_GOAL_RED_KEY = 3,
+	ESCORT_GOAL_CONTROLCEN = 4,
+	ESCORT_GOAL_EXIT = 5,
 
 // Custom escort goals.
-#define ESCORT_GOAL_ENERGY      6
-#define ESCORT_GOAL_ENERGYCEN   7
-#define ESCORT_GOAL_SHIELD      8
-#define ESCORT_GOAL_POWERUP     9
-#define ESCORT_GOAL_ROBOT       10
-#define ESCORT_GOAL_HOSTAGE     11
-#define ESCORT_GOAL_PLAYER_SPEW 12
-#define ESCORT_GOAL_SCRAM       13
-#define ESCORT_GOAL_BOSS        15
-#define ESCORT_GOAL_MARKER1     16
-#define ESCORT_GOAL_MARKER2     17
-#define ESCORT_GOAL_MARKER3     18
-#define ESCORT_GOAL_MARKER4     19
-#define ESCORT_GOAL_MARKER5     20
-#define ESCORT_GOAL_MARKER6     21
-#define ESCORT_GOAL_MARKER7     22
-#define ESCORT_GOAL_MARKER8     23
-#define ESCORT_GOAL_MARKER9     24
+	ESCORT_GOAL_ENERGY = 6,
+	ESCORT_GOAL_ENERGYCEN = 7,
+	ESCORT_GOAL_SHIELD = 8,
+	ESCORT_GOAL_POWERUP = 9,
+	ESCORT_GOAL_ROBOT = 10,
+	ESCORT_GOAL_HOSTAGE = 11,
+	ESCORT_GOAL_PLAYER_SPEW = 12,
+	ESCORT_GOAL_SCRAM = 13,
+	ESCORT_GOAL_BOSS = 15,
+	ESCORT_GOAL_MARKER1 = 16,
+	ESCORT_GOAL_MARKER2 = 17,
+	ESCORT_GOAL_MARKER3 = 18,
+	ESCORT_GOAL_MARKER4 = 19,
+	ESCORT_GOAL_MARKER5 = 20,
+	ESCORT_GOAL_MARKER6 = 21,
+	ESCORT_GOAL_MARKER7 = 22,
+	ESCORT_GOAL_MARKER8 = 23,
+	ESCORT_GOAL_MARKER9 = 24,
+};
 
-#define MAX_ESCORT_GOALS        25
-
-#define MAX_ESCORT_DISTANCE     (F1_0*80)
 #define MIN_ESCORT_DISTANCE     (F1_0*40)
 
-#define FUELCEN_CHECK           1000
-
 extern fix64 Escort_last_path_created;
-extern int Escort_goal_object, Escort_special_goal;
+extern escort_goal_t Escort_goal_object, Escort_special_goal;
 extern objnum_t	 Escort_goal_index;
-
-#define GOAL_WIDTH 11
 
 #define SNIPE_RETREAT_TIME  (F1_0*5)
 #define SNIPE_ABORT_RETREAT_TIME (SNIPE_RETREAT_TIME/2) // Can abort a retreat with this amount of time left in retreat
@@ -237,10 +228,6 @@ void init_ai_for_ship(void);
 // It is not valid to use FrameTime because robots do not get moved every frame.
 
 // --------- John: These variables must be saved as part of gamesave. ---------
-extern int              Ai_initialized;
-extern int              Overall_agitation;
-extern fix              Boss_teleport_interval;
-extern fix              Boss_cloak_interval;        // Time between cloaks
 extern fix64            Last_gate_time;
 extern fix              Gate_interval;
 extern fix64            Boss_dying_start_time;
@@ -250,18 +237,6 @@ extern fix64            Boss_hit_time;
 
 // These globals are set by a call to find_vector_intersection, which is a slow routine,
 // so we don't want to call it again (for this object) unless we have to.
-
-#ifndef NDEBUG
-// Index into this array with ailp->mode
-
-// Index into this array with aip->behavior
-
-// Index into this array with aip->GOAL_STATE or aip->CURRENT_STATE
-
-extern int Do_ai_flag;
-extern objnum_t Break_on_object;
-
-#endif //ifndef NDEBUG
 
 extern int Stolen_item_index;   // Used in ai.c for controlling rate of Thief flare firing.
 
@@ -292,7 +267,7 @@ void buddy_message(const char * format, ... ) __attribute_format_printf(1, 2);
 extern void special_reactor_stuff(void);
 #endif
 
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dcx {
 struct point_seg_array_t : public array<point_seg, MAX_POINT_SEGS> {};
 extern point_seg_array_t        Point_segs;
 extern point_seg_array_t::iterator        Point_segs_free_ptr;
@@ -300,16 +275,17 @@ static inline std::size_t operator-(point_seg_array_t::iterator i, point_seg_arr
 {
 	return std::distance(p.begin(), i);
 }
-#endif
+}
+
+int create_path_points(vobjptridx_t objp, segnum_t start_seg, segnum_t end_seg, point_seg_array_t::iterator point_segs, short *num_points, int max_depth, int random_flag, int safety_flag, segnum_t avoid_seg);
 
 int ai_save_state(PHYSFS_File * fp);
 int ai_restore_state(PHYSFS_File *fp, int version, int swap);
 
-int create_path_points(vobjptridx_t objp, segnum_t start_seg, segnum_t end_seg, point_seg_array_t::iterator point_segs, short *num_points, int max_depth, int random_flag, int safety_flag, segnum_t avoid_seg);
-
 #ifdef EDITOR
 void player_follow_path(vobjptr_t objp);
 void check_create_player_path(void);
+#endif
 #endif
 
 #endif

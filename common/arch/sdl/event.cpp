@@ -11,6 +11,7 @@
  *
  */
 
+#include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "event.h"
@@ -19,9 +20,12 @@
 #include "window.h"
 #include "timer.h"
 #include "config.h"
+#include "inferno.h"
 
 #include "joy.h"
 #include "args.h"
+
+namespace dcx {
 
 void event_poll()
 {
@@ -102,19 +106,9 @@ int event_init()
 	return 0;
 }
 
-int (*default_handler)(const d_event &event) = NULL;
-
-void set_default_handler(int (*handler)(const d_event &event))
-{
-	default_handler = handler;
-}
-
 int call_default_handler(const d_event &event)
 {
-	if (default_handler)
-		return (*default_handler)(event);
-	
-	return 0;
+	return standard_handler(event);
 }
 
 void event_send(const d_event &event)
@@ -149,6 +143,8 @@ void event_process(void)
 
 	event_poll();	// send input events first
 
+	cmd_queue_process();
+
 	// Doing this prevents problems when a draw event can create a newmenu,
 	// such as some network menus when they report a problem
 	if (window_get_front() != wind)
@@ -174,13 +170,24 @@ void event_process(void)
 	gr_flip();
 }
 
-void event_toggle_focus(int activate_focus)
+template <bool activate_focus>
+static void event_change_focus()
 {
-	if (activate_focus && GameCfg.Grabinput && !GameArg.DbgForbidConsoleGrab)
-		SDL_WM_GrabInput(SDL_GRAB_ON);
+	SDL_WM_GrabInput(activate_focus && CGameCfg.Grabinput && likely(!CGameArg.DbgForbidConsoleGrab) ? SDL_GRAB_ON : SDL_GRAB_OFF);
+	if (activate_focus)
+		mouse_disable_cursor();
 	else
-		SDL_WM_GrabInput(SDL_GRAB_OFF);
-	mouse_toggle_cursor(!activate_focus);
+		mouse_enable_cursor();
+}
+
+void event_enable_focus()
+{
+	event_change_focus<true>();
+}
+
+void event_disable_focus()
+{
+	event_change_focus<false>();
 }
 
 static fix64 last_event = 0;
@@ -195,3 +202,4 @@ fix event_get_idle_seconds()
 	return (timer_query() - last_event)/F1_0;
 }
 
+}

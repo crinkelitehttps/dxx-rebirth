@@ -14,6 +14,8 @@
 #include "3d.h"
 #include "globvars.h"
 
+namespace dcx {
+
 vms_vector	View_position;
 fix			View_zoom;
 
@@ -40,3 +42,4 @@ double		fCanv_h2;
 
 
 
+}

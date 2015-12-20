@@ -12,14 +12,27 @@
 #include "compiler-array.h"
 #include "objnum.h"
 #include "segnum.h"
-#include "fwdvalptridx.h"
+#include "fwd-valptridx.h"
+#include "fwd-vecmat.h"
+#include "fwd-segment.h"
 
 struct bitmap_index;
 
-const unsigned MAX_OBJECTS = 350;
-const unsigned MAX_USED_OBJECTS	= MAX_OBJECTS - 20;
-
+constexpr std::size_t MAX_OBJECTS = 350;
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 enum object_type_t : int;
+
+struct object;
+DXX_VALPTRIDX_DECLARE_GLOBAL_SUBTYPE(object, obj, Objects, MAX_OBJECTS);
+
+static constexpr valptridx<object>::magic_constant<0xfffe> object_guidebot_cannot_reach{};
+static constexpr valptridx<object>::magic_constant<0xffff> object_none{};
+static constexpr valptridx<object>::magic_constant<0> object_first{};
+}
+#endif
+
+const unsigned MAX_USED_OBJECTS	= MAX_OBJECTS - 20;
 
 #if defined(DXX_BUILD_DESCENT_I)
 const unsigned MAX_OBJECT_TYPES = 15;
@@ -90,10 +103,12 @@ const physics_flag_t PF_USES_THRUST = 0x40;    // this object uses its thrust
 const physics_flag_t PF_BOUNCED_ONCE = 0x80;    // Weapon has bounced once.
 const physics_flag_t PF_FREE_SPINNING = 0x100;   // Drag does not apply to rotation of this object
 const physics_flag_t PF_BOUNCES_TWICE = 0x200;   // This weapon bounces twice, then dies
+#endif
+
+namespace dcx {
 
 typedef unsigned powerup_flag_t;
 const powerup_flag_t PF_SPAT_BY_PLAYER = 1;   //this powerup was spat by the player
-#endif
 
 const unsigned IMMORTAL_TIME = 0x3fffffff;  // Time assigned to immortal objects, about 32768 seconds, or about 9 hours.
 
@@ -107,6 +122,7 @@ const unsigned MATRIX_PRECISION = 9;
 struct physics_info;
 struct physics_info_rw;
 
+struct laser_parent;
 struct laser_info;
 struct laser_info_rw;
 
@@ -117,7 +133,6 @@ struct light_info;
 struct light_info_rw;
 
 struct powerup_info;
-struct powerup_info_rw;
 
 struct vclip_info;
 struct vclip_info_rw;
@@ -126,28 +141,29 @@ struct polyobj_info;
 struct polyobj_info_rw;
 
 struct obj_position;
+struct object_rw;
+
+}
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
-extern const array<array<char, 9>, MAX_OBJECT_TYPES> Object_type_names;
 #if defined(DXX_BUILD_DESCENT_I)
 const unsigned MAX_CONTROLCEN_GUNS = 4;
 #elif defined(DXX_BUILD_DESCENT_II)
 const unsigned MAX_CONTROLCEN_GUNS = 8;
 #endif
 
-struct reactor_static;
+namespace dsx {
 
-struct object;
-struct object_rw;
-
+struct powerup_info_rw;
 struct window_rendered_data;
+struct reactor_static;
+struct object;
 
 typedef array<uint8_t, MAX_OBJECT_TYPES> collision_inner_array_t;
 typedef array<collision_inner_array_t, MAX_OBJECT_TYPES> collision_outer_array_t;
 extern const collision_outer_array_t CollisionResult;
 
-struct object_array_t;
-extern object_array_t Objects;
+}
 #endif
 
 extern int Object_next_signature;   // The next signature for the next newly created object
@@ -156,11 +172,19 @@ extern int num_objects;
 
 extern int Num_robot_types;
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 extern object *ConsoleObject;       // pointer to the object that is the player
 extern object *Viewer;              // which object we are seeing from
 extern object *Dead_player_camera;
+#endif
 
-extern int Player_is_dead;          // !0 means player is dead!
+enum class player_dead_state : uint8_t
+{
+	no,
+	yes,
+};
+
+extern player_dead_state Player_dead_state;          // !0 means player is dead!
 extern int Player_exploded;
 extern int Player_eggs_dropped;
 extern int Death_sequence_aborted;
@@ -170,6 +194,7 @@ extern int Drop_afterburner_blob_flag;		//ugly hack
 // do whatever setup needs to be done
 void init_objects();
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 // when an object has moved into a new segment, this function unlinks it
 // from its old segment, and links it into the new segment
 void obj_relink(vobjptridx_t objnum,vsegptridx_t newsegnum);
@@ -182,7 +207,7 @@ void obj_relink_all();
 void obj_link(vobjptridx_t objnum,vsegptridx_t segnum);
 
 // unlinks an object from a segment's list of objects
-void obj_unlink(vobjptridx_t objnum);
+void obj_unlink(vobjptr_t objnum);
 
 // initialize a new object.  adds to the list for the given segment
 // returns the object number
@@ -240,7 +265,8 @@ segnum_t find_object_seg(vobjptr_t obj);
 void fix_object_segs();
 
 // Drops objects contained in objp.
-objptridx_t object_create_egg(vobjptr_t objp);
+objptridx_t object_create_robot_egg(vobjptr_t objp);
+objptridx_t object_create_robot_egg(int type, int id, int num, const vms_vector &init_vel, const vms_vector &pos, const vsegptridx_t segnum);
 
 // Interface to object_create_egg, puts count objects of type type, id
 // = id in objp and then drops them.
@@ -251,11 +277,12 @@ void dead_player_end();
 // Extract information from an object (objp->orient, objp->pos,
 // objp->segnum), stuff in a shortpos structure.  See typedef
 // shortpos.
-void create_shortpos(shortpos *spp, vcobjptr_t objp, int swap_bytes);
+void create_shortpos_little(shortpos *spp, vcobjptr_t objp);
+void create_shortpos_native(shortpos *spp, vcobjptr_t objp);
 
 // Extract information from a shortpos, stuff in objp->orient
 // (matrix), objp->pos, objp->segnum
-void extract_shortpos(vobjptridx_t objp, shortpos *spp, int swap_bytes);
+void extract_shortpos_little(vobjptridx_t objp, const shortpos *spp);
 
 // create and extract quaternion structure from object data which greatly saves bytes by using quaternion instead or orientation matrix
 void create_quaternionpos(quaternionpos * qpp, vobjptr_t objp, int swap_bytes);
@@ -266,7 +293,7 @@ void extract_quaternionpos(vobjptridx_t objp, quaternionpos *qpp, int swap_bytes
 void clear_transient_objects(int clear_all);
 
 // Returns a new, unique signature for a new object
-int obj_get_signature();
+object_signature_t obj_get_signature();
 
 // returns the number of a free object, updating Highest_object_index.
 // Generally, obj_create() should be called to get an object, since it
@@ -289,9 +316,9 @@ void dead_player_frame();
 
 #if defined(DXX_BUILD_DESCENT_II)
 // returns object number
-objnum_t drop_marker_object(const vms_vector &pos, segnum_t segnum, const vms_matrix &orient, int marker_num);
+objptridx_t drop_marker_object(const vms_vector &pos, vsegptridx_t segnum, const vms_matrix &orient, int marker_num);
 
-void wake_up_rendered_objects(vobjptridx_t gmissp, window_rendered_data &window);
+void wake_up_rendered_objects(vobjptr_t gmissp, window_rendered_data &window);
 
 void fuelcen_check_for_goal (vsegptr_t);
 #endif
@@ -299,3 +326,5 @@ objptridx_t obj_find_first_of_type(int type);
 
 void object_rw_swap(struct object_rw *obj_rw, int swap);
 void reset_player_object();
+
+#endif

@@ -32,6 +32,8 @@
 #include "hmp.h"
 #endif
 
+namespace dsx {
+
 #ifndef __PIE__
 /* PIE -> paranoid checks
  * No PIE -> prefer speed
@@ -40,6 +42,8 @@
 #endif
 
 /* Sound system function pointers */
+
+namespace {
 
 struct sound_function_table_t
 {
@@ -91,8 +95,6 @@ static const sound_function_table_t digi_audio_table{
 	&digi_audio_stop_all_channels,
 	&digi_audio_set_digi_volume,
 };
-
-namespace {
 
 class sound_function_pointers_t
 {
@@ -160,26 +162,21 @@ sound_function_pointers_t &sound_function_pointers_t::operator=(const sound_func
 
 static sound_function_pointers_t fptr;
 
-void digi_select_system(int n) {
-	switch (n) {
+void digi_select_system()
+{
 #ifdef USE_SDLMIXER
-	case SDLMIXER_SYSTEM:
+	if (!CGameArg.SndDisableSdlMixer)
+	{
 	con_printf(CON_NORMAL,"Using SDL_mixer library");
 		fptr = digi_mixer_table;
-	break;
+		return;
+	}
 #endif
-	case SDLAUDIO_SYSTEM:
-	default:
 	con_printf(CON_NORMAL,"Using plain old SDL audio");
 		fptr = digi_audio_table;
- 	break;
-	}
 }
 
 /* Common digi functions */
-#ifndef NDEBUG
-static int digi_initialised = 0;
-#endif
 #if defined(DXX_BUILD_DESCENT_I)
 int digi_sample_rate = SAMPLE_RATE_11K;
 #endif
@@ -212,21 +209,6 @@ void digi_end_sound(int channel) { fptr->end_sound(channel); }
 int  digi_is_channel_playing(int channel) { return fptr->is_channel_playing(channel); }
 void digi_stop_all_channels() { fptr->stop_all_channels(); }
 void digi_set_digi_volume(int dvolume) { fptr->set_digi_volume(dvolume); }
-
-#ifndef NDEBUG
-void digi_debug()
-{
-	int n_voices = 0;
-
-	if (!digi_initialised) return;
-
-	for (int i = 0; i < digi_max_channels; i++)
-	{
-		if (digi_is_channel_playing(i))
-			n_voices++;
-        }
-}
-#endif
 
 #ifdef _WIN32
 // Windows native-MIDI stuff.
@@ -287,3 +269,5 @@ void digi_win32_stop_midi_song()
 	hmp_reset();
 }
 #endif
+
+}

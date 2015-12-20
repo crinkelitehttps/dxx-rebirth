@@ -58,18 +58,6 @@ unsigned Num_cloaking_walls;
 
 #endif
 
-#ifdef EDITOR
-const char	Wall_names[7][10] = {
-	"NORMAL   ",
-	"BLASTABLE",
-	"DOOR     ",
-	"ILLUSION ",
-	"OPEN     ",
-	"CLOSED   ",
-	"EXTERNAL "
-};
-#endif
-
 static std::pair<uint_fast32_t, uint_fast32_t> get_transparency_check_values(const side &side)
 {
 	if (uint_fast32_t masked_tmap_num2 = side.tmap_num2 & 0x3FFF)
@@ -204,7 +192,7 @@ static void blast_blastable_wall(const vsegptridx_t seg, int side)
 
 	Walls[seg->sides[side].wall_num].hps = -1;	//say it's blasted
 
-	auto csegp = &Segments[seg->children[side]];
+	const auto &&csegp = vsegptridx(seg->children[side]);
 	auto Connectside = find_connect_side(seg, csegp);
 	Assert(Connectside != -1);
 	cwall_num = csegp->sides[Connectside].wall_num;
@@ -255,7 +243,7 @@ void wall_damage(const vsegptridx_t seg, int side, fix damage)
 	
 	if (!(Walls[seg->sides[side].wall_num].flags & WALL_BLASTED) && Walls[seg->sides[side].wall_num].hps >= 0)
 		{
-		auto csegp = &Segments[seg->children[side]];
+		const auto &&csegp = vsegptridx(seg->children[side]);
 		auto Connectside = find_connect_side(seg, csegp);
 		Assert(Connectside != -1);
 		cwall_num = csegp->sides[Connectside].wall_num;
@@ -297,7 +285,7 @@ void wall_open_door(const vsegptridx_t seg, int side)
 		 (w->state == WALL_DOOR_WAITING))		//open, waiting to close
 		return;
 #if defined(DXX_BUILD_DESCENT_II)
-	if ((w->state == WALL_DOOR_OPEN))			//open, & staying open
+	if (w->state == WALL_DOOR_OPEN)			//open, & staying open
 		return;
 #endif
 
@@ -346,7 +334,7 @@ void wall_open_door(const vsegptridx_t seg, int side)
 	w->state = WALL_DOOR_OPENING;
 
 	// So that door can't be shot while opening
-	auto csegp = &Segments[seg->children[side]];
+	const auto &&csegp = vcsegptr(seg->children[side]);
 	auto Connectside = find_connect_side(seg, csegp);
 	if (Connectside >= 0)
 	{
@@ -369,15 +357,14 @@ void wall_open_door(const vsegptridx_t seg, int side)
 		wall *w2;
 
 		w2		= &Walls[w->linked_wall];
-		auto seg2	= &Segments[w2->segnum];
 
 		Assert(w2->linked_wall == seg->sides[side].wall_num);
 		//Assert(!(w2->flags & WALL_DOOR_OPENING  ||  w2->flags & WALL_DOOR_OPENED));
 
 		w2->state = WALL_DOOR_OPENING;
 
-		csegp = &Segments[seg2->children[w2->sidenum]];
-		Connectside = find_connect_side(seg2, csegp);
+		const auto &&seg2 = vcsegptridx(w2->segnum);
+		Connectside = find_connect_side(seg2, vcsegptr(seg2->children[w2->sidenum]));
 		Assert(Connectside != -1);
 		if (cwall_num > -1)
 			Walls[cwall_num].state = WALL_DOOR_OPENING;
@@ -416,12 +403,12 @@ void wall_close_door(int door_num)
 		int side;
 		w = &Walls[d->front_wallnum[p]];
 
-		auto seg = &Segments[w->segnum];
+		const auto &&seg = vsegptridx(w->segnum);
 		side = w->sidenum;
 
 		Assert(seg->sides[side].wall_num != wall_none);		//Closing door on illegal wall
 
-		auto csegp = &Segments[seg->children[side]];
+		const auto &&csegp = vsegptridx(seg->children[side]);
 		auto Connectside = find_connect_side(seg, csegp);
 		Assert(Connectside != -1);
 
@@ -457,7 +444,7 @@ void start_wall_cloak(const vsegptridx_t seg, int side)
 	if (w->type == WALL_OPEN || w->state == WALL_DOOR_CLOAKING)		//already open or cloaking
 		return;
 
-	auto csegp = &Segments[seg->children[side]];
+	const auto &&csegp = vcsegptr(seg->children[side]);
 	auto Connectside = find_connect_side(seg, csegp);
 	Assert(Connectside != -1);
 	cwall_num = csegp->sides[Connectside].wall_num;
@@ -577,7 +564,7 @@ void start_wall_decloak(const vsegptridx_t seg, int side)
 	w->state = WALL_DOOR_DECLOAKING;
 
 	// So that door can't be shot while opening
-	auto csegp = &Segments[seg->children[side]];
+	const auto &&csegp = vcsegptr(seg->children[side]);
 	auto Connectside = find_connect_side(seg, csegp);
 	Assert(Connectside != -1);
 	cwall_num = csegp->sides[Connectside].wall_num;
@@ -618,12 +605,12 @@ void wall_close_door_num(int door_num)
 
 		w = &Walls[d->front_wallnum[p]];
 
-		auto seg = &Segments[w->segnum];
+		const auto &&seg = vsegptridx(w->segnum);
 		side = w->sidenum;
 
 		Assert(seg->sides[side].wall_num != wall_none);		//Closing door on illegal wall
 
-		auto csegp = &Segments[seg->children[side]];
+		const auto &&csegp = vsegptridx(seg->children[side]);
 		auto Connectside = find_connect_side(seg, csegp);
 		Assert(Connectside != -1);
 		cwall_num = csegp->sides[Connectside].wall_num;
@@ -642,17 +629,12 @@ void wall_close_door_num(int door_num)
 
 }
 
-static int check_poke(objnum_t objnum,segnum_t segnum,int side)
+static uint8_t check_poke(const vcobjptr_t obj, const vcsegptr_t segnum,int side)
 {
-	object *obj = &Objects[objnum];
-
 	//note: don't let objects with zero size block door
-
-	if (obj->size && get_seg_masks(obj->pos, segnum, obj->size, __FILE__, __LINE__).sidemask & (1 << side))
-		return 1;		//pokes through side!
-	else
-		return 0;		//does not!
-
+	if (!obj->size)
+		return 0;
+	return get_seg_masks(obj->pos, segnum, obj->size).sidemask & (1 << side);		//pokes through side!
 }
 
 #if defined(DXX_BUILD_DESCENT_I)
@@ -675,34 +657,33 @@ void do_door_close(int door_num)
 	if (w->flags & WALL_DOOR_AUTO)
 		for (p=0;p<d->n_parts;p++) {
 			int side;
-			auto seg = &Segments[w->segnum];
+			const auto &&seg = vcsegptridx(w->segnum);
 			side = w->sidenum;
 
-			auto csegp = &Segments[seg->children[side]];
+			const auto &&csegp = vcsegptr(seg->children[side]);
 			auto Connectside = find_connect_side(seg, csegp);
 			Assert(Connectside != -1);
 
 			//go through each object in each of two segments, and see if
 			//it pokes into the connecting seg
 
-			for (objnum_t objnum=seg->objects; objnum!=object_none; objnum=Objects[objnum].next)
-				if (check_poke(objnum,seg-Segments,side))
+			range_for (const auto &&objnum, objects_in(seg))
+				if (check_poke(objnum, seg, side))
 					return;		//abort!
 
-			for (objnum_t objnum=csegp->objects; objnum!=object_none; objnum=Objects[objnum].next)
-				if (check_poke(objnum,csegp-Segments,Connectside))
+			range_for (const auto &&objnum, objects_in(csegp))
+				if (check_poke(objnum, csegp, Connectside))
 					return;		//abort!
 		}
 
 	for (p=0;p<d->n_parts;p++) {
-		wall *w;
 		int side;
 		fix time_elapsed, time_total, one_frame;
 		int i, n;
 
 		w = &Walls[d->front_wallnum[p]];
 
-		auto seg = &Segments[w->segnum];
+		const auto &&seg = vsegptridx(w->segnum);
 		side = w->sidenum;
 
 		if (seg->sides[side].wall_num == wall_none) {
@@ -713,7 +694,7 @@ void do_door_close(int door_num)
 		Assert(Walls[seg->sides[side].wall_num].flags & WALL_DOOR_AUTO);		
 
 		// Otherwise, close it.
-		auto csegp = &Segments[seg->children[side]];
+		const auto &&csegp = vsegptridx(seg->children[side]);
 		auto Connectside = find_connect_side(seg, csegp);
 		Assert(Connectside != -1);
 
@@ -724,7 +705,7 @@ void do_door_close(int door_num)
 				if ( d->time==0 )	{		//first time
 					const auto cp = compute_center_point_on_side(seg, side );
 					if (WallAnims[w->clip_num].close_sound  > -1 )
-						digi_link_sound_to_pos( WallAnims[Walls[seg->sides[side].wall_num].clip_num].close_sound, seg-Segments, side, cp, 0, F1_0 );
+						digi_link_sound_to_pos( WallAnims[Walls[seg->sides[side].wall_num].clip_num].close_sound, seg, side, cp, 0, F1_0 );
 				}
 
 		d->time += FrameTime;
@@ -758,28 +739,26 @@ void do_door_close(int door_num)
 #endif
 
 #if defined(DXX_BUILD_DESCENT_II)
+static int is_door_side_free(const vcsegptr_t seg, int side)
+{
+	range_for (const auto &&obj, objects_in(seg))
+		if (obj->type!=OBJ_WEAPON && obj->type!=OBJ_FIREBALL && check_poke(obj,seg,side))
+			return 0;	//not free
+	return 1;
+}
+
 //returns true of door in unobjstructed (& thus can close)
 static int is_door_free(const vcsegptridx_t seg,int side)
 {
-	auto csegp = vsegptridx(seg->children[side]);
+	if (!is_door_side_free(seg, side))
+		return 0;
+	const auto &&csegp = vcsegptr(seg->children[side]);
 	auto Connectside = find_connect_side(seg, csegp);
 	Assert(Connectside != -1);
-
 	//go through each object in each of two segments, and see if
 	//it pokes into the connecting seg
-
-	range_for (const auto obj, objects_in(*seg))
-		if (obj->type!=OBJ_WEAPON && obj->type!=OBJ_FIREBALL && check_poke(obj,seg,side))
-			return 0;	//not free
-
-	range_for (const auto obj, objects_in(*csegp))
-		if (obj->type!=OBJ_WEAPON && obj->type!=OBJ_FIREBALL && check_poke(obj,csegp,Connectside))
-			return 0;	//not free
-
-	return 1; 	//doorway is free!
+	return is_door_side_free(csegp, Connectside);
 }
-
-
 
 //-----------------------------------------------------------------
 // Closes a door
@@ -836,7 +815,7 @@ void wall_close_door(const vsegptridx_t seg, int side)
 	w->state = WALL_DOOR_CLOSING;
 
 	// So that door can't be shot while opening
-	auto csegp = &Segments[seg->children[side]];
+	const auto &&csegp = vcsegptr(seg->children[side]);
 	auto Connectside = find_connect_side(seg, csegp);
 	Assert(Connectside != -1);
 	cwall_num = csegp->sides[Connectside].wall_num;
@@ -891,7 +870,7 @@ void do_door_open(int door_num)
 		kill_stuck_objects(d->front_wallnum[p]);
 		kill_stuck_objects(d->back_wallnum[p]);
 
-		auto seg = &Segments[w->segnum];
+		const auto &&seg = vsegptridx(w->segnum);
 		side = w->sidenum;
 
 // 		Assert(seg->sides[side].wall_num != -1);		//Trying to do_door_open on illegal wall
@@ -901,7 +880,7 @@ void do_door_open(int door_num)
 			continue;
 		}
 
-		auto csegp = &Segments[seg->children[side]];
+		const auto &&csegp = vsegptridx(seg->children[side]);
 		auto Connectside = find_connect_side(seg, csegp);
 		Assert(Connectside != -1);
 
@@ -965,11 +944,13 @@ void do_door_close(int door_num)
 
 	w = &Walls[d->front_wallnum[0]];
 
+	const auto &&wsegp = vsegptridx(w->segnum);
+
 	//check for objects in doorway before closing
 	if (w->flags & WALL_DOOR_AUTO)
-		if (!is_door_free(&Segments[w->segnum],w->sidenum)) {
+		if (!is_door_free(wsegp, w->sidenum)) {
 			digi_kill_sound_linked_to_segment(w->segnum,w->sidenum,-1);
-			wall_open_door(&Segments[w->segnum],w->sidenum);		//re-open door
+			wall_open_door(wsegp, w->sidenum);		//re-open door
 			return;
 		}
 
@@ -981,7 +962,7 @@ void do_door_close(int door_num)
 
 		w = &Walls[d->front_wallnum[p]];
 
-		auto seg = &Segments[w->segnum];
+		const auto &seg = wsegp;
 		side = w->sidenum;
 
 		if (seg->sides[side].wall_num == wall_none) {
@@ -993,7 +974,7 @@ void do_door_close(int door_num)
 //don't assert here, because now we have triggers to close non-auto doors
 
 		// Otherwise, close it.
-		auto csegp = &Segments[seg->children[side]];
+		const auto &&csegp = vsegptridx(seg->children[side]);
 		auto Connectside = find_connect_side(seg, csegp);
 		Assert(Connectside != -1);
 
@@ -1004,7 +985,7 @@ void do_door_close(int door_num)
 				if ( d->time==0 )	{		//first time
 					const auto cp = compute_center_point_on_side(seg, side );
 					if (WallAnims[w->clip_num].close_sound  > -1 )
-						digi_link_sound_to_pos( WallAnims[Walls[seg->sides[side].wall_num].clip_num].close_sound, seg-Segments, side, cp, 0, F1_0 );
+						digi_link_sound_to_pos( WallAnims[Walls[seg->sides[side].wall_num].clip_num].close_sound, seg, side, cp, 0, F1_0 );
 				}
 
 		d->time += FrameTime;
@@ -1043,7 +1024,7 @@ void do_door_close(int door_num)
 //  wall switches or triggers that can turn on/off illusionary walls.)
 void wall_illusion_off(const vsegptridx_t seg, int side)
 {
-	auto csegp = &Segments[seg->children[side]];
+	const auto &&csegp = vcsegptr(seg->children[side]);
 	auto cside = find_connect_side(seg, csegp);
 	Assert(cside != -1);
 
@@ -1065,7 +1046,7 @@ void wall_illusion_off(const vsegptridx_t seg, int side)
 //  wall switches or triggers that can turn on/off illusionary walls.)
 void wall_illusion_on(const vsegptridx_t seg, int side)
 {
-	auto csegp = &Segments[seg->children[side]];
+	const auto &&csegp = vcsegptr(seg->children[side]);
 	auto cside = find_connect_side(seg, csegp);
 	Assert(cside != -1);
 
@@ -1100,7 +1081,7 @@ wall_hit_process_t wall_hit_process(const vsegptridx_t seg, int side, fix damage
 
 	// If it is not a "wall" then just return.
 	if ( seg->sides[side].wall_num == wall_none )
-		return WHP_NOT_SPECIAL;
+		return wall_hit_process_t::WHP_NOT_SPECIAL;
 
 	w = &Walls[seg->sides[side].wall_num];
 
@@ -1112,11 +1093,11 @@ wall_hit_process_t wall_hit_process(const vsegptridx_t seg, int side, fix damage
 		if (obj->ctype.laser_info.parent_type == OBJ_PLAYER)
 #endif
 			wall_damage(seg, side, damage);
-		return WHP_BLASTABLE;
+		return wall_hit_process_t::WHP_BLASTABLE;
 	}
 
 	if (playernum != Player_num)	//return if was robot fire
-		return WHP_NOT_SPECIAL;
+		return wall_hit_process_t::WHP_NOT_SPECIAL;
 
 	Assert( playernum > -1 );
 	
@@ -1133,37 +1114,37 @@ wall_hit_process_t wall_hit_process(const vsegptridx_t seg, int side, fix damage
 	else
 		show_message = 1;
 
-	if (w->keys == KEY_BLUE)
-		if (!(Players[playernum].flags & PLAYER_FLAGS_BLUE_KEY)) {
-			if ( playernum==Player_num )
+	/* Set key_color only after the type matches, since TXT_* are macros
+	 * that trigger a load from memory.  Use operator,() to suppress the
+	 * truth test on the second branch since the compiler cannot prove
+	 * that the loaded value will always be non-null.
+	 */
+	const char *key_color;
+	if (
+		(w->keys == KEY_BLUE && (key_color = TXT_BLUE, true)) ||
+		(w->keys == KEY_GOLD && (key_color = TXT_YELLOW, true)) ||
+		(w->keys == KEY_RED && (key_color = TXT_RED, true))
+	)
+	{
+		const auto &objp = get_local_plrobj();
+		const auto &player_info = objp.ctype.player_info;
+		if (!(player_info.powerup_flags & static_cast<PLAYER_FLAG>(w->keys)))
+		{
+			static_assert(KEY_BLUE == static_cast<unsigned>(PLAYER_FLAGS_BLUE_KEY), "BLUE key flag mismatch");
+			static_assert(KEY_GOLD == static_cast<unsigned>(PLAYER_FLAGS_GOLD_KEY), "GOLD key flag mismatch");
+			static_assert(KEY_RED == static_cast<unsigned>(PLAYER_FLAGS_RED_KEY), "RED key flag mismatch");
 				if (show_message)
-					HUD_init_message(HM_DEFAULT, "%s %s",TXT_BLUE,TXT_ACCESS_DENIED);
-			return WHP_NO_KEY;
+					HUD_init_message(HM_DEFAULT, "%s %s",key_color,TXT_ACCESS_DENIED);
+			return wall_hit_process_t::WHP_NO_KEY;
 		}
-
-	if (w->keys == KEY_RED)
-		if (!(Players[playernum].flags & PLAYER_FLAGS_RED_KEY)) {
-			if ( playernum==Player_num )
-				if (show_message)
-					HUD_init_message(HM_DEFAULT, "%s %s",TXT_RED,TXT_ACCESS_DENIED);
-			return WHP_NO_KEY;
-		}
-	
-	if (w->keys == KEY_GOLD)
-		if (!(Players[playernum].flags & PLAYER_FLAGS_GOLD_KEY)) {
-			if ( playernum==Player_num )
-				if (show_message)
-					HUD_init_message(HM_DEFAULT, "%s %s",TXT_YELLOW,TXT_ACCESS_DENIED);
-			return WHP_NO_KEY;
-		}
+	}
 
 	if (w->type == WALL_DOOR)
 	{
 		if ((w->flags & WALL_DOOR_LOCKED ) && !(special_boss_opening_allowed(seg, side)) ) {
-			if ( playernum==Player_num )
 				if (show_message)
 					HUD_init_message_literal(HM_DEFAULT, TXT_CANT_OPEN_DOOR);
-			return WHP_NO_KEY;
+			return wall_hit_process_t::WHP_NO_KEY;
 		}
 		else {
 			if (w->state != WALL_DOOR_OPENING)
@@ -1180,40 +1161,37 @@ wall_hit_process_t wall_hit_process(const vsegptridx_t seg, int side, fix damage
 					multi_send_door_open(seg, side,flags);
 				}
 			}
-			return WHP_DOOR;
+			return wall_hit_process_t::WHP_DOOR;
 			
 		}
 	}
-
-	return WHP_NOT_SPECIAL;		//default is treat like normal wall
+	return wall_hit_process_t::WHP_NOT_SPECIAL;		//default is treat like normal wall
 }
 
 //-----------------------------------------------------------------
 // Opens doors/destroys wall/shuts off triggers.
-void wall_toggle(segnum_t segnum, unsigned side)
+void wall_toggle(const vsegptridx_t segp, unsigned side)
 {
-	if (segnum < 0 || segnum > Highest_segment_index || side >= MAX_SIDES_PER_SEGMENT)
+	if (side >= MAX_SIDES_PER_SEGMENT)
 	{
 #ifndef NDEBUG
-		Warning("Can't toggle side %u of segment %d (%u)!\n", side, segnum, Highest_segment_index);
+		Warning("Can't toggle side %u of segment %d (%u)!\n", side, static_cast<segnum_t>(segp), Highest_segment_index);
 #endif
 		return;
 	}
-
-	auto wall_num = Segments[segnum].sides[side].wall_num;
-
+	auto wall_num = segp->sides[side].wall_num;
 	if (wall_num == wall_none) {
 		return;
 	}
 
 	if ( Newdemo_state == ND_STATE_RECORDING )
-		newdemo_record_wall_toggle(segnum, side );
+		newdemo_record_wall_toggle(segp, side);
 
 	if (Walls[wall_num].type == WALL_BLASTABLE)
-		wall_destroy(&Segments[segnum], side);
+		wall_destroy(segp, side);
 
 	if ((Walls[wall_num].type == WALL_DOOR) && (Walls[wall_num].state == WALL_DOOR_CLOSED))
-		wall_open_door(&Segments[segnum], side);
+		wall_open_door(segp, side);
 }
 
 
@@ -1396,7 +1374,7 @@ void wall_frame_process()
 
 			if (d->time > DOOR_WAIT_TIME)
 #if defined(DXX_BUILD_DESCENT_II)
-				if (is_door_free(&Segments[w->segnum],w->sidenum))
+				if (is_door_free(vcsegptridx(w->segnum), w->sidenum))
 #endif
 				{
 					w->state = WALL_DOOR_CLOSING;
@@ -1437,25 +1415,24 @@ void wall_frame_process()
 #endif
 }
 
-int	Num_stuck_objects=0;
-
-stuckobj	Stuck_objects[MAX_STUCK_OBJECTS];
+static unsigned Num_stuck_objects;
+static array<stuckobj, MAX_STUCK_OBJECTS> Stuck_objects;
 
 //	An object got stuck in a door (like a flare).
 //	Add global entry.
-void add_stuck_object(const vobjptridx_t objp, segnum_t segnum, int sidenum)
+void add_stuck_object(const vobjptridx_t objp, const vsegptr_t segp, int sidenum)
 {
-	int	i;
-	int	wallnum;
-	wallnum = Segments[segnum].sides[sidenum].wall_num;
-	if (wallnum != -1) {
+	const auto wallnum = segp->sides[sidenum].wall_num;
+	if (wallnum != wall_none)
+	{
 		if (Walls[wallnum].flags & WALL_BLASTED)
 			objp->flags |= OF_SHOULD_BE_DEAD;
-		for (i=0; i<MAX_STUCK_OBJECTS; i++) {
-			if (Stuck_objects[i].wallnum == -1) {
-				Stuck_objects[i].wallnum = wallnum;
-				Stuck_objects[i].objnum = objp;
-				Stuck_objects[i].signature = objp->signature;
+		range_for (auto &i, Stuck_objects)
+		{
+			if (i.wallnum == -1) {
+				i.wallnum = wallnum;
+				i.objnum = objp;
+				i.signature = objp->signature;
 				Num_stuck_objects++;
 				break;
 			}
@@ -1474,7 +1451,8 @@ void remove_obsolete_stuck_objects(void)
 	objnum = d_tick_count % MAX_STUCK_OBJECTS;
 
 	if (Stuck_objects[objnum].wallnum != -1)
-		if ((Stuck_objects[objnum].wallnum == 0) || (Objects[Stuck_objects[objnum].objnum].signature != Stuck_objects[objnum].signature)) {
+		if ((Stuck_objects[objnum].wallnum == 0) || (vcobjptr(Stuck_objects[objnum].objnum)->signature != Stuck_objects[objnum].signature))
+		{
 			Num_stuck_objects--;
 			Stuck_objects[objnum].wallnum = -1;
 		}
@@ -1496,9 +1474,9 @@ void remove_obsolete_stuck_objects(void)
 	objnum = d_tick_count % MAX_STUCK_OBJECTS;
 
 	if (Stuck_objects[objnum].wallnum != -1)
-		if ((Walls[Stuck_objects[objnum].wallnum].state != WALL_DOOR_CLOSED) || (Objects[Stuck_objects[objnum].objnum].signature != Stuck_objects[objnum].signature)) {
+		if ((Walls[Stuck_objects[objnum].wallnum].state != WALL_DOOR_CLOSED) || (vcobjptr(Stuck_objects[objnum].objnum)->signature != Stuck_objects[objnum].signature)) {
 			Num_stuck_objects--;
-			Objects[Stuck_objects[objnum].objnum].lifeleft = F1_0/8;
+			vobjptr(Stuck_objects[objnum].objnum)->lifeleft = F1_0/8;
 			Stuck_objects[objnum].wallnum = -1;
 		}
 
@@ -1519,13 +1497,14 @@ void kill_stuck_objects(int wallnum)
 
 	for (i=0; i<MAX_STUCK_OBJECTS; i++)
 		if (Stuck_objects[i].wallnum == wallnum) {
-			if (Objects[Stuck_objects[i].objnum].type == OBJ_WEAPON) {
+			const auto &&objp = vobjptr(Stuck_objects[i].objnum);
+			if (objp->type == OBJ_WEAPON) {
 #if defined(DXX_BUILD_DESCENT_I)
 #define DXX_WEAPON_LIFELEFT	F1_0/4
 #elif defined(DXX_BUILD_DESCENT_II)
 #define DXX_WEAPON_LIFELEFT	F1_0/8
 #endif
-				Objects[Stuck_objects[i].objnum].lifeleft = DXX_WEAPON_LIFELEFT;
+				objp->lifeleft = DXX_WEAPON_LIFELEFT;
 			}
 			Stuck_objects[i].wallnum = -1;
 		} else if (Stuck_objects[i].wallnum != -1) {
@@ -1543,11 +1522,8 @@ void kill_stuck_objects(int wallnum)
 // Initialize stuck objects array.  Called at start of level
 void init_stuck_objects(void)
 {
-	int	i;
-
-	for (i=0; i<MAX_STUCK_OBJECTS; i++)
-		Stuck_objects[i].wallnum = -1;
-
+	range_for (auto &i, Stuck_objects)
+		i.wallnum = -1;
 	Num_stuck_objects = 0;
 }
 
@@ -1555,19 +1531,14 @@ void init_stuck_objects(void)
 // Clear out all stuck objects.  Called for a new ship
 void clear_stuck_objects(void)
 {
-	int	i;
+	range_for (auto &i, Stuck_objects)
+	{
+		if (i.wallnum != -1) {
+			const auto &&objp = vobjptr(i.objnum);
+			if (objp->type == OBJ_WEAPON && get_weapon_id(objp) == weapon_id_type::FLARE_ID)
+				objp->lifeleft = F1_0/8;
 
-	for (i=0; i<MAX_STUCK_OBJECTS; i++) {
-		if (Stuck_objects[i].wallnum != -1) {
-			int	objnum;
-
-			objnum = Stuck_objects[i].objnum;
-
-			if ((Objects[objnum].type == OBJ_WEAPON) && (get_weapon_id(&Objects[objnum]) == FLARE_ID))
-				Objects[objnum].lifeleft = F1_0/8;
-
-			Stuck_objects[i].wallnum = -1;
-
+			i.wallnum = -1;
 			Num_stuck_objects--;
 		}
 	}
@@ -1604,7 +1575,7 @@ static void bng_process_segment(const vobjptr_t objp, fix damage, const vsegptri
 				if (dist < damage/2) {
 					dist = find_connected_distance(pnt, segp, objp->pos, objp->segnum, MAX_BLAST_GLASS_DEPTH, WID_RENDPAST_FLAG);
 					if ((dist > 0) && (dist < damage/2))
-						check_effect_blowup(segp, sidenum, pnt, &Objects[objp->ctype.laser_info.parent_num], 1, 0);
+						check_effect_blowup(segp, sidenum, pnt, vcobjptr(objp->ctype.laser_info.parent_num)->ctype.laser_info, 1, 0);
 				}
 			}
 		}
@@ -1617,7 +1588,7 @@ static void bng_process_segment(const vobjptr_t objp, fix damage, const vsegptri
 			if (!visited[segnum]) {
 				if (WALL_IS_DOORWAY(segp, i) & WID_FLY_FLAG) {
 					visited[segnum] = true;
-					bng_process_segment(objp, damage, &Segments[segnum], depth, visited);
+					bng_process_segment(objp, damage, vsegptridx(segnum), depth, visited);
 				}
 			}
 		}
@@ -1632,8 +1603,7 @@ void blast_nearby_glass(const vobjptr_t objp, fix damage)
 	visited_segment_bitarray_t visited;
 
 	visited[objp->segnum] = true;
-	auto cursegp = &Segments[objp->segnum];
-	bng_process_segment(objp, damage, cursegp, 0, visited);
+	bng_process_segment(objp, damage, vsegptridx(objp->segnum), 0, visited);
 }
 
 struct d1wclip
@@ -1657,10 +1627,12 @@ void wclip_read(PHYSFS_file *fp, wclip &wc)
 	PHYSFSX_serialize_read(fp, wc);
 }
 
+#if 0
 void wclip_write(PHYSFS_file *fp, const wclip &wc)
 {
 	PHYSFSX_serialize_write(fp, wc);
 }
+#endif
 
 struct wrap_v16_wall
 {

@@ -27,9 +27,10 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "segment.h"
 
 #ifdef __cplusplus
-#include "fwdwall.h"
+#include "fwd-wall.h"
 #include "pack.h"
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 struct WALL_IS_DOORWAY_mask_t
 {
 	unsigned value;
@@ -75,21 +76,23 @@ struct WALL_IS_DOORWAY_result_t
 			return !(*this == t);
 		}
 };
+#endif
 
 struct stuckobj : public prohibit_void_ptr<stuckobj>
 {
-	short   objnum, wallnum;
-	int     signature;
+	objnum_t objnum;
+	short   wallnum;
+	object_signature_t signature;
 };
 
 //Start old wall structures
 
-struct v16_wall
+struct v16_wall : public prohibit_void_ptr<v16_wall>
 {
 	sbyte   type;               // What kind of special wall.
 	sbyte   flags;              // Flags for the wall.
+	uint8_t   trigger;            // Which trigger is associated with the wall.
 	fix     hps;                // "Hit points" of the wall.
-	sbyte   trigger;            // Which trigger is associated with the wall.
 	sbyte   clip_num;           // Which animation associated with the wall.
 	sbyte   keys;
 };
@@ -97,11 +100,11 @@ struct v16_wall
 struct v19_wall : public prohibit_void_ptr<v19_wall>
 {
 	segnum_t     segnum;
-	int	sidenum;     // Seg & side for this wall
 	sbyte   type;               // What kind of special wall.
 	sbyte   flags;              // Flags for the wall.
+	int	sidenum;     // Seg & side for this wall
 	fix     hps;                // "Hit points" of the wall.
-	sbyte   trigger;            // Which trigger is associated with the wall.
+	uint8_t   trigger;            // Which trigger is associated with the wall.
 	sbyte   clip_num;           // Which animation associated with the wall.
 	sbyte   keys;
 	int linked_wall;            // number of linked wall
@@ -119,7 +122,7 @@ struct wall : public prohibit_void_ptr<wall>
 	int16_t linked_wall;        // number of linked wall
 	ubyte   flags;              // Flags for the wall.
 	ubyte   state;              // Opening, closing, etc.
-	sbyte   trigger;            // Which trigger is associated with the wall.
+	uint8_t   trigger;            // Which trigger is associated with the wall.
 	sbyte   clip_num;           // Which animation associated with the wall.
 	ubyte   keys;               // which keys are required
 #if defined(DXX_BUILD_DESCENT_II)
@@ -168,7 +171,6 @@ static inline ssize_t operator-(wall *w, array<wall, MAX_WALLS> &W)
 {
 	return w - static_cast<wall *>(&*W.begin());
 }
-#endif
 
 static inline WALL_IS_DOORWAY_result_t WALL_IS_DOORWAY(const vcsegptr_t seg, const uint_fast32_t side)
 {
@@ -182,4 +184,5 @@ static inline WALL_IS_DOORWAY_result_t WALL_IS_DOORWAY(const vcsegptr_t seg, con
 		return WID_NO_WALL;
 	return wall_is_doorway(s);
 }
+#endif
 #endif

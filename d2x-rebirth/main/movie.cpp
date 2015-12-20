@@ -48,7 +48,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "strutil.h"
 #include "dxxerror.h"
 #include "u_mem.h"
-#include "byteutil.h"
 #include "gr.h"
 #include "gamefont.h"
 #include "menu.h"
@@ -63,11 +62,15 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "compiler-range_for.h"
 
+namespace {
+
 // Subtitle data
 struct subtitle {
 	short first_frame,last_frame;
 	char *msg;
 };
+
+}
 
 static int init_subtitles(const char *filename);
 
@@ -99,10 +102,14 @@ public:
 // Movielib data
 
 static const array<array<char, 8>, 3> movielib_files{{{"intro"}, {"other"}, {"robots"}}};
+namespace {
+
 struct loaded_movie_t
 {
 	array<char, FILENAME_LEN + 2> filename;
 };
+
+}
 static loaded_movie_t extra_robot_movie_mission;
 
 static RWops_ptr RoboFile;
@@ -161,17 +168,17 @@ int PlayMovie(const char *subtitles, const char *filename, int must_have)
 	songs_stop_all();
 
 	// MD2211: if using SDL_Mixer, we never reinit the sound system
-	if (GameArg.SndDisableSdlMixer)
+	if (CGameArg.SndDisableSdlMixer)
 		digi_close();
 
 	// Start sound
-	MVE_sndInit(!GameArg.SndNoSound ? 1 : -1);
+	MVE_sndInit(!CGameArg.SndNoSound ? 1 : -1);
 
 	ret = RunMovie(name, !GameArg.GfxSkipHiresMovie, must_have, -1, -1);
 
 	// MD2211: if using SDL_Mixer, we never reinit the sound system
-	if (!GameArg.SndNoSound
-		&& GameArg.SndDisableSdlMixer
+	if (!CGameArg.SndNoSound
+		&& CGameArg.SndDisableSdlMixer
 	)
 		digi_init();
 
@@ -196,7 +203,7 @@ static void MovieShowFrame(ubyte *buf, int dstx, int dsty, int bufw, int bufh, i
 	source_bm.bm_x = source_bm.bm_y = 0;
 	source_bm.bm_w = source_bm.bm_rowsize = bufw;
 	source_bm.bm_h = bufh;
-	source_bm.bm_type = BM_LINEAR;
+	source_bm.set_type(BM_LINEAR);
 	source_bm.bm_flags = 0;
 	source_bm.bm_data = buf;
 
@@ -253,6 +260,7 @@ static void MovieSetPalette(const unsigned char *p, unsigned start, unsigned cou
 	memcpy(&gr_palette[start],p+start*3,count*3);
 }
 
+namespace {
 
 struct movie : ignore_window_pointer_t
 {
@@ -262,7 +270,9 @@ struct movie : ignore_window_pointer_t
 	MVESTREAM_ptr_t pMovie;
 };
 
-static window_event_result show_pause_message(window *wind,const d_event &event, const unused_window_userdata_t *)
+}
+
+static window_event_result show_pause_message(window *, const d_event &event, const unused_window_userdata_t *)
 {
 	switch (event.type)
 	{
@@ -281,15 +291,15 @@ static window_event_result show_pause_message(window *wind,const d_event &event,
 		case EVENT_WINDOW_DRAW:
 		{
 			const char *msg = TXT_PAUSE;
-			int w,h,aw;
+			int h;
 			int y;
 
 			gr_set_current_canvas(NULL);
 			gr_set_curfont( GAME_FONT );
 
-			gr_get_string_size(msg,&w,&h,&aw);
+			gr_get_string_size(msg, nullptr, &h, nullptr);
 
-			y = (grd_curscreen->sc_h-h)/2;
+			y = (grd_curscreen->get_screen_height() - h) / 2;
 
 			gr_set_fontcolor( 255, -1 );
 
@@ -303,7 +313,7 @@ static window_event_result show_pause_message(window *wind,const d_event &event,
 	return window_event_result::ignored;
 }
 
-static window_event_result MovieHandler(window *wind,const d_event &event, movie *m)
+static window_event_result MovieHandler(window *, const d_event &event, movie *m)
 {
 	int key;
 
@@ -368,11 +378,9 @@ static window_event_result MovieHandler(window *wind,const d_event &event, movie
 //returns status.  see movie.h
 int RunMovie(char *filename, int hires_flag, int must_have,int dx,int dy)
 {
-	window *wind;
 	movie m;
 	int track = 0;
 	int aborted = 0;
-	int reshow = 0;
 #ifdef OGL
 	palette_array_t pal_save;
 #endif
@@ -382,16 +390,6 @@ int RunMovie(char *filename, int hires_flag, int must_have,int dx,int dy)
 	m.frame_num = 0;
 	m.paused = 0;
 
-	reshow = hide_menus();
-
-	wind = window_create(&grd_curscreen->sc_canvas, 0, 0, SWIDTH, SHEIGHT, MovieHandler, &m);
-	if (!wind)
-	{
-		if (reshow)
-			show_menus();
-		return MOVIE_NOT_PLAYED;
-	}
-
 	// Open Movie file.  If it doesn't exist, no movie, just return.
 
 	auto filehndl = PHYSFSRWOPS_openRead(filename);
@@ -399,7 +397,12 @@ int RunMovie(char *filename, int hires_flag, int must_have,int dx,int dy)
 	{
 		if (must_have)
 			con_printf(CON_URGENT, "Can't open movie <%s>: %s", filename, PHYSFS_getLastError());
-		window_close(wind);
+		return MOVIE_NOT_PLAYED;
+	}
+	const auto reshow = hide_menus();
+	const auto wind = window_create(&grd_curscreen->sc_canvas, 0, 0, SWIDTH, SHEIGHT, MovieHandler, &m);
+	if (!wind)
+	{
 		if (reshow)
 			show_menus();
 		return MOVIE_NOT_PLAYED;
@@ -412,8 +415,9 @@ int RunMovie(char *filename, int hires_flag, int must_have,int dx,int dy)
 	set_screen_mode(SCREEN_MOVIE);
 	gr_copy_palette(pal_save, gr_palette);
 	gr_palette_load(gr_palette);
+	(void)hires_flag;
 #else
-	gr_set_mode(SM((hires_flag?640:320),(hires_flag?480:200)));
+	gr_set_mode(hires_flag ? screen_mode{640, 480} : screen_mode{320, 200});
 #endif
 	MVE_sfCallbacks(MovieShowFrame);
 	MVE_palCallbacks(MovieSetPalette);
@@ -649,7 +653,8 @@ static void draw_subtitles(int frame_num)
 	}
 
 	//find y coordinate for first line of subtitles
-	y = grd_curcanv->cv_bitmap.bm_h-((LINE_SPACING)*(MAX_ACTIVE_SUBTITLES+2));
+	const auto &&line_spacing = LINE_SPACING;
+	y = grd_curcanv->cv_bitmap.bm_h - (line_spacing * (MAX_ACTIVE_SUBTITLES + 2));
 
 	//erase old subtitles if necessary
 	if (must_erase) {
@@ -661,7 +666,7 @@ static void draw_subtitles(int frame_num)
 	for (int t=0;t<num_active_subtitles;t++)
 		if (active_subtitles[t] != -1) {
 			gr_string(0x8000,y,Subtitles[active_subtitles[t]].msg);
-			y += LINE_SPACING;
+			y += line_spacing;
 		}
 }
 
@@ -671,7 +676,7 @@ static int init_movie(const char *movielib, char resolution, int required, loade
 	auto r = PHYSFSX_contfile_init(&movie.filename[0], 0);
 	if (!r)
 	{
-		if (required || GameArg.DbgVerbose)
+		if (required || CGameArg.DbgVerbose)
 			con_printf(CON_URGENT, "Can't open movielib <%s>: %s", &movie.filename[0], PHYSFS_getLastError());
 		movie.filename[0] = 0;
 	}

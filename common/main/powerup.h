@@ -23,18 +23,17 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-#ifndef _POWERUP_H
-#define _POWERUP_H
+#pragma once
 
 #include "dxxsconf.h"
 #include "vclip.h"
 #include "fmtcheck.h"
 
 #ifdef __cplusplus
-#include "fwdvalptridx.h"
+#include "fwd-object.h"
 
-enum powerup_type_t
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+enum powerup_type_t : uint8_t
 {
 	POW_EXTRA_LIFE = 0,
 	POW_ENERGY = 1,
@@ -47,9 +46,6 @@ enum powerup_type_t
 
 //	POW_RADAR_ROBOTS = 7,
 //	POW_RADAR_POWERUPS = 8,
-#if defined(DXX_BUILD_DESCENT_I)
-	POW_FULL_MAP = 9,
-#endif
 
 	POW_MISSILE_1 = 10,
 	POW_MISSILE_4 = 11,      // 4-pack MUST follow single missile
@@ -69,9 +65,6 @@ enum powerup_type_t
 	POW_CLOAK = 23,
 	POW_TURBO = 24,
 	POW_INVULNERABILITY = 25,
-#if defined(DXX_BUILD_DESCENT_I)
-	POW_HEADLIGHT = 26,
-#endif
 	POW_MEGAWOW = 27,
 #if defined(DXX_BUILD_DESCENT_II)
 	POW_GAUSS_WEAPON = 28,
@@ -102,7 +95,6 @@ enum powerup_type_t
 #endif
 };
 
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 #if defined(DXX_BUILD_DESCENT_I)
 #define VULCAN_AMMO_MAX             (392*2)
 #define MAX_POWERUP_TYPES			29
@@ -128,9 +120,9 @@ struct powerup_type_info : public prohibit_void_ptr<powerup_type_info>
 
 extern unsigned N_powerup_types;
 extern array<powerup_type_info, MAX_POWERUP_TYPES> Powerup_info;
-#else
-struct powerup_type_info;
-#endif
+
+void powerup_type_info_read(PHYSFS_file *fp, powerup_type_info &pti);
+void powerup_type_info_write(PHYSFS_file *fp, const powerup_type_info &pti);
 
 void draw_powerup(vobjptridx_t obj);
 
@@ -139,6 +131,7 @@ int do_powerup(vobjptridx_t obj);
 
 //process (animate) a powerup for one frame
 void do_powerup_frame(vobjptridx_t obj);
+#endif
 
 // Diminish shields and energy towards max in case they exceeded it.
 extern void diminish_towards_max(void);
@@ -149,9 +142,4 @@ void powerup_basic_str(int redadd, int greenadd, int blueadd, int score, const c
 extern void powerup_basic(int redadd, int greenadd, int blueadd, int score, const char *format, ...) __attribute_format_printf(5, 6);
 #define powerup_basic(A1,A2,A3,A4,F,...)	dxx_call_printf_checked(powerup_basic,powerup_basic_str,(A1,A2,A3,A4),(F),##__VA_ARGS__)
 
-void powerup_type_info_read(PHYSFS_file *fp, powerup_type_info &pti);
-void powerup_type_info_write(PHYSFS_file *fp, const powerup_type_info &pti);
-
 #endif
-
-#endif /* _POWERUP_H */

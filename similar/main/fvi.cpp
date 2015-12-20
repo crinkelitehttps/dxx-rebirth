@@ -81,6 +81,8 @@ static int find_plane_line_intersection(vms_vector &new_pnt,const vms_vector &pl
 
 }
 
+namespace {
+
 struct vec2d {
 	fix i,j;
 };
@@ -97,6 +99,8 @@ struct ij_pair
 	fix vms_vector::*i;
 	fix vms_vector::*j;
 };
+
+}
 
 __attribute_warn_unused_result
 static ij_pair find_largest_normal(vms_vector t)
@@ -242,7 +246,7 @@ static int check_line_to_face(vms_vector &newp,const vms_vector &p0,const vms_ve
 
 		norm = seg->sides[side].normals[facenum];
 
-	const auto v = create_abs_vertex_lists(seg, side);
+	const auto v = create_abs_vertex_lists(seg, s, side);
 	const auto &num_faces = v.first;
 	const auto &vertex_list = v.second;
 
@@ -320,7 +324,7 @@ static int special_check_line_to_face(vms_vector &newp,const vms_vector &p0,cons
 
 	//calc some basic stuff
 
-	const auto v = create_abs_vertex_lists(seg, side);
+	const auto v = create_abs_vertex_lists(seg, s, side);
 	const auto &vertex_list = v.second;
 	auto move_vec = vm_vec_sub(p1,p0);
 
@@ -592,6 +596,8 @@ static vm_distance_squared check_vector_to_object(vms_vector &intp,const vms_vec
 }
 
 
+namespace {
+
 #define MAX_SEGS_VISITED 100
 struct fvi_segment_visit_count_t
 {
@@ -600,6 +606,7 @@ struct fvi_segment_visit_count_t
 	{
 	}
 };
+
 struct fvi_segments_visited_t : public fvi_segment_visit_count_t, public visited_segment_bitarray_t
 {
 };
@@ -613,6 +620,8 @@ int fvi_hit_side;		// what side was hit
 int fvi_hit_side_seg;// what seg the hitside is in
 vms_vector wall_norm;	//ptr to surface normal of hit wall
 segnum_t fvi_hit_seg2;		// what segment the hit point is in
+
+}
 
 static int fvi_sub(vms_vector &intp,segnum_t &ints,const vms_vector &p0,const vcsegptridx_t startseg,const vms_vector &p1,fix rad,objnum_t thisobjnum,const std::pair<const objnum_t *, const objnum_t *> ignore_obj_list,int flags,fvi_info::segment_array_t &seglist,segnum_t entry_seg, fvi_segments_visited_t &visited);
 
@@ -633,9 +642,6 @@ int find_vector_intersection(const fvi_query &fq, fvi_info &hit_data)
 	int hit_type;
 	segnum_t hit_seg2;
 	vms_vector hit_pnt;
-
-	Assert(fq.startseg <= Highest_segment_index && fq.startseg >= 0);
-
 	fvi_hit_seg = segment_none;
 	fvi_hit_side = -1;
 
@@ -645,9 +651,9 @@ int find_vector_intersection(const fvi_query &fq, fvi_info &hit_data)
 	//Assert(check_point_in_seg(p0,startseg,0).centermask==0);	//start point not in seg
 
 	// invalid segnum, so say there is no hit.
-	if(fq.startseg < 0 || fq.startseg > Highest_segment_index)
+	if(fq.startseg > Highest_segment_index)
 	{
-
+		Assert(fq.startseg <= Highest_segment_index);
 		hit_data.hit_type = HIT_BAD_P0;
 		hit_data.hit_pnt = *fq.p0;
 		hit_data.hit_seg = hit_data.hit_side = hit_data.hit_object = 0;
@@ -657,7 +663,7 @@ int find_vector_intersection(const fvi_query &fq, fvi_info &hit_data)
 	}
 
 	// Viewer is not in segment as claimed, so say there is no hit.
-	if(!(get_seg_masks(*fq.p0, fq.startseg, 0, __FILE__, __LINE__).centermask == 0))
+	if(!(get_seg_masks(*fq.p0, vcsegptr(fq.startseg), 0).centermask == 0))
 	{
 
 		hit_data.hit_type = HIT_BAD_P0;
@@ -678,14 +684,14 @@ int find_vector_intersection(const fvi_query &fq, fvi_info &hit_data)
 
 	hit_type = fvi_sub(hit_pnt,hit_seg2,*fq.p0,fq.startseg,*fq.p1,fq.rad,fq.thisobjnum,fq.ignore_obj_list,fq.flags,hit_data.seglist,segment_exit,visited);
 	segnum_t hit_seg;
-	if (hit_seg2 != segment_none && !get_seg_masks(hit_pnt, hit_seg2, 0, __FILE__, __LINE__).centermask)
+	if (hit_seg2 != segment_none && !get_seg_masks(hit_pnt, vcsegptr(hit_seg2), 0).centermask)
 		hit_seg = hit_seg2;
 	else
 		hit_seg = find_point_seg(hit_pnt,fq.startseg);
 
 //MATT: TAKE OUT THIS HACK AND FIX THE BUGS!
 	if (hit_type == HIT_WALL && hit_seg==segment_none)
-		if (fvi_hit_seg2 != segment_none && get_seg_masks(hit_pnt, fvi_hit_seg2, 0, __FILE__, __LINE__).centermask == 0)
+		if (fvi_hit_seg2 != segment_none && get_seg_masks(hit_pnt, vcsegptr(fvi_hit_seg2), 0).centermask == 0)
 			hit_seg = fvi_hit_seg2;
 
 	if (hit_seg == segment_none) {
@@ -791,8 +797,7 @@ static int fvi_sub(vms_vector &intp,segnum_t &ints,const vms_vector &p0,const vc
 	int startmask,endmask;	//mask of faces
 	//@@int sidemask;				//mask of sides - can be on back of face but not side
 	int centermask;			//where the center point is
-	segmasks masks;
-	vms_vector closest_hit_point = ZERO_VECTOR; 	//where we hit
+	vms_vector closest_hit_point{}; 	//where we hit
 	auto closest_d = vm_distance_squared::maximum_value();					//distance to hit point
 	int hit_type=HIT_NONE;							//what sort of hit
 	segnum_t hit_seg=segment_none;
@@ -812,14 +817,23 @@ static int fvi_sub(vms_vector &intp,segnum_t &ints,const vms_vector &p0,const vc
 
 	//first, see if vector hit any objects in this segment
 	if (flags & FQ_CHECK_OBJS)
+	{
+		const auto &collision = CollisionResult[likely(thisobjnum != object_none) ? vcobjptr(thisobjnum)->type : 0];
 		range_for (const auto objnum, objects_in(*seg))
-			if (	!(objnum->flags & OF_SHOULD_BE_DEAD) &&
-				 	!(thisobjnum == objnum ) &&
-				 	!obj_in_list(objnum,ignore_obj_list) &&
-				 	!laser_are_related( objnum, thisobjnum ) &&
-				 	!((thisobjnum != object_none)	&&
-				  		(CollisionResult[Objects[thisobjnum].type][objnum->type] == RESULT_NOTHING ) &&
-			 	 		(CollisionResult[objnum->type][Objects[thisobjnum].type] == RESULT_NOTHING ))) {
+		{
+			if (objnum->flags & OF_SHOULD_BE_DEAD)
+				continue;
+			if (thisobjnum != object_none)
+			{
+				if (thisobjnum == objnum)
+					continue;
+				if (laser_are_related(objnum, thisobjnum))
+					continue;
+				if (collision[objnum->type] == RESULT_NOTHING)
+					continue;
+			}
+			if (obj_in_list(objnum, ignore_obj_list))
+				continue;
 				int fudged_rad = rad;
 
 #if defined(DXX_BUILD_DESCENT_II)
@@ -830,25 +844,26 @@ static int fvi_sub(vms_vector &intp,segnum_t &ints,const vms_vector &p0,const vc
 #endif
 
 				//	If this is a robot:robot collision, only do it if both of them have attack_type != 0 (eg, green guy)
-				if (Objects[thisobjnum].type == OBJ_ROBOT)
+				const auto &&thisobjp = vcobjptr(thisobjnum);
+				if (thisobjp->type == OBJ_ROBOT)
 					if (objnum->type == OBJ_ROBOT)
 #if defined(DXX_BUILD_DESCENT_I)
-						if (!(Robot_info[get_robot_id(objnum)].attack_type && Robot_info[get_robot_id(&Objects[thisobjnum])].attack_type))
+						if (!(Robot_info[get_robot_id(objnum)].attack_type && Robot_info[get_robot_id(thisobjp)].attack_type))
 #endif
 						// -- MK: 11/18/95, 4claws glomming together...this is easy.  -- if (!(Robot_info[Objects[objnum].id].attack_type && Robot_info[Objects[thisobjnum].id].attack_type))
 							continue;
 
-				if (Objects[thisobjnum].type == OBJ_ROBOT && Robot_info[get_robot_id(&Objects[thisobjnum])].attack_type)
+				if (thisobjp->type == OBJ_ROBOT && Robot_info[get_robot_id(thisobjp)].attack_type)
 					fudged_rad = (rad*3)/4;
 
 				//if obj is player, and bumping into other player or a weapon of another coop player, reduce radius
-				if (Objects[thisobjnum].type == OBJ_PLAYER &&
+				if (thisobjp->type == OBJ_PLAYER &&
 						((objnum->type == OBJ_PLAYER) ||
 						((Game_mode&GM_MULTI_COOP) &&  objnum->type == OBJ_WEAPON && objnum->ctype.laser_info.parent_type == OBJ_PLAYER)))
 					fudged_rad = rad/2;	//(rad*3)/4;
 
 				vms_vector hit_point;
-				const auto d = check_vector_to_object(hit_point,p0,p1,fudged_rad,objnum,&Objects[thisobjnum]);
+				const auto &&d = check_vector_to_object(hit_point,p0,p1,fudged_rad,objnum, thisobjp);
 
 				if (d)          //we have intersection
 					if (d < closest_d) {
@@ -858,16 +873,17 @@ static int fvi_sub(vms_vector &intp,segnum_t &ints,const vms_vector &p0,const vc
 						closest_hit_point = hit_point;
 						hit_type=HIT_OBJECT;
 					}
-			}
+		}
+	}
 
-	if (	(thisobjnum != object_none ) && (CollisionResult[Objects[thisobjnum].type][OBJ_WALL] == RESULT_NOTHING ) )
+	if (	(thisobjnum != object_none ) && (CollisionResult[vcobjptr(thisobjnum)->type][OBJ_WALL] == RESULT_NOTHING ) )
 		rad = 0;		//HACK - ignore when edges hit walls
 
 	//now, check segment walls
 
-	startmask = get_seg_masks(p0, startseg, rad, __FILE__, __LINE__).facemask;
+	startmask = get_seg_masks(p0, startseg, rad).facemask;
 
-	masks = get_seg_masks(p1, startseg, rad, __FILE__, __LINE__);    //on back of which faces?
+	const auto &&masks = get_seg_masks(p1, startseg, rad);    //on back of which faces?
 	endmask = masks.facemask;
 	//@@sidemask = masks.sidemask;
 	centermask = masks.centermask;
@@ -919,8 +935,9 @@ static int fvi_sub(vms_vector &intp,segnum_t &ints,const vms_vector &p0,const vc
 
 						//if what we have hit is a door, check the adjoining seg
 
-						if ( (thisobjnum == Players[Player_num].objnum) && (cheats.ghostphysics) )	{
-							if (seg->children[side] >= 0 )
+						if (thisobjnum == get_local_player().objnum && cheats.ghostphysics)
+						{
+							if (IS_CHILD(seg->children[side]))
  								wid_flag |= WID_FLY_FLAG;
 						}
 
@@ -999,7 +1016,7 @@ static int fvi_sub(vms_vector &intp,segnum_t &ints,const vms_vector &p0,const vc
 										wall_norm = seg->sides[side].normals[face];	
 									
 	
-										if (get_seg_masks(hit_point, startseg, rad, __FILE__, __LINE__).centermask == 0)
+										if (get_seg_masks(hit_point, startseg, rad).centermask == 0)
 										hit_seg = startseg;             //hit in this segment
 									else
 										fvi_hit_seg2 = startseg;
@@ -1101,16 +1118,13 @@ fvi_hitpoint find_hitpoint_uv(const vms_vector &pnt, const vcsegptridx_t seg, co
 
 	//when do I return 0 & 1 for non-transparent walls?
 
-	const auto vx = create_abs_vertex_lists(seg, sidenum);
-	const auto &vertex_list = vx.second;
-	const auto vn = create_all_vertnum_lists(seg, sidenum);
-	const auto &vertnum_list = vn.second;
+	const auto &&vn = create_all_vertnum_lists(seg, side, sidenum);
 
 	//now the hard work.
 
 	//1. find what plane to project this wall onto to make it a 2d case
 
-	vms_vector normal_array = side->normals[facenum];
+	const auto &normal_array = side->normals[facenum];
 	auto fmax = [](const vms_vector &v, fix vms_vector::*a, fix vms_vector::*b) {
 		return abs(v.*a) > abs(v.*b) ? a : b;
 	};
@@ -1121,13 +1135,13 @@ fvi_hitpoint find_hitpoint_uv(const vms_vector &pnt, const vcsegptridx_t seg, co
 	//2. compute u,v of intersection point
 
 	//vec from 1 -> 0
-	const vms_vector &vf1 = Vertices[vertex_list[facenum*3+1]];
+	const vms_vector &vf1 = Vertices[vn[facenum*3+1].vertex];
 	const vec2d p1{vf1.*ii, vf1.*jj};
 
-	const vms_vector &vf0 = Vertices[vertex_list[facenum*3+0]];
+	const vms_vector &vf0 = Vertices[vn[facenum*3+0].vertex];
 	const vec2d vec0{vf0.*ii - p1.i, vf0.*jj - p1.j};
 	//vec from 1 -> 2
-	const vms_vector &vf2 = Vertices[vertex_list[facenum*3+2]];
+	const vms_vector &vf2 = Vertices[vn[facenum*3+2].vertex];
 	const vec2d vec1{vf2.*ii - p1.i, vf2.*jj - p1.j};
 
 	//vec from 1 -> checkpoint
@@ -1148,7 +1162,7 @@ fvi_hitpoint find_hitpoint_uv(const vms_vector &pnt, const vcsegptridx_t seg, co
 
 	array<uvl, 3> uvls;
 	for (i=0;i<3;i++)
-		uvls[i] = side->uvls[vertnum_list[facenum*3+i]];
+		uvls[i] = side->uvls[vn[facenum*3+i].vertnum];
 
 	auto p = [&uvls, k0, k1](fix uvl::*p) {
 		return uvls[1].*p + fixmul(k0,uvls[0].*p - uvls[1].*p) + fixmul(k1,uvls[2].*p - uvls[1].*p);
@@ -1200,7 +1214,7 @@ static int sphere_intersects_wall(const vms_vector &pnt, const vcsegptridx_t seg
 	visited[segnum] = true;
 	++visited.count;
 
-	facemask = get_seg_masks(pnt, segnum, rad, __FILE__, __LINE__).facemask;
+	facemask = get_seg_masks(pnt, segnum, rad).facemask;
 
 	const auto &seg = segnum;
 
@@ -1218,11 +1232,12 @@ static int sphere_intersects_wall(const vms_vector &pnt, const vcsegptridx_t seg
 					int face_hit_type;      //in what way did we hit the face?
 
 					//did we go through this wall/door?
-					const auto v = create_abs_vertex_lists(seg, side);
+					const auto *sidep = &seg->sides[side];
+					const auto v = create_abs_vertex_lists(seg, sidep, side);
 					const auto &num_faces = v.first;
 					const auto &vertex_list = v.second;
 
-					face_hit_type = check_sphere_to_face( pnt,&seg->sides[side],
+					face_hit_type = check_sphere_to_face(pnt, sidep,
 										face,((num_faces==1)?4:3),rad,vertex_list);
 
 					if (face_hit_type) {            //through this wall/door
@@ -1253,7 +1268,7 @@ static int sphere_intersects_wall(const vms_vector &pnt, const vcsegptridx_t seg
 }
 
 //Returns true if the object is through any walls
-int object_intersects_wall(const vobjptr_t objp)
+int object_intersects_wall(const vcobjptr_t objp)
 {
 	fvi_segments_visited_t visited;
 	return sphere_intersects_wall(objp->pos, objp->segnum, objp->size, nullptr, visited);

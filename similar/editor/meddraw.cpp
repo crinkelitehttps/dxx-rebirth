@@ -50,13 +50,16 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "textures.h"
 #include "screens.h"
 #include "texmap.h"
-#include "ogl_init.h"
 #include "object.h"
 #include "fuelcen.h"
 #include "meddraw.h"
 #include "compiler-range_for.h"
 #include "highest_valid.h"
 #include "segiter.h"
+
+#ifdef OGL
+#include "ogl_init.h"
+#endif
 
 using std::min;
 
@@ -106,9 +109,8 @@ static void draw_segment(const vcsegptr_t seg)
 		return;
 
 	auto &svp = seg->verts;
-	g3s_codes cc=rotate_list(svp);
-
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(svp).uand)
+	{		//all off screen?
 		int i;
 
 		for (i=0;i<4;i++) draw_line(svp[i],svp[i+4]);
@@ -122,16 +124,14 @@ static void draw_segment(const vcsegptr_t seg)
 		draw_line(svp[0+4],svp[3+4]);
 
 	}
-
 }
 
 //for looking for segment under a mouse click
 static void check_segment(const vsegptridx_t seg)
 {
 	auto &svp = seg->verts;
-	g3s_codes cc=rotate_list(svp);
-
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(svp).uand)
+	{		//all off screen?
 		gr_setcolor(0);
 #ifdef OGL
 		g3_end_frame();
@@ -167,9 +167,8 @@ static void check_segment(const vsegptridx_t seg)
 static void draw_seg_side(const vcsegptr_t seg,int side)
 {
 	auto &svp = seg->verts;
-	g3s_codes cc=rotate_list(svp);
-
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(svp).uand)
+	{		//all off screen?
 		int i;
 
 		for (i=0;i<3;i++)
@@ -183,9 +182,7 @@ static void draw_seg_side(const vcsegptr_t seg,int side)
 static void draw_side_edge(const vcsegptr_t seg,int side,int edge)
 {
 	auto &svp = seg->verts;
-	g3s_codes cc=rotate_list(svp);
-
-	if (! cc.uand)		//on screen?
+	if (!rotate_list(svp).uand)		//on screen?
 		draw_line(svp[Side_to_verts[side][edge]],svp[Side_to_verts[side][(edge+1)%4]]);
 }
 
@@ -210,6 +207,8 @@ const
 #endif
 array<color_t, 3> edge_colors{{54, 59, 64}};
 
+namespace {
+
 struct seg_edge
 {
 	union {
@@ -220,9 +219,10 @@ struct seg_edge
 	ubyte		face_count, backface_count;
 };
 
-seg_edge edge_list[MAX_EDGES];
+}
 
-int	used_list[MAX_EDGES];	//which entries in edge_list have been used
+static array<seg_edge, MAX_EDGES> edge_list;
+static array<int, MAX_EDGES> used_list;	//which entries in edge_list have been used
 int n_used;
 
 int edge_list_size;		//set each frame
@@ -338,7 +338,7 @@ static void add_edge(int v0,int v1,ubyte type)
 		e->v.n.v0 = v0;
 		e->v.n.v1 = v1;
 		e->type = type;
-		used_list[n_used] = e-edge_list;
+		used_list[n_used] = e - edge_list.begin();
 		if (type == ET_FACING)
 			edge_list[used_list[n_used]].face_count++;
 		else if (type == ET_NOTFACING)
@@ -358,9 +358,8 @@ static void add_edge(int v0,int v1,ubyte type)
 static void add_edges(const vcsegptridx_t seg)
 {
 	auto &svp = seg->verts;
-	g3s_codes cc=rotate_list(svp);
-
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(svp).uand)
+	{		//all off screen?
 		int	i,sn,fn,vn;
 		int	flag;
 		ubyte	edge_flags[N_EDGES_PER_SEGMENT];
@@ -371,7 +370,7 @@ static void add_edges(const vcsegptridx_t seg)
 		for (sn=0;sn<MAX_SIDES_PER_SEGMENT;sn++) {
 			auto sidep = &seg->sides[sn];
 			int	num_vertices;
-			const auto v = create_all_vertex_lists(seg, sn);
+			const auto v = create_all_vertex_lists(seg, sidep, sn);
 			const auto &num_faces = v.first;
 			const auto &vertex_list = v.second;
 			if (num_faces == 1)
@@ -417,9 +416,8 @@ static void add_edges(const vcsegptridx_t seg)
 static void draw_trigger_side(const vcsegptr_t seg,int side)
 {
 	auto &svp = seg->verts;
-	g3s_codes cc=rotate_list(svp);
-
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(svp).uand)
+	{		//all off screen?
 		// Draw diagonals
 		draw_line(svp[Side_to_verts[side][0]],svp[Side_to_verts[side][2]]);
 	}
@@ -429,13 +427,11 @@ static void draw_trigger_side(const vcsegptr_t seg,int side)
 static void draw_wall_side(const vcsegptr_t seg,int side)
 {
 	auto &svp = seg->verts;
-	g3s_codes cc=rotate_list(svp);
-
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(svp).uand)
+	{		//all off screen?
 		// Draw diagonals
 		draw_line(svp[Side_to_verts[side][0]],svp[Side_to_verts[side][2]]);
 		draw_line(svp[Side_to_verts[side][1]],svp[Side_to_verts[side][3]]);
-
 	}
 }
 
@@ -551,7 +547,7 @@ static void draw_mine(const vsegptridx_t mine_ptr,int depth)
 // -----------------------------------------------------------------------------
 //	Draw all segments, ignoring connectivity.
 //	A segment is drawn if its segnum != -1.
-void draw_mine_all(segment_array_t &sp, int automap_flag)
+static void draw_mine_all(int automap_flag)
 {
 	int	i;
 
@@ -567,17 +563,21 @@ void draw_mine_all(segment_array_t &sp, int automap_flag)
 	n_used = 0;
 
 	range_for (const auto s, highest_valid(Segments))
-		if (sp[s].segnum != segment_none) {
+	{
+		const auto &&segp = vsegptridx(s);
+		if (segp->segnum != segment_none)
+		{
 			for (i=0; i<MAX_SIDES_PER_SEGMENT; i++)
-				if (sp[s].sides[i].wall_num != wall_none)
-					draw_special_wall(&sp[s], i);
+				if (segp->sides[i].wall_num != wall_none)
+					draw_special_wall(segp, i);
 			if (Search_mode)
-				check_segment(&sp[s]);
+				check_segment(segp);
 			else {
-				add_edges(&sp[s]);
-				draw_seg_objects(&sp[s]);
+				add_edges(segp);
+				draw_seg_objects(segp);
 			}
 		}
+	}
 
 	draw_mine_edges(automap_flag);
 
@@ -624,25 +624,28 @@ static void draw_special_segments(void)
 
 	// Highlight matcens, fuelcens, etc.
 	range_for (const auto seg, highest_valid(Segments))
-		if (Segments[seg].segnum != segment_none)
-			switch(Segments[seg].special)
+	{
+		const auto &&segp = vcsegptr(static_cast<segnum_t>(seg));
+		if (segp->segnum != segment_none)
+			switch(segp->special)
 			{
 			case SEGMENT_IS_FUELCEN:
 				color = BM_XRGB( 29, 27, 13 );
 				gr_setcolor(color);
-				draw_segment(&Segments[seg]);
+				draw_segment(segp);
 				break;
 			case SEGMENT_IS_CONTROLCEN:
 				color = BM_XRGB( 29, 0, 0 );
 				gr_setcolor(color);
-				draw_segment(&Segments[seg]);
+				draw_segment(segp);
 				break;
 			case SEGMENT_IS_ROBOTMAKER:
 				color = BM_XRGB( 29, 0, 31 );
 				gr_setcolor(color);
-				draw_segment(&Segments[seg]);
+				draw_segment(segp);
 				break;
 			}
+	}
 }
 		
 
@@ -768,7 +771,7 @@ void draw_world(grs_canvas *screen_canvas,editor_view *v,const vsegptridx_t mine
 	// Draw all segments or only connected segments.
 	// We might want to draw all segments if we have broken the mine into pieces.
 	if (Draw_all_segments)
-		draw_mine_all(Segments, Automap_test);
+		draw_mine_all(Automap_test);
 	else
 		draw_mine(mine_ptr,depth);
 
@@ -877,7 +880,7 @@ void find_segments(short x,short y,grs_canvas *screen_canvas,editor_view *v,cons
 	Search_x = x; Search_y = y;
 
 	if (Draw_all_segments)
-		draw_mine_all(Segments, 0);
+		draw_mine_all(0);
 	else
 		draw_mine(mine_ptr,depth);
 

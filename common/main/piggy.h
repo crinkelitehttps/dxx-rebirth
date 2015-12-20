@@ -23,19 +23,23 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _PIGGY_H
-#define _PIGGY_H
+#pragma once
 
 #include <physfs.h>
 #include "sounds.h"
-#include "hash.h"
 #include "inferno.h"
 #include "gr.h"
 #include "fwd-partial_range.h"
 
 #ifdef __cplusplus
+#include "dxxsconf.h"
+#include "compiler-array.h"
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 struct digi_sound;
+}
+#endif
 
 #define D1_SHARE_BIG_PIGSIZE    5092871 // v1.0 - 1.4 before RLE compression
 #define D1_SHARE_10_PIGSIZE     2529454 // v1.0 - 1.2
@@ -84,6 +88,7 @@ extern grs_bitmap bogus_bitmap;
 #endif
 extern array<uint8_t, 64 * 64> bogus_data;
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 int properties_init();
 void piggy_close();
 bitmap_index piggy_register_bitmap( grs_bitmap * bmp, const char * name, int in_file );
@@ -110,28 +115,14 @@ extern void piggy_bitmap_page_in( bitmap_index bmp );
 extern void piggy_bitmap_page_out_all();
 extern int piggy_page_flushed;
 
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
-extern digi_sound GameSounds[MAX_SOUND_FILES];
-extern grs_bitmap GameBitmaps[MAX_BITMAP_FILES];
-/* Make GNUC use static inline function as #define with backslash continuations causes problems with dos linefeeds */
-# ifdef __GNUC__
+extern array<digi_sound, MAX_SOUND_FILES> GameSounds;
+extern array<grs_bitmap, MAX_BITMAP_FILES> GameBitmaps;
 #  define  PIGGY_PAGE_IN(bmp) _piggy_page_in(bmp)
 static inline void _piggy_page_in(bitmap_index bmp) {
     if ( GameBitmaps[(bmp).index].bm_flags & BM_FLAG_PAGED_OUT ) {
         piggy_bitmap_page_in( bmp );
     }
 }
-
-# else /* __GNUC__ */
-
-	#define PIGGY_PAGE_IN(bmp)	\
-do {					\
-	if ( GameBitmaps[(bmp).index].bm_flags & BM_FLAG_PAGED_OUT )	{\
-		piggy_bitmap_page_in( bmp ); \
-	}				\
-} while(0)
-# endif /* __GNUC__ */
-#endif
 
 #if defined(DXX_BUILD_DESCENT_I)
 void piggy_read_sounds(int pc_shareware);
@@ -168,18 +159,18 @@ extern int Num_bitmap_files;
 extern int Num_sound_files;
 extern ubyte bogus_bitmap_initialized;
 extern digi_sound bogus_sound;
+#endif
 #define space_tab " \t"
 #define equal_space " \t="
 #if defined(DXX_BUILD_DESCENT_I)
+#include "hash.h"
 extern hashtable AllBitmapsNames;
 extern hashtable AllDigiSndNames;
 #elif defined(DXX_BUILD_DESCENT_II)
-extern BitmapFile AllBitmaps[ MAX_BITMAP_FILES ];
+extern array<BitmapFile, MAX_BITMAP_FILES> AllBitmaps;
 #endif
 void piggy_init_pigfile(const char *filename);
 int read_hamfile();
 void swap_0_255(grs_bitmap *bmp);
 
 #endif
-
-#endif //_PIGGY_H

@@ -18,6 +18,9 @@
 #include "window.h"
 #include "u_mem.h"
 #include "dxxerror.h"
+#include "event.h"
+
+namespace dcx {
 
 struct window
 {
@@ -33,7 +36,7 @@ struct window
 static window *FrontWindow = NULL;
 static window *FirstWindow = NULL;
 
-window *window_create(grs_canvas *src, int x, int y, int w, int h, window_subfunction_t<void>::type event_callback, void *data, const void *createdata)
+window *window_create(grs_canvas *src, int x, int y, int w, int h, window_subfunction<void> event_callback, void *data, const void *createdata)
 {
 	window *prev = window_get_front();
 	d_create_event event;
@@ -188,7 +191,8 @@ grs_canvas &window_get_canvas(window &wind)
 	return wind.w_canv;
 }
 
-extern void window_update_canvases(void)
+#ifndef OGL
+void window_update_canvases()
 {
 	window *wind;
 	
@@ -200,6 +204,7 @@ extern void window_update_canvases(void)
 							wind->w_canv.cv_bitmap.bm_w,
 							wind->w_canv.cv_bitmap.bm_h);
 }
+#endif
 
 window_event_result window_send_event(window &wind, const d_event &event)
 {
@@ -217,4 +222,6 @@ void window_set_modal(window &wind, int modal)
 int window_is_modal(window &wind)
 {
 	return wind.w_modal;
+}
+
 }

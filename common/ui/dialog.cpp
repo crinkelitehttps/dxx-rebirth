@@ -40,6 +40,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "compiler-make_unique.h"
 
+namespace dcx {
+
 #define D_X             (dlg->x)
 #define D_Y             (dlg->y)
 #define D_WIDTH         (dlg->width)
@@ -54,83 +56,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #endif
 
 #define BORDER_WIDTH 8
-
-static unsigned int FrameCount = 0;
-unsigned int ui_event_counter = 0;
-unsigned int ui_number_of_events = 0;
-static UI_EVENT *   EventBuffer = NULL;
-static int          Record = 0;
-static int          RecordFlags = 0;
-
-static unsigned char SavedState[256];
-
-static int PlaybackSpeed = 1;
-
-// 1=1x faster, 2=2x faster, etc
-void ui_set_playback_speed( int speed )
-{
-	PlaybackSpeed = speed;
-}
-
-int ui_record_events( int NumberOfEvents, UI_EVENT * buffer, int Flags )
-{
-	if ( Record > 0 || buffer==NULL ) return 1;
-
-	RecordFlags = Flags;
-	EventBuffer = buffer;
-	ui_event_counter = 0;
-	FrameCount = 0;
-	ui_number_of_events = NumberOfEvents;
-	Record = 1;
-	return 0;
-}
-
-int ui_play_events_realtime( int NumberOfEvents, UI_EVENT * buffer )
-{	int i;
-	if ( buffer == NULL ) return 1;
-
-	EventBuffer = buffer;
-	FrameCount = 0;
-	ui_event_counter = 0;
-	ui_number_of_events = NumberOfEvents;
-	Record = 2;
-	_disable();
-	keyd_last_released= 0;
-	keyd_last_pressed= 0;
-	for (i=0; i<256; i++ )
-		SavedState[i] = keyd_pressed[i];
-	_enable();
-	key_flush();
-	return 0;
-}
-
-int ui_play_events_fast( int NumberOfEvents, UI_EVENT * buffer )
-{
-	if ( buffer == NULL ) return 1;
-
-	EventBuffer = buffer;
-	FrameCount = 0;
-	ui_event_counter = 0;
-	ui_number_of_events = NumberOfEvents;
-	Record = 3;
-	_disable();
-	keyd_last_released= 0;
-	keyd_last_pressed= 0;
-
-	for (int i=0; i<256; i++ )
-	{
-		SavedState[i] = keyd_pressed[i];
-	}
-	_enable();
-	key_flush();
-	return 0;
-}
-
-// Returns:  0=Normal, 1=Recording, 2=Playback normal, 3=Playback fast
-int ui_recorder_status()
-{
-	return Record;
-}
 
 static void ui_dialog_draw(UI_DIALOG *dlg)
 {
@@ -218,14 +143,13 @@ static window_event_result ui_dialog_handler(window *wind,const d_event &event, 
 	}
 }
 
-template <>
-UI_DIALOG * ui_create_dialog( short x, short y, short w, short h, enum dialog_flags flags, ui_subfunction_t<void>::type callback, void *userdata, const void *createdata)
+UI_DIALOG *untyped_ui_create_dialog( short x, short y, short w, short h, enum dialog_flags flags, ui_subfunction_t<void>::type callback, void *userdata, const void *createdata)
 {
 	int sw, sh, req_w, req_h;
 
 	auto dlg = make_unique<UI_DIALOG>();
-	sw = grd_curscreen->sc_w;
-	sh = grd_curscreen->sc_h;
+	sw = grd_curscreen->get_screen_width();
+	sh = grd_curscreen->get_screen_height();
 
 	//mouse_set_limits(0, 0, sw - 1, sh - 1);
 
@@ -567,4 +491,6 @@ void ui_dputs_at( UI_DIALOG * dlg, short x, short y, const char * buffer )
 {
 	ui_dialog_set_current_canvas( dlg );
 	gr_string( x, y, buffer );
+}
+
 }

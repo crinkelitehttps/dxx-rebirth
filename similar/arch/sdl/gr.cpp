@@ -10,6 +10,7 @@
  *
  */
 
+#include <algorithm>
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
@@ -18,6 +19,8 @@
 #include "gr.h"
 #include "grdef.h"
 #include "palette.h"
+#include "game.h"
+#include "console.h"
 #include "u_mem.h"
 #include "dxxerror.h"
 #include "vers_id.h"
@@ -28,9 +31,13 @@
 
 #include "compiler-make_unique.h"
 
-int sdl_video_flags = SDL_SWSURFACE | SDL_HWPALETTE | SDL_DOUBLEBUF;
+using std::min;
+
+namespace dcx {
+
+static int sdl_video_flags = SDL_SWSURFACE | SDL_HWPALETTE | SDL_DOUBLEBUF;
 SDL_Surface *screen,*canvas;
-int gr_installed = 0;
+static int gr_installed;
 
 void gr_flip()
 {
@@ -44,15 +51,8 @@ void gr_flip()
 	SDL_Flip(screen);
 }
 
-// Set the buffer to draw to. 0 is front, 1 is back
-// With SDL, can't use it without resetting the video mode
-void gr_set_draw_buffer(int buf)
-{
-	buf = buf;
-}
-
 // returns possible (fullscreen) resolutions if any.
-int gr_list_modes( array<uint32_t, 50> &gsmodes )
+uint_fast32_t gr_list_modes(array<screen_mode, 50> &gsmodes)
 {
 	SDL_Rect** modes;
 	int modesnum = 0;
@@ -77,55 +77,45 @@ int gr_list_modes( array<uint32_t, 50> &gsmodes )
 			if (modes[i]->w > 0xFFF0 || modes[i]->h > 0xFFF0 // resolutions saved in 32bits. so skip bigger ones (unrealistic in 2010) (kreatordxx - made 0xFFF0 to kill warning)
 				|| modes[i]->w < 320 || modes[i]->h < 200) // also skip everything smaller than 320x200
 				continue;
-			gsmodes[modesnum] = SM(modes[i]->w,modes[i]->h);
+			gsmodes[modesnum].width = modes[i]->w;
+			gsmodes[modesnum].height = modes[i]->h;
 			modesnum++;
-			if (modesnum >= 50) // that really seems to be enough big boy.
+			if (modesnum >= gsmodes.size()) // that really seems to be enough big boy.
 				break;
 		}
 		return modesnum;
 	}
 }
 
-int gr_check_mode(u_int32_t mode)
-{
-	unsigned int w, h;
-
-	w=SM_W(mode);
-	h=SM_H(mode);
-
-	return SDL_VideoModeOK(w,h,GameArg.DbgBpp,sdl_video_flags);
 }
 
-int gr_set_mode(u_int32_t mode)
+namespace dsx {
+
+int gr_set_mode(screen_mode mode)
 {
-	unsigned int w, h;
-
-	if (mode<=0)
-		return 0;
-
-	w=SM_W(mode);
-	h=SM_H(mode);
 	screen=NULL;
 
 	SDL_WM_SetCaption(DESCENT_VERSION, DXX_SDL_WINDOW_CAPTION);
 	SDL_WM_SetIcon( SDL_LoadBMP( DXX_SDL_WINDOW_ICON_BITMAP ), NULL );
 
-	if(SDL_VideoModeOK(w,h,GameArg.DbgBpp,sdl_video_flags))
+	const auto sdl_video_flags = ::sdl_video_flags;
+	const auto DbgBpp = CGameArg.DbgBpp;
+	if(SDL_VideoModeOK(SM_W(mode), SM_H(mode), DbgBpp, sdl_video_flags))
 	{
-		screen=SDL_SetVideoMode(w, h, GameArg.DbgBpp, sdl_video_flags);
 	}
 	else
 	{
-		con_printf(CON_URGENT,"Cannot set %ix%i. Fallback to 640x480",w,h);
-		w=640;
-		h=480;
-		Game_screen_mode=mode=SM(w,h);
-		screen=SDL_SetVideoMode(w, h, GameArg.DbgBpp, sdl_video_flags);
+		con_printf(CON_URGENT,"Cannot set %hux%hu. Fallback to 640x480", SM_W(mode), SM_H(mode));
+		mode.width = 640;
+		mode.height = 480;
+		Game_screen_mode = mode;
 	}
+	const unsigned w = SM_W(mode), h = SM_H(mode);
+	screen = SDL_SetVideoMode(w, h, DbgBpp, sdl_video_flags);
 
 	if (screen == NULL)
 	{
-		Error("Could not set %dx%dx%d video mode\n",w,h,GameArg.DbgBpp);
+		Error("Could not set %dx%dx%d video mode\n", w, h, DbgBpp);
 		exit(1);
 	}
 
@@ -137,10 +127,8 @@ int gr_set_mode(u_int32_t mode)
 	}
 
 	*grd_curscreen = {};
-	grd_curscreen->sc_mode = mode;
-	grd_curscreen->sc_w = w;
-	grd_curscreen->sc_h = h;
-	grd_curscreen->sc_aspect = fixdiv(grd_curscreen->sc_w*GameCfg.AspectX,grd_curscreen->sc_h*GameCfg.AspectY);
+	grd_curscreen->set_screen_width_height(w, h);
+	grd_curscreen->sc_aspect = fixdiv(grd_curscreen->get_screen_width() * GameCfg.AspectX, grd_curscreen->get_screen_height() * GameCfg.AspectY);
 	gr_init_canvas(grd_curscreen->sc_canvas, reinterpret_cast<unsigned char *>(canvas->pixels), BM_LINEAR, w, h);
 	window_update_canvases();
 	gr_set_current_canvas(NULL);
@@ -149,34 +137,34 @@ int gr_set_mode(u_int32_t mode)
 	gamefont_choose_game_font(w,h);
 	gr_palette_load(gr_palette);
 	gr_remap_color_fonts();
-	gr_remap_mono_fonts();
 
 	return 0;
 }
+
+}
+
+namespace dcx {
 
 int gr_check_fullscreen(void)
 {
 	return (sdl_video_flags & SDL_FULLSCREEN)?1:0;
 }
 
-int gr_toggle_fullscreen(void)
+void gr_toggle_fullscreen()
 {
+	const auto sdl_video_flags = (::sdl_video_flags ^= SDL_FULLSCREEN);
+	const int WindowMode = !(sdl_video_flags & SDL_FULLSCREEN);
+	CGameCfg.WindowMode = WindowMode;
 	gr_remap_color_fonts();
-	gr_remap_mono_fonts();
-	sdl_video_flags^=SDL_FULLSCREEN;
 	SDL_WM_ToggleFullScreen(screen);
-	GameCfg.WindowMode = (sdl_video_flags & SDL_FULLSCREEN)?0:1;
-	return (sdl_video_flags & SDL_FULLSCREEN)?1:0;
 }
 
-void gr_set_attributes(void)
-{
 }
 
-int gr_init(int mode)
-{
-	int retcode;
+namespace dsx {
 
+int gr_init()
+{
 	// Only do this function once!
 	if (gr_installed==1)
 		return -1;
@@ -188,7 +176,7 @@ int gr_init(int mode)
 
 	grd_curscreen = make_unique<grs_screen, grs_screen>({});
 
-	if (!GameCfg.WindowMode && !GameArg.SysWindow)
+	if (!CGameCfg.WindowMode && !GameArg.SysWindow)
 		sdl_video_flags|=SDL_FULLSCREEN;
 
 	if (GameArg.SysNoBorders)
@@ -201,9 +189,6 @@ int gr_init(int mode)
 		sdl_video_flags|=SDL_ASYNCBLIT;
 
 	// Set the mode.
-	if ((retcode=gr_set_mode(mode)))
-		return retcode;
-
 	grd_curscreen->sc_canvas.cv_color = 0;
 	grd_curscreen->sc_canvas.cv_fade_level = GR_FADE_OFF;
 	grd_curscreen->sc_canvas.cv_blend_func = GR_BLEND_NORMAL;
@@ -229,6 +214,10 @@ void gr_close()
 	}
 }
 
+}
+
+namespace dcx {
+
 // Palette functions follow.
 static int last_r=0, last_g=0, last_b=0;
 
@@ -237,7 +226,7 @@ void gr_palette_step_up( int r, int g, int b )
 	palette_array_t &p = gr_palette;
 	int temp;
 	SDL_Palette *palette;
-	SDL_Color colors[256];
+	array<SDL_Color, 256> colors;
 
 	if ( (r==last_r) && (g==last_g) && (b==last_b) )
 		return;
@@ -278,18 +267,18 @@ void gr_palette_step_up( int r, int g, int b )
 
 		colors[i].b = temp * 4;
 	}
-
-	SDL_SetColors(canvas, colors, 0, 256);
+	SDL_SetColors(canvas, colors.data(), 0, colors.size());
 }
 
-#undef min
-static inline int min(int x, int y) { return x < y ? x : y; }
+}
+
+namespace dsx {
 
 void gr_palette_load( palette_array_t &pal )
 {
 	SDL_Palette *palette;
-	SDL_Color colors[256];
-	ubyte gamma[64];
+	array<SDL_Color, 256> colors;
+	array<uint8_t, 64> gamma;
 
 	if (pal != gr_current_pal)
 		SDL_FillRect(canvas, NULL, SDL_MapRGB(canvas->format, 0, 0, 0));
@@ -318,10 +307,11 @@ void gr_palette_load( palette_array_t &pal )
 		i++;
 	}
 
-	SDL_SetColors(canvas, colors, 0, 256);
+	SDL_SetColors(canvas, colors.data(), 0, colors.size());
 	init_computed_colors();
 	gr_remap_color_fonts();
-	gr_remap_mono_fonts();
+}
+
 }
 
 void gr_palette_read(palette_array_t &pal)

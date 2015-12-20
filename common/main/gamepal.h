@@ -23,10 +23,14 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _GAMEPAL_H
-#define _GAMEPAL_H
+#pragma once
 
 #ifdef __cplusplus
+
+namespace dcx {
+template <std::size_t>
+struct PHYSFSX_gets_line_t;
+}
 
 #if defined(DXX_BUILD_DESCENT_I)
 #define MENU_PALETTE	""	// never used
@@ -38,11 +42,11 @@ static inline int load_palette(const char *name, int used_for_level, int no_chan
 	return 1;
 }
 #elif defined(DXX_BUILD_DESCENT_II)
+#include "inferno.h"
+
+namespace dsx {
 #define D2_DEFAULT_PALETTE "default.256"
 #define MENU_PALETTE    "default.256"
-
-template <std::size_t>
-struct PHYSFSX_gets_line_t;
 
 extern char last_palette_loaded[FILENAME_LEN];
 extern PHYSFSX_gets_line_t<FILENAME_LEN> Current_level_palette;
@@ -53,8 +57,7 @@ extern char last_palette_loaded_pig[FILENAME_LEN];
 // if no_change_screen is set, the current screen does not get
 // remapped, and the hardware palette does not get changed
 int load_palette(const char *name, int used_for_level, int no_change_screen);
+}
 #endif
 
 #endif
-
-#endif /* _GAMEPAL_H */

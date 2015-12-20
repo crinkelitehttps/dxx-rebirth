@@ -38,6 +38,8 @@
 
 #include "compiler-make_unique.h"
 
+namespace dsx {
+
 #define MIX_DIGI_DEBUG 0
 #define MIX_OUTPUT_FORMAT	AUDIO_S16
 #define MIX_OUTPUT_CHANNELS	2
@@ -50,6 +52,8 @@
 #endif
 #define MIN_VOLUME 10
 
+namespace {
+
 struct RAIIMix_Chunk : public Mix_Chunk
 {
 	~RAIIMix_Chunk()
@@ -58,11 +62,13 @@ struct RAIIMix_Chunk : public Mix_Chunk
 	}
 };
 
+}
+
 static int digi_initialised = 0;
 static int digi_mixer_max_channels = MAX_SOUND_SLOTS;
 static inline int fix2byte(fix f) { return (f / 256) % 256; }
-static RAIIMix_Chunk SoundChunks[MAX_SOUNDS];
-ubyte channels[MAX_SOUND_SLOTS];
+static array<RAIIMix_Chunk, MAX_SOUNDS> SoundChunks;
+static array<uint8_t, MAX_SOUND_SLOTS> channels;
 
 /* Initialise audio */
 int digi_mixer_init()
@@ -79,12 +85,12 @@ int digi_mixer_init()
 	{
 		//edited on 10/05/98 by Matt Mueller - should keep running, just with no sound.
 		con_printf(CON_URGENT,"\nError: Couldn't open audio: %s", SDL_GetError());
-		GameArg.SndNoSound = 1;
+		CGameArg.SndNoSound = 1;
 		return 1;
 	}
 
 	digi_mixer_max_channels = Mix_AllocateChannels(digi_mixer_max_channels);
-	memset(channels, 0, MAX_SOUND_SLOTS);
+	channels = {};
 	Mix_Pause(0);
 
 	digi_initialised = 1;
@@ -168,6 +174,10 @@ int digi_mixer_start_sound(short soundnum, fix volume, int pan, int looping, int
 	int channel;
 
 	if (!digi_initialised) return -1;
+
+	if (soundnum < 0)
+		return -1;
+
 	Assert(GameSounds[soundnum].data != (void *)-1);
 
 	mixdigi_convert_sound(soundnum);
@@ -175,6 +185,8 @@ int digi_mixer_start_sound(short soundnum, fix volume, int pan, int looping, int
 	if (MIX_DIGI_DEBUG) con_printf(CON_DEBUG,"digi_start_sound %d, volume %d, pan %d (start=%d, end=%d)", soundnum, mix_vol, mix_pan, loop_start, loop_end);
 
 	channel = digi_mixer_find_channel();
+	if (channel < 0)
+		return -1;
 
 	Mix_PlayChannel(channel, &(SoundChunks[soundnum]), mix_loop);
 	Mix_SetPanning(channel, 255-mix_pan, mix_pan);
@@ -226,10 +238,8 @@ int digi_mixer_is_channel_playing(int) { return 0; }
 void digi_mixer_reset() {}
 void digi_mixer_stop_all_channels()
 {
+	channels = {};
 	Mix_HaltChannel(-1);
-	memset(channels, 0, MAX_SOUND_SLOTS);
 }
 
-#ifndef NDEBUG
-void digi_mixer_debug() {}
-#endif
+}

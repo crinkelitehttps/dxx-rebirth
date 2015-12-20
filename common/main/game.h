@@ -23,18 +23,18 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _GAME_H
-#define _GAME_H
+#pragma once
 
 #include <physfs.h>
-#include "pstypes.h"
-#include "window.h"
+#include "maths.h"
 
 #ifdef __cplusplus
 #include <cstdint>
 #include "pack.h"
 #include "segnum.h"
-#include "fwdvalptridx.h"
+#include "fwd-object.h"
+#include "fwd-segment.h"
+#include "fwd-window.h"
 
 #define DESIGNATED_GAME_FPS 30 // assuming the original intended Framerate was 30
 #define DESIGNATED_GAME_FRAMETIME (F1_0/DESIGNATED_GAME_FPS) 
@@ -61,8 +61,9 @@ extern fix64 Next_flare_fire_time;
 extern fix Laser_delay_time;        // Delay between laser fires.
 
 #if defined(DXX_BUILD_DESCENT_II)
+class object_signature_t;
 extern struct object *Missile_viewer;
-extern int Missile_viewer_sig;
+extern object_signature_t Missile_viewer_sig;
 
 #define CV_NONE     0
 #define CV_ESCORT   1
@@ -70,19 +71,9 @@ extern int Missile_viewer_sig;
 #define CV_COOP     3
 #define CV_MARKER   4
 
-extern int Coop_view_player[2];     // left & right
-extern int Marker_viewer_num[2];    // left & right
+extern array<int, 2> Coop_view_player;     // left & right
+extern array<int, 2> Marker_viewer_num;    // left & right
 #endif
-
-// constants for ft_preference
-#define FP_RIGHT        0
-#define FP_UP           1
-#define FP_FORWARD      2       // this is the default
-#define FP_LEFT         3
-#define FP_DOWN         4
-#define FP_FIRST_TIME   5
-
-extern int ft_preference;
 
 // The following bits define the game modes.
 #define GM_EDITOR       1       // You came into the game from the editor
@@ -108,9 +99,7 @@ extern int ft_preference;
 #define NDL 5       // Number of difficulty levels.
 
 extern int Game_mode;
-extern u_int32_t Game_screen_mode;
-
-extern int gauge_message_on;
+extern screen_mode Game_screen_mode;
 
 #ifndef NDEBUG      // if debugging, these are variables
 
@@ -119,15 +108,12 @@ extern int Slew_on;                 // in slew or sim mode?
 #else               // if not debugging, these are constants
 
 #define Slew_on             0       // no slewing in real game
-#define Game_double_buffer  1       // always double buffer in real game
 
 #endif
 
 // Suspend flags
 
-#define SUSP_NONE       0           // Everything moving normally
 #define SUSP_ROBOTS     1           // Robot AI doesn't move
-#define SUSP_WEAPONS    2           // Lasers, etc. don't move
 
 extern int Game_suspended;          // if non-zero, nothing moves but player
 
@@ -152,29 +138,39 @@ extern int PaletteRedAdd, PaletteGreenAdd, PaletteBlueAdd;
 
 #define MAX_PALETTE_ADD 30
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 extern void PALETTE_FLASH_ADD(int dr, int dg, int db);
+}
+#endif
 
 //sets the rgb values for palette flash
 #define PALETTE_FLASH_SET(_r,_g,_b) PaletteRedAdd=(_r), PaletteGreenAdd=(_g), PaletteBlueAdd=(_b)
 
-extern int draw_gauges_on;
-
-extern void init_game_screen(void);
-
 extern void game_flush_inputs();    // clear all inputs
+void game_flush_respawn_inputs();
 
-extern int Playing_game;    // True if playing game
-extern int Auto_flythrough; // if set, start flythough automatically
-extern int Mark_count;      // number of debugging marks set
-extern char faded_in;
 extern int last_drawn_cockpit;
+
+class pause_game_world_time
+{
+public:
+	pause_game_world_time();
+	~pause_game_world_time();
+};
 
 extern void stop_time(void);
 extern void start_time(void);
 extern void reset_time(void);       // called when starting level
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+
 // If automap_flag == 1, then call automap routine to write message.
 extern void save_screen_shot(int automap_flag);
+
+}
+#endif
 
 enum cockpit_mode_t
 {
@@ -186,13 +182,12 @@ enum cockpit_mode_t
 	CM_LETTERBOX   // half-height window (for cutscenes)
 };
 
-extern int Game_window_w,       // width and height of player's game window
-           Game_window_h;
-
 extern int Rear_view;           // if true, looking back.
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 // initalize flying
 void fly_init(vobjptr_t obj);
+#endif
 
 // selects a given cockpit (or lack of one).
 void select_cockpit(cockpit_mode_t mode);
@@ -201,10 +196,10 @@ void select_cockpit(cockpit_mode_t mode);
 void reset_cockpit(void);       // called if you've trashed the screen
 
 // functions to save, clear, and resture palette flash effects
-void palette_save(void);
 void reset_palette_add(void);
 void palette_restore(void);
 #if defined(DXX_BUILD_DESCENT_I)
+void palette_save();
 static inline void full_palette_save(void)
 {
 	palette_save();
@@ -232,7 +227,6 @@ static inline void game_init_render_buffers (int render_max_w, int render_max_h)
 }
 
 extern int netplayerinfo_on;
-extern int	Slide_segs_computed;
 
 #if defined(DXX_BUILD_DESCENT_I)
 static inline int game_mode_capture_flag()
@@ -270,6 +264,7 @@ typedef array<flickering_light, MAX_FLICKERING_LIGHTS> Flickering_light_array_t;
 extern Flickering_light_array_t Flickering_lights;
 extern unsigned Num_flickering_lights;
 extern int BigWindowSwitch;
+void compute_slide_segs();
 
 // turn flickering off (because light has been turned off)
 void disable_flicker(segnum_t segnum, int sidenum);
@@ -295,6 +290,7 @@ static inline void game_render_frame_mono(int flip)
 void game_leave_menus(void);
 
 //Cheats
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 struct game_cheats : prohibit_void_ptr<game_cheats>
 {
 	int enabled;
@@ -328,8 +324,11 @@ struct game_cheats : prohibit_void_ptr<game_cheats>
 #endif
 };
 extern game_cheats cheats;
-void game_disable_cheats();
+
 void move_player_2_segment(vsegptridx_t seg, int side);
+#endif
+int cheats_enabled();
+void game_disable_cheats();
 int allowed_to_fire_laser(void);
 int allowed_to_fire_flare(void);
 int allowed_to_fire_missile(void);
@@ -344,7 +343,11 @@ extern fix ThisLevelTime;
 extern int	Last_level_path_created;
 extern int force_cockpit_redraw;
 extern ubyte DemoDoingRight,DemoDoingLeft;
+#if defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 extern fix64	Time_flash_last_played;
+}
+#endif
 window_event_result game_handler(window *wind,const d_event &event, const unused_window_userdata_t *);
 
 #ifdef EDITOR
@@ -352,5 +355,3 @@ void dump_used_textures_all();
 #endif
 
 #endif
-
-#endif /* _GAME_H */

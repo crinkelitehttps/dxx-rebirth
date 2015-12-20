@@ -14,6 +14,8 @@
 #include <stdlib.h>
 #include "maths.h"
 
+namespace dcx {
+
 #ifdef NO_WATCOM_RAND
 
 void d_srand(unsigned int seed)
@@ -41,3 +43,5 @@ void d_srand(unsigned int seed)
 }
 
 #endif
+
+}

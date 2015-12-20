@@ -39,7 +39,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define ZDIM	2
 
 #define	MAX_MODIFIED_VERTICES	32
-int		Modified_vertices[MAX_MODIFIED_VERTICES];
+static array<int, MAX_MODIFIED_VERTICES>		Modified_vertices;
 int		Modified_vertex_index = 0;
 
 // ------------------------------------------------------------------------------------------
@@ -52,18 +52,19 @@ static void validate_modified_segments(void)
 
 		range_for (const auto seg, highest_valid(Segments))
 		{
-			if (Segments[seg].segnum != segment_none)
+			const auto &&segp = vsegptridx(static_cast<segnum_t>(seg));
+			if (segp->segnum != segment_none)
 			{
 				if (modified_segments[seg])
 					continue;
-				range_for (const auto w, Segments[seg].verts)
+				range_for (const auto w, segp->verts)
 					if (w == v0)
 					{
 						modified_segments[seg] = true;
-						validate_segment(&Segments[seg]);
+						validate_segment(segp);
 						for (unsigned s=0; s<MAX_SIDES_PER_SEGMENT; s++) {
 							Num_tilings = 1;
-							assign_default_uvs_to_side(&Segments[seg], s);
+							assign_default_uvs_to_side(segp, s);
 						}
 						break;
 					}
@@ -195,7 +196,6 @@ void med_extract_up_vector_from_segment_side(const vsegptr_t sp, int sidenum, vm
 //	Increase the size of Cursegp in dimension dimension by amount
 static int segsize_common(int dimension, fix amount)
 {
-	int	propagated[MAX_SIDES_PER_SEGMENT];
 	vms_vector	uvec, rvec, fvec, scalevec;
 
 	Degenerate_segment_found = 0;
@@ -222,17 +222,19 @@ static int segsize_common(int dimension, fix amount)
 	//	For all segments to which Cursegp is connected, propagate tmap (uv coordinates) from the connected
 	//	segment back to Cursegp.  This will meaningfully propagate uv coordinates to all sides which havve
 	//	an incident edge.  It will also do some sides more than once.  And it is probably just not what you want.
+	array<int, MAX_SIDES_PER_SEGMENT> propagated = {};
 	for (int i=0; i<MAX_SIDES_PER_SEGMENT; i++)
-		propagated[i] = 0;
-
-	for (int i=0; i<MAX_SIDES_PER_SEGMENT; i++)
-		if (IS_CHILD(Cursegp->children[i])) {
+	{
+		const auto c = Cursegp->children[i];
+		if (IS_CHILD(c))
+		{
 			int	s;
 			for (s=0; s<MAX_SIDES_PER_SEGMENT; s++)
 				propagated[s]++;
                         propagated[(int) Side_opposite[i]]--;
-			med_propagate_tmaps_to_segments(&Segments[Cursegp->children[i]],Cursegp,1);
+			med_propagate_tmaps_to_segments(vsegptridx(c), Cursegp, 1);
 		}
+	}
 
 	//	Now, for all sides that were not adjacent to another side, and therefore did not get tmaps
 	//	propagated to them, treat as a back side.

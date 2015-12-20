@@ -30,13 +30,13 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include "render_state.h"
 #include "inferno.h"
 #include "segment.h"
 #include "dxxerror.h"
 #include "bm.h"
 #include "texmap.h"
 #include "render.h"
-#include "render_state.h"
 #include "game.h"
 #include "object.h"
 #include "laser.h"
@@ -84,8 +84,8 @@ using std::max;
 int Render_depth = MAX_RENDER_SEGS; //how many segments deep to render
 #else
 int Render_depth = 20; //how many segments deep to render
-#endif
 unsigned Max_linear_depth = 50; // Deepest segment at which linear interpolation will be used.
+#endif
 
 //used for checking if points have been rotated
 int	Clear_window_color=-1;
@@ -110,8 +110,12 @@ int	Render_only_bottom=0;
 int	Bottom_bitmap_num = 9;
 #endif
 
+namespace dcx {
+
 //Global vars for window clip test
 int Window_clip_left,Window_clip_top,Window_clip_right,Window_clip_bot;
+
+}
 
 #ifdef EDITOR
 int _search_mode = 0;			//true if looking for curseg,side,face
@@ -125,7 +129,9 @@ static const int _search_mode = 0;
 
 #ifdef NDEBUG		//if no debug code, set these vars to constants
 
-static const int Outline_mode = 0, Show_only_curside = 0;
+#ifdef EDITOR
+const int Show_only_curside = 0;
+#endif
 
 #else
 
@@ -219,7 +225,7 @@ static inline int is_alphablend_eclip(int eclip_num)
 //	they are used for our hideously hacked in headlight system.
 //	vp is a pointer to vertex ids.
 //	tmap1, tmap2 are texture map ids.  tmap2 is the pasty one.
-static void render_face(segnum_t segnum, int sidenum, unsigned nv, const array<int, 4> &vp, int tmap1, int tmap2, array<g3s_uvl, 4> uvl_copy, WALL_IS_DOORWAY_result_t wid_flags)
+static void render_face(const vcsegptridx_t segp, int sidenum, unsigned nv, const array<int, 4> &vp, int tmap1, int tmap2, array<g3s_uvl, 4> uvl_copy, WALL_IS_DOORWAY_result_t wid_flags)
 {
 	grs_bitmap  *bm;
 #ifdef OGL
@@ -237,11 +243,15 @@ static void render_face(segnum_t segnum, int sidenum, unsigned nv, const array<i
 	}
 
 #if defined(DXX_BUILD_DESCENT_I)
+	(void)segp;
 	(void)wid_flags;
+#ifndef EDITOR
+	(void)sidenum;
+#endif
 #elif defined(DXX_BUILD_DESCENT_II)
 	//handle cloaked walls
 	if (wid_flags & WID_CLOAKED_FLAG) {
-		auto wall_num = Segments[segnum].sides[sidenum].wall_num;
+		auto wall_num = segp->sides[sidenum].wall_num;
 		Assert(wall_num != wall_none);
 		gr_settransblend(Walls[wall_num].cloak_value, GR_BLEND_NORMAL);
 		gr_setcolor(BM_XRGB(0, 0, 0));  // set to black (matters for s3)
@@ -255,14 +265,13 @@ static void render_face(segnum_t segnum, int sidenum, unsigned nv, const array<i
 #endif
 
 	if (tmap1 >= NumTextures) {
-#ifndef RELEASE
 		Int3();
-#endif
-		Segments[segnum].sides[sidenum].tmap_num = 0;
+		return;
 	}
 
 #ifdef OGL
-	if (!GameArg.DbgUseOldTextureMerge){
+	if (!CGameArg.DbgUseOldTextureMerge)
+	{
 		PIGGY_PAGE_IN(Textures[tmap1]);
 		bm = &GameBitmaps[Textures[tmap1].index];
 		if (tmap2){
@@ -335,8 +344,12 @@ static void render_face(segnum_t segnum, int sidenum, unsigned nv, const array<i
 		}
 	}
 
-	if ( PlayerCfg.AlphaEffects && is_alphablend_eclip(TmapInfo[tmap1].eclip_num) ) // set nice transparency/blending for some special effects (if we do more, we should maybe use switch here)
+	bool alpha = false;
+	if (PlayerCfg.AlphaBlendEClips && is_alphablend_eclip(TmapInfo[tmap1].eclip_num)) // set nice transparency/blending for some special effects (if we do more, we should maybe use switch here)
+	{
+		alpha = true;
 		gr_settransblend(GR_FADE_OFF, GR_BLEND_ADDITIVE_C);
+	}
 
 #ifdef EDITOR
 	if ((Render_only_bottom) && (sidenum == WBOTTOM))
@@ -351,6 +364,7 @@ static void render_face(segnum_t segnum, int sidenum, unsigned nv, const array<i
 #endif
 			g3_draw_tmap(nv,pointlist,uvl_copy,dyn_light,*bm);
 
+	if (alpha)
 	gr_settransblend(GR_FADE_OFF, GR_BLEND_NORMAL); // revert any transparency/blending setting back to normal
 
 #ifndef NDEBUG
@@ -421,7 +435,7 @@ static void check_face(segnum_t segnum, int sidenum, int facenum, unsigned nv, c
 }
 
 template <std::size_t... N>
-static inline void check_render_face(index_sequence<N...>, segnum_t segnum, int sidenum, unsigned facenum, const array<int, 4> &ovp, int tmap1, int tmap2, const array<uvl, 4> &uvlp, WALL_IS_DOORWAY_result_t wid_flags, const std::size_t nv)
+static inline void check_render_face(index_sequence<N...>, const vcsegptridx_t segnum, int sidenum, unsigned facenum, const array<int, 4> &ovp, int tmap1, int tmap2, const array<uvl, 4> &uvlp, WALL_IS_DOORWAY_result_t wid_flags, const std::size_t nv)
 {
 	const array<int, 4> vp{{ovp[N]...}};
 	const array<g3s_uvl, 4> uvl_copy{{
@@ -432,7 +446,7 @@ static inline void check_render_face(index_sequence<N...>, segnum_t segnum, int 
 }
 
 template <std::size_t N0, std::size_t N1, std::size_t N2, std::size_t N3>
-static inline void check_render_face(index_sequence<N0, N1, N2, N3> is, segnum_t segnum, int sidenum, unsigned facenum, const array<int, 4> &vp, int tmap1, int tmap2, const array<uvl, 4> &uvlp, WALL_IS_DOORWAY_result_t wid_flags)
+static inline void check_render_face(index_sequence<N0, N1, N2, N3> is, const vcsegptridx_t segnum, int sidenum, unsigned facenum, const array<int, 4> &vp, int tmap1, int tmap2, const array<uvl, 4> &uvlp, WALL_IS_DOORWAY_result_t wid_flags)
 {
 	check_render_face(is, segnum, sidenum, facenum, vp, tmap1, tmap2, uvlp, wid_flags, 4);
 }
@@ -441,7 +455,7 @@ static inline void check_render_face(index_sequence<N0, N1, N2, N3> is, segnum_t
  * are default constructed, gcc zero initializes all members.
  */
 template <std::size_t N0, std::size_t N1, std::size_t N2>
-static inline void check_render_face(index_sequence<N0, N1, N2>, segnum_t segnum, int sidenum, unsigned facenum, const array<int, 4> &vp, int tmap1, int tmap2, const array<uvl, 4> &uvlp, WALL_IS_DOORWAY_result_t wid_flags)
+static inline void check_render_face(index_sequence<N0, N1, N2>, const vcsegptridx_t segnum, int sidenum, unsigned facenum, const array<int, 4> &vp, int tmap1, int tmap2, const array<uvl, 4> &uvlp, WALL_IS_DOORWAY_result_t wid_flags)
 {
 	check_render_face(index_sequence<N0, N1, N2, 3>(), segnum, sidenum, facenum, vp, tmap1, tmap2, uvlp, wid_flags, 3);
 }
@@ -586,7 +600,7 @@ static void render_object_search(const vobjptridx_t obj)
 
 	if (changed) {
 		if (obj->segnum != segment_none)
-			Cursegp = &Segments[obj->segnum];
+			Cursegp = segptridx(obj->segnum);
 		found_seg = segment_none;
 		found_obj = obj;
 	}
@@ -625,9 +639,8 @@ static void do_render_object(const vobjptridx_t obj, window_rendered_data &windo
 	//	Added by MK on 09/07/94 (at about 5:28 pm, CDT, on a beautiful, sunny late summer day!) so
 	//	that the guided missile system will know what objects to look at.
 	//	I didn't know we had guided missiles before the release of D1. --MK
-	if ((obj->type == OBJ_ROBOT) || (obj->type == OBJ_PLAYER)) {
+	if (obj->type == OBJ_ROBOT)
 		window.rendered_robots.emplace_back(obj);
-	}
 
 	if ((count++ > MAX_OBJECTS) || (obj->next == obj)) {
 		Int3();					// infinite loop detected
@@ -654,11 +667,13 @@ static void do_render_object(const vobjptridx_t obj, window_rendered_data &windo
 		//NOTE LINK TO ABOVE
 		render_object(obj);
 
-	for (objnum_t n=obj->attached_obj; n != object_none; n = Objects[n].ctype.expl_info.next_attach) {
-		const auto o = vobjptridx(n);
+	for (auto n = obj->attached_obj; n != object_none;)
+	{
+		const auto &&o = vobjptridx(n);
 		Assert(o->type == OBJ_FIREBALL);
 		Assert(o->control_type == CT_EXPLOSION);
 		Assert(o->flags & OF_ATTACHED);
+		n = o->ctype.expl_info.next_attach;
 
 		render_object(o);
 	}
@@ -688,24 +703,27 @@ void render_start_frame()
 g3s_codes rotate_list(std::size_t nv,const int *pointnumlist)
 {
 	g3s_codes cc;
+	const auto current_generation = s_current_generation;
+	const auto cheats_acid = cheats.acid;
+	float f = likely(!cheats_acid)
+		? 0.0f /* unused */
+		: 2.0f * (static_cast<float>(timer_query()) / F1_0);
 
 	range_for (const auto pnum, unchecked_partial_range(pointnumlist, nv))
 	{
 		auto &pnt = Segment_points[pnum];
-		if (pnt.p3_last_generation != s_current_generation)
+		if (pnt.p3_last_generation != current_generation)
 		{
-			pnt.p3_last_generation = s_current_generation;
-			if (cheats.acid)
-			{
-				float f = (float) timer_query() / F1_0;
-				vms_vector tmpv = Vertices[pnum];
-				tmpv.x += fl2f(sinf(f * 2.0f + f2fl(tmpv.x)));
-				tmpv.y += fl2f(sinf(f * 3.0f + f2fl(tmpv.y)));
-				tmpv.z += fl2f(sinf(f * 5.0f + f2fl(tmpv.z)));
-				g3_rotate_point(pnt,tmpv);
-			}
-			else
-				g3_rotate_point(pnt,Vertices[pnum]);
+			pnt.p3_last_generation = current_generation;
+			const auto &v = Vertices[pnum];
+			vertex tmpv;
+			g3_rotate_point(pnt, likely(!cheats_acid) ? v : (
+				tmpv = v,
+				tmpv.x += fl2f(sinf(f + f2fl(tmpv.x))),
+				tmpv.y += fl2f(sinf(f * 1.5f + f2fl(tmpv.y))),
+				tmpv.z += fl2f(sinf(f * 2.5f + f2fl(tmpv.z))),
+				tmpv
+			));
 		}
 		cc.uand &= pnt.p3_codes;
 		cc.uor  |= pnt.p3_codes;
@@ -728,19 +746,17 @@ static void project_list(array<int, 8> &pointnumlist)
 
 // -----------------------------------------------------------------------------------
 #if !defined(OGL)
-static void render_segment(segnum_t segnum)
+static void render_segment(const vcsegptridx_t seg)
 {
-	segment		*seg = &Segments[segnum];
 	int			sn;
 
-	Assert(segnum!=segment_none && segnum<=Highest_segment_index);
-	g3s_codes 	cc=rotate_list(seg->verts);
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(seg->verts).uand)
+	{		//all off screen?
 
 #if defined(DXX_BUILD_DESCENT_II)
       if (Viewer->type!=OBJ_ROBOT)
 #endif
-  	   	Automap_visited[segnum]=1;
+		Automap_visited[seg]=1;
 
 		for (sn=0; sn<MAX_SIDES_PER_SEGMENT; sn++)
 			render_side(seg, sn);
@@ -792,18 +808,17 @@ static void render_segment(segnum_t segnum)
 // -- 
 // -- }
 
-static const fix CROSS_WIDTH = i2f(8);
-static const fix CROSS_HEIGHT = i2f(8);
-
 #ifdef EDITOR
 #ifndef NDEBUG
+
+const fix CROSS_WIDTH = i2f(8);
+const fix CROSS_HEIGHT = i2f(8);
 
 //draw outline for curside
 static void outline_seg_side(const vcsegptr_t seg,int _side,int edge,int vert)
 {
-	g3s_codes cc=rotate_list(seg->verts);
-
-	if (! cc.uand) {		//all off screen?
+	if (!rotate_list(seg->verts).uand)
+	{		//all off screen?
 		g3s_point *pnt;
 
 		//render curedge of curside of curseg in green
@@ -870,10 +885,15 @@ static ubyte code_window_point(fix x,fix y,const rect &w)
 }
 
 #ifndef NDEBUG
-char visited2[MAX_SEGMENTS];
+static array<char, MAX_SEGMENTS> visited2;
 #endif
 
+namespace {
+
 struct visited_twobit_array_t : visited_segment_multibit_array_t<2> {};
+
+}
+
 int	lcnt_save,scnt_save;
 
 //Given two sides of segment, tell the two verts which form the 
@@ -1044,6 +1064,7 @@ namespace {
 
 class render_compare_context_t
 {
+	typedef render_state_t::per_segment_state_t::distant_object distant_object;
 	struct element
 	{
 		fix64 dist_squared;
@@ -1060,7 +1081,7 @@ public:
 	{
 		range_for (const auto t, segstate.objects)
 		{
-			auto objp = &Objects[t.objnum];
+			const auto &&objp = vobjptr(t.objnum);
 			auto &e = (*this)[t.objnum];
 #if defined(DXX_BUILD_DESCENT_II)
 			e.objp = objp;
@@ -1068,18 +1089,17 @@ public:
 			e.dist_squared = vm_vec_dist2(objp->pos, Viewer_eye);
 		}
 	}
+	bool operator()(const distant_object &a, const distant_object &b) const;
 };
 
-}
-
 //compare function for object sort. 
-static bool compare_func(const render_compare_context_t &c, const render_state_t::per_segment_state_t::distant_object &a,const render_state_t::per_segment_state_t::distant_object &b)
+bool render_compare_context_t::operator()(const distant_object &a, const distant_object &b) const
 {
-	fix64 delta_dist_squared = c[a.objnum].dist_squared - c[b.objnum].dist_squared;
+	const auto delta_dist_squared = (*this)[a.objnum].dist_squared - (*this)[b.objnum].dist_squared;
 
 #if defined(DXX_BUILD_DESCENT_II)
-	const auto obj_a = c[a.objnum].objp;
-	const auto obj_b = c[b.objnum].objp;
+	const auto obj_a = (*this)[a.objnum].objp;
+	const auto obj_b = (*this)[b.objnum].objp;
 
 	auto abs_delta_dist_squared = std::abs(delta_dist_squared);
 	fix combined_size = obj_a->size + obj_b->size;
@@ -1094,32 +1114,37 @@ static bool compare_func(const render_compare_context_t &c, const render_state_t
 		//or laser or something that should plot on top.  Don't do this for
 		//the afterburner blobs, though.
 
-		if (obj_a->type == OBJ_WEAPON || (obj_a->type == OBJ_FIREBALL && obj_a->id != VCLIP_AFTERBURNER_BLOB))
+		if (obj_a->type == OBJ_WEAPON || (obj_a->type == OBJ_FIREBALL && get_fireball_id(*obj_a) != VCLIP_AFTERBURNER_BLOB))
+		{
 			if (!(obj_b->type == OBJ_WEAPON || obj_b->type == OBJ_FIREBALL))
 				return true;	//a is weapon, b is not, so say a is closer
-			else;				//both are weapons 
+			//both are weapons 
+		}
 		else
-			if (obj_b->type == OBJ_WEAPON || (obj_b->type == OBJ_FIREBALL && obj_b->id != VCLIP_AFTERBURNER_BLOB))
+		{
+			if (obj_b->type == OBJ_WEAPON || (obj_b->type == OBJ_FIREBALL && get_fireball_id(*obj_b) != VCLIP_AFTERBURNER_BLOB))
 				return false;	//b is weapon, a is not, so say a is farther
+		}
 
 		//no special case, fall through to normal return
 	}
 #endif
-	return delta_dist_squared < 0;	//return distance
+	return delta_dist_squared > 0;	//return distance
+}
+
 }
 
 static void sort_segment_object_list(render_state_t::per_segment_state_t &segstate)
 {
 	render_compare_context_t context(segstate);
-	typedef render_state_t::per_segment_state_t::distant_object distant_object;
-	const auto predicate = [&context](const distant_object &a, const distant_object &b) { return compare_func(context, a, b); };
 	auto &v = segstate.objects;
-	std::sort(v.begin(), v.end(), predicate);
+	std::sort(v.begin(), v.end(), std::cref(context));
 }
 
 static void build_object_lists(render_state_t &rstate)
 {
 	int nn;
+	const auto viewer = Viewer;
 	for (nn=0;nn < rstate.N_render_segs;nn++) {
 		auto segnum = rstate.Render_list[nn];
 		if (segnum != segment_none) {
@@ -1127,6 +1152,11 @@ static void build_object_lists(render_state_t &rstate)
 			{
 				int list_pos;
 				if (obj->type == OBJ_NONE)
+				{
+					assert(obj->type != OBJ_NONE);
+					continue;
+				}
+				if (unlikely(obj == viewer) && likely(obj->attached_obj == object_none))
 					continue;
 
 				Assert( obj->segnum == segnum );
@@ -1145,22 +1175,21 @@ static void build_object_lists(render_state_t &rstate)
 				if (obj->type != OBJ_CNTRLCEN && !(obj->type==OBJ_ROBOT && get_robot_id(obj)==65))		//don't migrate controlcen
 #endif
 				do {
-					segmasks m;
-
 #if defined(DXX_BUILD_DESCENT_I)
 					did_migrate = 0;
 #endif
-					m = get_seg_masks(obj->pos, new_segnum, obj->size, __FILE__, __LINE__);
+					const uint_fast32_t sidemask = get_seg_masks(obj->pos, vcsegptr(new_segnum), obj->size).sidemask;
 	
-					if (m.sidemask) {
+					if (sidemask) {
 						int sn,sf;
 
 						for (sn=0,sf=1;sn<6;sn++,sf<<=1)
-							if (m.sidemask & sf) {
+							if (sidemask & sf)
+							{
 #if defined(DXX_BUILD_DESCENT_I)
-								segment *seg = &Segments[obj->segnum];
+								const auto &&seg = vcsegptr(obj->segnum);
 #elif defined(DXX_BUILD_DESCENT_II)
-								segment *seg = &Segments[new_segnum];
+								const auto &&seg = vcsegptr(new_segnum);
 #endif
 		
 								if (WALL_IS_DOORWAY(seg,sn) & WID_FLY_FLAG) {		//can explosion migrate through
@@ -1176,6 +1205,8 @@ static void build_object_lists(render_state_t &rstate)
 #endif
 										}
 								}
+								if (sidemask <= sf)
+									break;
 							}
 					}
 	
@@ -1299,7 +1330,7 @@ void update_rendered_data(window_rendered_data &window, const vobjptr_t viewer, 
 
 //build a list of segments to be rendered
 //fills in Render_list & N_render_segs
-static void build_segment_list(render_state_t &rstate, visited_twobit_array_t &visited, short start_seg_num)
+static void build_segment_list(render_state_t &rstate, visited_twobit_array_t &visited, segnum_t start_seg_num)
 {
 	int	lcnt,scnt,ecnt;
 	int	l;
@@ -1307,7 +1338,7 @@ static void build_segment_list(render_state_t &rstate, visited_twobit_array_t &v
 	rstate.render_pos.fill(-1);
 
 	#ifndef NDEBUG
-	memset(visited2, 0, sizeof(visited2[0])*(Highest_segment_index+1));
+	visited2 = {};
 	#endif
 
 	lcnt = scnt = 0;
@@ -1332,7 +1363,11 @@ static void build_segment_list(render_state_t &rstate, visited_twobit_array_t &v
 	for (l=0;l<Render_depth;l++) {
 		for (scnt=0;scnt < ecnt;scnt++) {
 			auto segnum = rstate.Render_list[scnt];
-			if (segnum == segment_none) continue;
+			if (unlikely(segnum == segment_none))
+			{
+				assert(segnum != segment_none);
+				continue;
+			}
 
 			auto &srsm = rstate.render_seg_map[segnum];
 			auto &processed = srsm.processed;
@@ -1343,7 +1378,7 @@ static void build_segment_list(render_state_t &rstate, visited_twobit_array_t &v
 			processed = true;
 
 			auto seg = vsegptridx(segnum);
-			const auto r = rotate_list(seg->verts);
+			const auto uor = rotate_list(seg->verts).uor & CC_BEHIND;
 
 			//look at all sides of this segment.
 			//tricky code to look at sides in correct order follows
@@ -1354,12 +1389,12 @@ static void build_segment_list(render_state_t &rstate, visited_twobit_array_t &v
 				auto wid = WALL_IS_DOORWAY(seg, c);
 				if (wid & WID_RENDPAST_FLAG)
 				{
-					ubyte codes_and = r.uor;
-					if (codes_and & CC_BEHIND)
+					if (auto codes_and = uor)
 					{
 						range_for (const auto i, Side_to_verts[c])
 							codes_and &= Segment_points[seg->verts[i]].p3_codes;
-						if (codes_and & CC_BEHIND) continue;
+						if (codes_and)
+							continue;
 					}
 					child_list[n_children++] = c;
 				}
@@ -1505,7 +1540,7 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 		build_segment_list(rstate, visited, start_seg_num);		//fills in Render_list & N_render_segs
 
 	const auto render_range = partial_range(rstate.Render_list, rstate.N_render_segs);
-	const auto reversed_render_range = render_range.reversed();
+	const auto &&reversed_render_range = render_range.reversed();
 	//render away
 	#ifndef NDEBUG
 #if defined(DXX_BUILD_DESCENT_I)
@@ -1580,7 +1615,7 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 				Window_clip_bot   = rw.bot;
 			}
 
-			render_segment(segnum);
+			render_segment(vcsegptridx(segnum));
 			visited[segnum]=3;
 			if (srsm.objects.empty())
 				continue;
@@ -1593,8 +1628,7 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 
 			{
 				//int n_expl_objs=0,expl_objs[5],i;
-				int save_linear_depth = Max_linear_depth;
-				Max_linear_depth = Max_linear_depth_objects;
+				const auto save_linear_depth = exchange(Max_linear_depth, Max_linear_depth_objects);
 				range_for (auto &v, srsm.objects)
 				{
 					do_render_object(v.objnum, window);	// note link to above else
@@ -1605,62 +1639,19 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 		}
 	}
 #else
-	struct render_subrange : partial_range_t<std::reverse_iterator<segnum_t *>>
+        // Two pass rendering. Since sprites and some level geometry can have transparency (blending), we need some fancy sorting.
+        // GL_DEPTH_TEST helps to sort everything in view but we should make sure translucent sprites are rendered after geometry to prevent them to turn walls invisible (if rendered BEFORE geometry but still in FRONT of it).
+        // If walls use blending, they should be rendered along with objects (in same pass) to prevent some ugly clipping.
+
+        // First Pass: render opaque level geometry and level geometry with alpha pixels (high Alpha-Test func)
+	range_for (const auto segnum, reversed_render_range)
 	{
-		iterator *m_pbegin;
-		render_subrange(iterator i) :
-			partial_range_t<iterator>(i, std::prev(i)),
-			m_pbegin(&m_begin)
-		{
-		}
-		/* Prevent pointing m_pbegin at m_begin of different instance */
-		render_subrange(const render_subrange &rhs) = delete;
-		render_subrange &operator=(const render_subrange &rhs) = delete;
-		void record(iterator p, iterator &dummy)
-		{
-			*m_pbegin = m_end = p;
-			m_pbegin = &dummy;
-		}
-	};
-	struct render_ranges
-	{
-		typedef render_subrange::iterator iterator;
-		iterator dummy_write_only_begin;
-		render_subrange reversed_object_render_range, reversed_alpha_segment_render_range;
-		render_ranges(iterator e) :
-			reversed_object_render_range(e),
-			reversed_alpha_segment_render_range(e)
-		{
-		}
-		void record_object(iterator p)
-		{
-			reversed_object_render_range.record(p, dummy_write_only_begin);
-		}
-		void record_alpha(iterator p)
-		{
-			reversed_alpha_segment_render_range.record(p, dummy_write_only_begin);
-		}
-	};
-	/* Initially empty */
-	render_ranges rr{reversed_render_range.end()};
-	// Sorting elements for Alpha - 3 passes
-	// First Pass: render opaque level geometry + transculent level geometry with high Alpha-Test func
-	for (auto iter = reversed_render_range.begin(); iter != reversed_render_range.end(); ++iter)
-	{
-		const auto segnum = *iter;
 		auto &srsm = rstate.render_seg_map[segnum];
 
-#if defined(DXX_BUILD_DESCENT_I)
-		if (segnum!=segment_none && (_search_mode || eye_offset>0 || visited[segnum]!=3))
-#elif defined(DXX_BUILD_DESCENT_II)
-		if (segnum!=segment_none && (_search_mode || visited[segnum]!=3))
-#endif
-		{
-			Current_seg_depth = srsm.Seg_depth;
-			if (!srsm.objects.empty())
-				rr.record_object(iter);
+		if (segnum!=segment_none && (_search_mode || visited[segnum]!=3)) {
 			//set global render window vars
 
+			Current_seg_depth = srsm.Seg_depth;
 			{
 				const auto &rw = srsm.render_window;
 				Window_clip_left  = rw.left;
@@ -1671,12 +1662,11 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 
 			// render segment
 			{
-				segment		*seg = &Segments[segnum];
+				const auto &&seg = vcsegptridx(segnum);
 				int			sn;
 				Assert(segnum!=segment_none && segnum<=Highest_segment_index);
-				g3s_codes 	cc=rotate_list(seg->verts);
-
-				if (! cc.uand) {		//all off screen?
+				if (!rotate_list(seg->verts).uand)
+				{		//all off screen?
 
 				  if (Viewer->type!=OBJ_ROBOT)
 					Automap_visited[segnum]=1;
@@ -1690,78 +1680,29 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 #endif
 							)
 						{
-							glAlphaFunc(GL_GEQUAL,0.8);
+                                                        if (PlayerCfg.AlphaBlendEClips && is_alphablend_eclip(TmapInfo[seg->sides[sn].tmap_num].eclip_num)) // Do NOT render geometry with blending textures. Since we've not rendered any objects, yet, they would disappear behind them.
+                                                                continue;
+							glAlphaFunc(GL_GEQUAL,0.8); // prevent ugly outlines if an object (which is rendered later) is shown behind a grate, door, etc. if texture filtering is enabled. These sides are rendered later again with normal AlphaFunc
 							render_side(seg, sn);
 							glAlphaFunc(GL_GEQUAL,0.02);
-							rr.record_alpha(iter);
 						}
 						else
 							render_side(seg, sn);
 					}
 				}
 			}
-			visited[segnum]=3;
 		}
 	}
 
-	visited.clear();
-
-	// Second Pass: Objects
-	advance(rr.reversed_object_render_range.m_end, 1);
-	range_for (const auto segnum, rr.reversed_object_render_range)
-	{
-		auto &srsm = rstate.render_seg_map[segnum];
-		if (srsm.objects.empty())
-			continue;
-
-#if defined(DXX_BUILD_DESCENT_I)
-		if (segnum!=segment_none && (_search_mode || eye_offset>0 || visited[segnum]!=3))
-#elif defined(DXX_BUILD_DESCENT_II)
-		if (segnum!=segment_none && (_search_mode || visited[segnum]!=3))
-#endif
-		{
-			Current_seg_depth = srsm.Seg_depth;
-			//set global render window vars
-
-			visited[segnum]=3;
-
-			{		//reset for objects
-				Window_clip_left  = Window_clip_top = 0;
-				Window_clip_right = grd_curcanv->cv_bitmap.bm_w-1;
-				Window_clip_bot   = grd_curcanv->cv_bitmap.bm_h-1;
-			}
-
-			// render objects
-			{
-				int save_linear_depth = Max_linear_depth;
-
-				Max_linear_depth = Max_linear_depth_objects;
-				range_for (auto &v, srsm.objects)
-				{
-					do_render_object(v.objnum, window);	// note link to above else
-				}
-				Max_linear_depth = save_linear_depth;
-			}
-		}
-	}
-
-	visited.clear();
-
-	// Third Pass - Render Transculent level geometry with normal Alpha-Func
-	advance(rr.reversed_alpha_segment_render_range.m_end, 1);
-	range_for (const auto segnum, rr.reversed_alpha_segment_render_range)
+        // Second pass: Render objects and level geometry with alpha pixels (normal Alpha-Test func) and eclips with blending
+	range_for (const auto segnum, reversed_render_range)
 	{
 		auto &srsm = rstate.render_seg_map[segnum];
 
-#if defined(DXX_BUILD_DESCENT_I)
-		if (segnum!=segment_none && (_search_mode || eye_offset>0 || visited[segnum]!=3))
-#elif defined(DXX_BUILD_DESCENT_II)
-		if (segnum!=segment_none && (_search_mode || visited[segnum]!=3))
-#endif
-		{
-			Current_seg_depth = srsm.Seg_depth;
+		if (segnum!=segment_none && (_search_mode || visited[segnum]!=3)) {
 			//set global render window vars
 
+			Current_seg_depth = srsm.Seg_depth;
 			{
 				const auto &rw = srsm.render_window;
 				Window_clip_left  = rw.left;
@@ -1772,12 +1713,15 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 
 			// render segment
 			{
-				segment		*seg = &Segments[segnum];
+				const auto &&seg = vcsegptridx(segnum);
 				int			sn;
 				Assert(segnum!=segment_none && segnum<=Highest_segment_index);
-				g3s_codes 	cc=rotate_list(seg->verts);
+				if (!rotate_list(seg->verts).uand)
+				{		//all off screen?
 
-				if (! cc.uand) {		//all off screen?
+				  if (Viewer->type!=OBJ_ROBOT)
+					Automap_visited[segnum]=1;
+
 					for (sn=0; sn<MAX_SIDES_PER_SEGMENT; sn++)
 					{
 						auto wid = WALL_IS_DOORWAY(seg, sn);
@@ -1786,11 +1730,27 @@ void render_mine(segnum_t start_seg_num,fix eye_offset, window_rendered_data &wi
 							|| (wid & WID_CLOAKED_FLAG)
 #endif
 							)
+						{
 							render_side(seg, sn);
+						}
 					}
 				}
 			}
 			visited[segnum]=3;
+			if (srsm.objects.empty())
+				continue;
+			{		//reset for objects
+				Window_clip_left  = Window_clip_top = 0;
+				Window_clip_right = grd_curcanv->cv_bitmap.bm_w-1;
+				Window_clip_bot   = grd_curcanv->cv_bitmap.bm_h-1;
+			}
+
+			{
+				range_for (auto &v, srsm.objects)
+				{
+					do_render_object(v.objnum, window);	// note link to above else
+				}
+			}
 		}
 	}
 #endif

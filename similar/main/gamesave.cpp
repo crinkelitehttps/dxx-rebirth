@@ -23,6 +23,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#include <stdexcept>
 #include <stdio.h>
 #include <string.h>
 #include "pstypes.h"
@@ -55,6 +56,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "powerup.h"
 #include "hostage.h"
 #include "weapon.h"
+#include "player.h"
 #include "newdemo.h"
 #include "gameseq.h"
 #include "automap.h"
@@ -65,7 +67,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gamepal.h"
 #include "physics.h"
 #include "laser.h"
-#include "byteutil.h"
 #include "multi.h"
 #include "makesig.h"
 #include "textures.h"
@@ -156,14 +157,12 @@ static int is_real_level(const char *filename)
 
 //--unused-- vms_angvec zero_angles={0,0,0};
 
-#define vm_angvec_zero(v) do {(v)->p=(v)->b=(v)->h=0;} while (0)
-
 int Gamesave_num_players=0;
 
 #if defined(DXX_BUILD_DESCENT_I)
 int N_save_pof_names=25;
 #define MAX_POLYGON_MODELS_NEW 167
-char Save_pof_names[MAX_POLYGON_MODELS_NEW][FILENAME_LEN];
+static array<char[FILENAME_LEN], MAX_POLYGON_MODELS_NEW> Save_pof_names;
 
 static int convert_vclip(int vc) {
 	if (vc < 0)
@@ -186,7 +185,7 @@ static int convert_polymod(int polymod) {
 }
 #elif defined(DXX_BUILD_DESCENT_II)
 int N_save_pof_names;
-char Save_pof_names[MAX_POLYGON_MODELS][FILENAME_LEN];
+static array<char[FILENAME_LEN], MAX_POLYGON_MODELS> Save_pof_names;
 #endif
 
 static void verify_object(const vobjptr_t obj)
@@ -233,7 +232,7 @@ static void verify_object(const vobjptr_t obj)
 		}
 
 #if defined(DXX_BUILD_DESCENT_II)
-		if (obj->id == 65)						//special "reactor" robots
+		if (get_robot_id(obj) == 65)						//special "reactor" robots
 			obj->movement_type = MT_NONE;
 #endif
 
@@ -256,48 +255,37 @@ static void verify_object(const vobjptr_t obj)
 
 	if ( obj->type == OBJ_POWERUP ) {
 		if ( get_powerup_id(obj) >= N_powerup_types )	{
-			set_powerup_id(obj, 0);
+			set_powerup_id(obj, POW_SHIELD_BOOST);
 			Assert( obj->render_type != RT_POLYOBJ );
 		}
 		obj->control_type = CT_POWERUP;
 		obj->size = Powerup_info[get_powerup_id(obj)].size;
-#if defined(DXX_BUILD_DESCENT_II)
 		obj->ctype.powerup_info.creation_time = 0;
-#endif
 
 		if (Game_mode & GM_NETWORK)
 		{
-			if (multi_powerup_is_4pack(get_powerup_id(obj)))
-			{
-				PowerupsInMine[obj->id-1]+=4;
-				MaxPowerupsAllowed[obj->id-1]+=4;
-			}
-			else
-			{
-				PowerupsInMine[get_powerup_id(obj)]++;
-				MaxPowerupsAllowed[get_powerup_id(obj)]++;
-			}
+			PowerupCaps.inc_powerup_both(get_powerup_id(obj));
 		}
-
 	}
 
 	if ( obj->type == OBJ_WEAPON )	{
 		if ( get_weapon_id(obj) >= N_weapon_types )	{
-			set_weapon_id(obj, LASER_ID_L1);
+			set_weapon_id(obj, weapon_id_type::LASER_ID_L1);
 			Assert( obj->render_type != RT_POLYOBJ );
 		}
 
 #if defined(DXX_BUILD_DESCENT_II)
-		if (obj->id == PMINE_ID) {		//make sure pmines have correct values
-
-			obj->mtype.phys_info.mass = Weapon_info[obj->id].mass;
-			obj->mtype.phys_info.drag = Weapon_info[obj->id].drag;
+		const auto weapon_id = get_weapon_id(obj);
+		if (weapon_id == weapon_id_type::PMINE_ID)
+		{		//make sure pmines have correct values
+			obj->mtype.phys_info.mass = Weapon_info[weapon_id].mass;
+			obj->mtype.phys_info.drag = Weapon_info[weapon_id].drag;
 			obj->mtype.phys_info.flags |= PF_FREE_SPINNING;
 
 			// Make sure model number & size are correct...		
 			Assert( obj->render_type == RT_POLYOBJ );
 
-			obj->rtype.pobj_info.model_num = Weapon_info[obj->id].model_num;
+			obj->rtype.pobj_info.model_num = Weapon_info[weapon_id].model_num;
 			obj->size = Polygon_models[obj->rtype.pobj_info.model_num].rad;
 		}
 #endif
@@ -318,7 +306,7 @@ static void verify_object(const vobjptr_t obj)
 			}
 #elif defined(DXX_BUILD_DESCENT_II)
 		if (Gamesave_current_version <= 1) { // descent 1 reactor
-			obj->id = 0;                         // used to be only one kind of reactor
+			set_reactor_id(obj, 0);                         // used to be only one kind of reactor
 			obj->rtype.pobj_info.model_num = Reactors[0].model_num;// descent 1 reactor
 		}
 
@@ -366,7 +354,8 @@ static void verify_object(const vobjptr_t obj)
 //reads one object of the given version from the given file
 static void read_object(const vobjptr_t obj,PHYSFS_file *f,int version)
 {
-
+	const auto poison_obj = reinterpret_cast<uint8_t *>(&*obj);
+	DXX_POISON_MEMORY(poison_obj, sizeof(*obj), 0xfd);
 	obj->type           = PHYSFSX_readByte(f);
 	obj->id             = PHYSFSX_readByte(f);
 
@@ -429,7 +418,7 @@ static void read_object(const vobjptr_t obj,PHYSFS_file *f,int version)
 	switch (obj->control_type) {
 
 		case CT_AI: {
-			obj->ctype.ai_info.behavior				= PHYSFSX_readByte(f);
+			obj->ctype.ai_info.behavior				= static_cast<ai_behavior>(PHYSFSX_readByte(f));
 
 			range_for (auto &i, obj->ctype.ai_info.flags)
 				i = PHYSFSX_readByte(f);
@@ -440,13 +429,8 @@ static void read_object(const vobjptr_t obj,PHYSFS_file *f,int version)
 			obj->ctype.ai_info.cur_path_index		= PHYSFSX_readShort(f);
 
 			if (version <= 25) {
-#if defined(DXX_BUILD_DESCENT_I)
-				obj->ctype.ai_info.follow_path_start_seg = PHYSFSX_readShort(f);
-				obj->ctype.ai_info.follow_path_end_seg	 = PHYSFSX_readShort(f);
-#elif defined(DXX_BUILD_DESCENT_II)
 				PHYSFSX_readShort(f);	//				obj->ctype.ai_info.follow_path_start_seg	= 
 				PHYSFSX_readShort(f);	//				obj->ctype.ai_info.follow_path_end_seg		= 
-#endif
 			}
 
 			break;
@@ -467,7 +451,7 @@ static void read_object(const vobjptr_t obj,PHYSFS_file *f,int version)
 
 			obj->ctype.laser_info.parent_type		= PHYSFSX_readShort(f);
 			obj->ctype.laser_info.parent_num		= PHYSFSX_readShort(f);
-			obj->ctype.laser_info.parent_signature	= PHYSFSX_readInt(f);
+			obj->ctype.laser_info.parent_signature	= object_signature_t{static_cast<uint16_t>(PHYSFSX_readInt(f))};
 #if defined(DXX_BUILD_DESCENT_II)
 			obj->ctype.laser_info.last_afterburner_time = 0;
 #endif
@@ -486,16 +470,23 @@ static void read_object(const vobjptr_t obj,PHYSFS_file *f,int version)
 			else
 				obj->ctype.powerup_info.count = 1;
 
+			if (obj->type == OBJ_POWERUP)
+			{
+				/* Hostages have control type CT_POWERUP, but object
+				 * type OBJ_HOSTAGE.  Hostages are never weapons, so
+				 * prevent checking their IDs.
+				 */
 			if (get_powerup_id(obj) == POW_VULCAN_WEAPON)
 					obj->ctype.powerup_info.count = VULCAN_WEAPON_AMMO_AMOUNT;
 
 #if defined(DXX_BUILD_DESCENT_II)
-			if (get_powerup_id(obj) == POW_GAUSS_WEAPON)
+			else if (get_powerup_id(obj) == POW_GAUSS_WEAPON)
 					obj->ctype.powerup_info.count = VULCAN_WEAPON_AMMO_AMOUNT;
 
-			if (get_powerup_id(obj) == POW_OMEGA_WEAPON)
+			else if (get_powerup_id(obj) == POW_OMEGA_WEAPON)
 					obj->ctype.powerup_info.count = MAX_OMEGA_CHARGE;
 #endif
+			}
 
 			break;
 
@@ -671,7 +662,7 @@ static void write_object(const vcobjptr_t obj, short version, PHYSFS_file *f)
 	switch (obj->control_type) {
 
 		case CT_AI: {
-			PHYSFSX_writeU8(f, obj->ctype.ai_info.behavior);
+			PHYSFSX_writeU8(f, static_cast<uint8_t>(obj->ctype.ai_info.behavior));
 
 			range_for (auto &i, obj->ctype.ai_info.flags)
 				PHYSFSX_writeU8(f, i);
@@ -682,8 +673,8 @@ static void write_object(const vcobjptr_t obj, short version, PHYSFS_file *f)
 			PHYSFS_writeSLE16(f, obj->ctype.ai_info.cur_path_index);
 
 #if defined(DXX_BUILD_DESCENT_I)
-			PHYSFS_writeSLE16(f, obj->ctype.ai_info.follow_path_start_seg);
-			PHYSFS_writeSLE16(f, obj->ctype.ai_info.follow_path_end_seg);
+			PHYSFS_writeSLE16(f, segment_none);
+			PHYSFS_writeSLE16(f, segment_none);
 #elif defined(DXX_BUILD_DESCENT_II)
 			if (version <= 25)
 			{
@@ -709,7 +700,7 @@ static void write_object(const vcobjptr_t obj, short version, PHYSFS_file *f)
 
 			PHYSFS_writeSLE16(f, obj->ctype.laser_info.parent_type);
 			PHYSFS_writeSLE16(f, obj->ctype.laser_info.parent_num);
-			PHYSFS_writeSLE32(f, obj->ctype.laser_info.parent_signature);
+			PHYSFS_writeSLE32(f, obj->ctype.laser_info.parent_signature.get());
 
 			break;
 
@@ -888,13 +879,18 @@ static int load_game_data(PHYSFS_file *LoadFile)
 		if (PHYSFSX_fseek( LoadFile, object_offset, SEEK_SET ))
 			Error( "Error seeking to object_offset in gamesave.c" );
 
+		const auto &&plr = vobjptr(Players[0].objnum);
+		const auto plr_shields = plr->shields;
+		const auto player_info = plr->ctype.player_info;
 		range_for (auto &i, partial_range(Objects, gs_num_objects))
 		{
-			read_object(&i, LoadFile, game_top_fileinfo_version);
+			const auto &&o = vobjptr(&i);
+			read_object(o, LoadFile, game_top_fileinfo_version);
 			i.signature = obj_get_signature();
-			verify_object(&i);
+			verify_object(o);
 		}
-
+		plr->shields = plr_shields;
+		plr->ctype.player_info = player_info;
 	}
 
 	//===================== READ WALL INFO ============================
@@ -1113,11 +1109,15 @@ static int load_game_data(PHYSFS_file *LoadFile)
 		int wallnum;
 
 		range_for (const auto segnum, highest_valid(Segments))
+		{
+			const auto &&segp = vcsegptr(static_cast<segnum_t>(segnum));
 			for (int sidenum=0;sidenum<6;sidenum++)
-				if ((wallnum=Segments[segnum].sides[sidenum].wall_num) != -1) {
+				if ((wallnum = segp->sides[sidenum].wall_num) != -1)
+				{
 					Walls[wallnum].segnum = segnum;
 					Walls[wallnum].sidenum = sidenum;
 				}
+		}
 	}
 
 	#ifndef NDEBUG
@@ -1180,14 +1180,9 @@ int load_level(const char * filename_passed)
 	int sig, minedata_offset, gamedata_offset;
 	int mine_err, game_err;
 
-#if defined(DXX_BUILD_DESCENT_II)
-	Slide_segs_computed = 0;
-#endif
-
    if (Game_mode & GM_NETWORK)
 	 {
-		 MaxPowerupsAllowed = {};
-		 PowerupsInMine = {};
+		 PowerupCaps.clear();
 	 }
 
 
@@ -1217,10 +1212,12 @@ int load_level(const char * filename_passed)
 	}		
 #endif
 
-	if (!PHYSFSX_exists(filename,1))
-		sprintf(filename,"%s%s",MISSION_DIR,filename_passed);
-
 	auto LoadFile = PHYSFSX_openReadBuffered(filename);
+	if (!LoadFile)
+	{
+		snprintf(filename, sizeof(filename), "%.*s%s", static_cast<int>(std::distance(Current_mission->path.cbegin(), Current_mission->filename)), Current_mission->path.c_str(), filename_passed);
+		LoadFile = PHYSFSX_openReadBuffered(filename);
+	}
 
 	if (!LoadFile)	{
 		#ifdef EDITOR
@@ -1402,19 +1399,21 @@ int load_level(const char * filename_passed)
 				"details, and contact Matt or Mike." );
 	#endif
 
+
+#if defined(DXX_BUILD_DESCENT_II)
+	compute_slide_segs();
+#endif
 	return 0;
 }
 
 #ifdef EDITOR
 int get_level_name()
 {
-	array<newmenu_item, 2> m{
+	array<newmenu_item, 2> m{{
 		nm_item_text("Please enter a name for this mine:"),
 		nm_item_input(Current_level_name.next()),
-	};
-
+	}};
 	return newmenu_do( NULL, "Enter mine name", m, unused_newmenu_subfunction, unused_newmenu_userdata ) >= 0;
-
 }
 #endif
 
@@ -1458,9 +1457,9 @@ int create_new_mine(void)
 	Highest_vertex_index = 0;
 	Num_segments = 0;		// Number of segments in global array, will get increased in med_create_segment
 	Highest_segment_index = 0;
-	Cursegp = &Segments[0];	// Say current segment is the only segment.
+	Cursegp = segptridx(segment_first);	// Say current segment is the only segment.
 	Curside = WBACK;		// The active side is the back side
-	Markedsegp = 0;		// Say there is no marked segment.
+	Markedsegp = segment_none;		// Say there is no marked segment.
 	Markedside = WBACK;	//	Shouldn't matter since Markedsegp == 0, but just in case...
 	for (int s=0;s<MAX_GROUPS+1;s++) {
 		GroupList[s].clear();
@@ -1476,7 +1475,7 @@ int create_new_mine(void)
 	// Create New_segment, which is the segment we will be adding at each instance.
 	med_create_new_segment({DEFAULT_X_SIZE, DEFAULT_Y_SIZE, DEFAULT_Z_SIZE});		// New_segment = Segments[0];
 	//	med_create_segment(Segments,0,0,0,DEFAULT_X_SIZE,DEFAULT_Y_SIZE,DEFAULT_Z_SIZE,vm_mat_make(&m1,F1_0,0,0,0,F1_0,0,0,0,F1_0));
-	med_create_segment(&Segments[0],0,0,0,DEFAULT_X_SIZE,DEFAULT_Y_SIZE,DEFAULT_Z_SIZE,m1);
+	med_create_segment(vsegptridx(static_cast<segnum_t>(0)),0,0,0,DEFAULT_X_SIZE,DEFAULT_Y_SIZE,DEFAULT_Z_SIZE,m1);
 	
 	Found_segs.clear();
 	Selected_segs.clear();
@@ -1559,7 +1558,8 @@ static int save_game_data(PHYSFS_file *SaveFile)
 #endif
 	{
 		PHYSFS_writeSLE16(SaveFile, N_polygon_models);
-		PHYSFS_write(SaveFile, Pof_names, sizeof(*Pof_names), N_polygon_models);
+		range_for (const auto &i, partial_range(Pof_names, N_polygon_models))
+			PHYSFS_write(SaveFile, &i, sizeof(i), 1);
 	}
 
 	//==================== SAVE PLAYER INFO ===========================
@@ -1571,7 +1571,8 @@ static int save_game_data(PHYSFS_file *SaveFile)
 	object_offset = PHYSFS_tell(SaveFile);
 	range_for (const auto i, highest_valid(Objects))
 	{
-			write_object(&Objects[i], game_top_fileinfo_version, SaveFile);
+		const auto &&objp = vcobjptr(static_cast<objnum_t>(i));
+		write_object(objp, game_top_fileinfo_version, SaveFile);
 	}
 
 	//==================== SAVE WALL INFO =============================
@@ -1699,7 +1700,7 @@ static int save_level_sub(const char * filename)
 		if (update_object_seg(plr) == 0) {
 			if (plr->segnum > Highest_segment_index)
 				plr->segnum = segment_first;
-			compute_segment_center(plr->pos,&(Segments[plr->segnum]));
+			compute_segment_center(plr->pos, vcsegptr(plr->segnum));
 		}
 	}
  

@@ -27,9 +27,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #ifdef __cplusplus
 #include "pack.h"
-#include "fwdsegment.h"
-
-struct vms_vector;
+#include "fwd-object.h"
+#include "fwd-segment.h"
+#include "fwd-vecmat.h"
 
 //------------------------------------------------------------
 // A refueling center is one segment... to identify it in the
@@ -57,13 +57,15 @@ struct vms_vector;
 
 // Destroys all fuel centers, clears segment backpointer array.
 void fuelcen_reset();
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 // Makes a segment a fuel center.
 void fuelcen_create( vsegptridx_t segp);
 // Makes a fuel center active... needs to be called when
 // a segment is loaded from disk.
 void fuelcen_activate( vsegptridx_t segp, int station_type );
 // Deletes a segment as a fuel center.
-void fuelcen_delete( vsegptridx_t segp );
+void fuelcen_delete(vsegptr_t segp);
 
 // Charges all fuel centers to max capacity.
 void fuelcen_replentish_all();
@@ -73,7 +75,7 @@ objptridx_t create_morph_robot(vsegptridx_t segp, const vms_vector &object_pos, 
 
 // Returns the amount of fuel/shields this segment can give up.
 // Can be from 0 to 100.
-fix fuelcen_give_fuel(vsegptr_t segp, fix MaxAmountCanTake );
+fix fuelcen_give_fuel(vcsegptr_t segp, fix MaxAmountCanTake);
 
 // Call once per frame.
 void fuelcen_update_all();
@@ -84,8 +86,9 @@ void fuelcen_update_all();
 #if defined(DXX_BUILD_DESCENT_I)
 #define MAX_NUM_FUELCENS	50
 #elif defined(DXX_BUILD_DESCENT_II)
-fix repaircen_give_shields(vsegptr_t segp, fix MaxAmountCanTake );
+fix repaircen_give_shields(vcsegptr_t segp, fix MaxAmountCanTake);
 #define MAX_NUM_FUELCENS    70
+#endif
 #endif
 
 //--repair-- //do the repair center for this frame
@@ -116,7 +119,7 @@ struct FuelCenter : public prohibit_void_ptr<FuelCenter>
 
 struct d1_matcen_info : public prohibit_void_ptr<d1_matcen_info>
 {
-	array<int, 1>     robot_flags;    // Up to 32 different robots
+	array<unsigned, 1>     robot_flags;    // Up to 32 different robots
 	segnum_t   segnum;         // Segment this is attached to.
 	short   fuelcen_num;    // Index in fuelcen array.
 };
@@ -128,7 +131,7 @@ void matcen_info_read(PHYSFS_file *fp, matcen_info &ps, int version);
 #elif defined(DXX_BUILD_DESCENT_II)
 struct matcen_info : public prohibit_void_ptr<matcen_info>
 {
-	array<int, 2>     robot_flags; // Up to 64 different robots
+	array<unsigned, 2>     robot_flags; // Up to 64 different robots
 	segnum_t   segnum;         // Segment this is attached to.
 	short   fuelcen_num;    // Index in fuelcen array.
 };
@@ -146,7 +149,6 @@ static inline long operator-(FuelCenter *s, array<FuelCenter, MAX_NUM_FUELCENS> 
 {
 	return std::distance(a.begin(), s);
 }
-#endif
 
 // Called when a materialization center gets triggered by the player
 // flying through some trigger!
@@ -160,7 +162,6 @@ extern void init_all_matcens(void);
 
 extern const fix EnergyToCreateOneRobot;
 
-#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 /*
  * reads a matcen_info structure from a PHYSFS_file
  */

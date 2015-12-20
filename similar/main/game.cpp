@@ -57,6 +57,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "3d.h"
 #include "effects.h"
 #include "menu.h"
+#include "player.h"
 #include "gameseg.h"
 #include "wall.h"
 #include "ai.h"
@@ -115,10 +116,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "partial_range.h"
 #include "segiter.h"
 
-#ifndef NDEBUG
-int	Mark_count = 0;                 // number of debugging marks set
-#endif
-
 static fix64 last_timer_value=0;
 fix ThisLevelTime=0;
 
@@ -126,11 +123,6 @@ grs_canvas	Screen_3d_window;							// The rectangle for rendering the mine to
 
 int	force_cockpit_redraw=0;
 int	PaletteRedAdd, PaletteGreenAdd, PaletteBlueAdd;
-
-#ifdef EDITOR
-//flag for whether initial fade-in has been done
-char	faded_in;
-#endif
 
 int	Game_suspended=0; //if non-zero, nothing moves but player
 fix64	Auto_fire_fusion_cannon_time = 0;
@@ -173,8 +165,7 @@ void reset_palette_add()
 	PaletteBlueAdd		= 0;
 }
 
-
-u_int32_t Game_screen_mode = SM(640,480);
+screen_mode Game_screen_mode{640, 480};
 
 //initialize the various canvases on the game screen
 //called every time the screen mode or cockpit changes
@@ -189,11 +180,15 @@ void init_cockpit()
 		PlayerCfg.CockpitMode[1] = CM_FULL_SCREEN;
 
 #ifndef OGL
+	if (PlayerCfg.CockpitMode[1] != CM_LETTERBOX)
+	{
 #if defined(DXX_BUILD_DESCENT_II)
-	int HiresGFXAvailable = !GameArg.GfxSkipHiresGFX;
+		int HiresGFXAvailable = !GameArg.GfxSkipHiresGFX;
 #endif
-	if ( Game_screen_mode != (HiresGFXAvailable? SM(640,480) : SM(320,200)) && PlayerCfg.CockpitMode[1] != CM_LETTERBOX) {
-		PlayerCfg.CockpitMode[1] = CM_FULL_SCREEN;
+		auto full_screen_mode = HiresGFXAvailable ? screen_mode{640, 480} : screen_mode{320, 200};
+		if (Game_screen_mode != full_screen_mode) {
+			PlayerCfg.CockpitMode[1] = CM_FULL_SCREEN;
+		}
 	}
 #endif
 
@@ -228,14 +223,14 @@ void init_cockpit()
 			break;
 
 		case CM_LETTERBOX:	{
-			int x,y,w,h;
+			const unsigned gsm_height = SM_H(Game_screen_mode);
+			const unsigned w = SM_W(Game_screen_mode);
+			const unsigned h = (gsm_height * 3) / 4; // true letterbox size (16:9)
+			const unsigned x = 0;
+			const unsigned y = (gsm_height - h) / 2;
 
-			x = 0; w = SM_W(Game_screen_mode);
-			h = (SM_H(Game_screen_mode) * 3) / 4; // true letterbox size (16:9)
-			y = (SM_H(Game_screen_mode)-h)/2;
-
-			gr_rect(x,0,w,SM_H(Game_screen_mode)-h);
-			gr_rect(x,SM_H(Game_screen_mode)-h,w,SM_H(Game_screen_mode));
+			gr_rect(x, 0, w, gsm_height - h);
+			gr_rect(x, gsm_height - h, w, gsm_height);
 
 			game_init_render_sub_buffers( x, y, w, h );
 			break;
@@ -272,7 +267,7 @@ void game_init_render_sub_buffers( int x, int y, int w, int h )
 //mode if cannot init requested mode)
 int set_screen_mode(int sm)
 {
-	if ( (Screen_mode == sm) && !((sm==SCREEN_GAME) && (grd_curscreen->sc_mode != Game_screen_mode)) && !(sm==SCREEN_MENU) )
+	if ( (Screen_mode == sm) && !((sm==SCREEN_GAME) && (grd_curscreen->get_screen_mode() != Game_screen_mode)) && !(sm==SCREEN_MENU) )
 	{
 		gr_set_current_canvas(NULL);
 		return 1;
@@ -287,33 +282,42 @@ int set_screen_mode(int sm)
 	switch( Screen_mode )
 	{
 		case SCREEN_MENU:
-			if  (grd_curscreen->sc_mode != Game_screen_mode)
+			if  (grd_curscreen->get_screen_mode() != Game_screen_mode)
 				if (gr_set_mode(Game_screen_mode))
 					Error("Cannot set screen mode.");
 			break;
 
 		case SCREEN_GAME:
-			if  (grd_curscreen->sc_mode != Game_screen_mode)
+			if  (grd_curscreen->get_screen_mode() != Game_screen_mode)
 				if (gr_set_mode(Game_screen_mode))
 					Error("Cannot set screen mode.");
 			break;
 #ifdef EDITOR
 		case SCREEN_EDITOR:
-			if (grd_curscreen->sc_mode != SM(800,600))	{
+		{
+			const screen_mode editor_mode{800, 600};
+			if (grd_curscreen->get_screen_mode() != editor_mode)
+			{
 				int gr_error;
-				if ((gr_error=gr_set_mode(SM(800,600)))!=0) { //force into game scrren
+				if ((gr_error = gr_set_mode(editor_mode)) != 0) { //force into game scrren
 					Warning("Cannot init editor screen (error=%d)",gr_error);
 					return 0;
 				}
 			}
+		}
 			break;
 #endif
 #if defined(DXX_BUILD_DESCENT_II)
 		case SCREEN_MOVIE:
-			if (grd_curscreen->sc_mode != SM(MOVIE_WIDTH,MOVIE_HEIGHT))	{
-				if (gr_set_mode(SM(MOVIE_WIDTH,MOVIE_HEIGHT))) Error("Cannot set screen mode for game!");
+		{
+			const screen_mode movie_mode{MOVIE_WIDTH, MOVIE_HEIGHT};
+			if (grd_curscreen->get_screen_mode() != movie_mode)
+			{
+				if (gr_set_mode(movie_mode))
+					Error("Cannot set screen mode for game!");
 				gr_palette_load( gr_palette );
 			}
+		}
 			break;
 #endif
 		default:
@@ -325,9 +329,25 @@ int set_screen_mode(int sm)
 	return 1;
 }
 
-static int time_paused=0;
+namespace {
 
-void stop_time()
+class game_world_time_paused
+{
+	unsigned time_paused;
+public:
+	explicit operator bool() const
+	{
+		return time_paused;
+	}
+	void increase_pause_count();
+	void decrease_pause_count();
+};
+
+}
+
+static game_world_time_paused time_paused;
+
+void game_world_time_paused::increase_pause_count()
 {
 	if (time_paused==0) {
 		const fix64 time = timer_update();
@@ -339,25 +359,54 @@ void stop_time()
 	time_paused++;
 }
 
-void start_time()
+void game_world_time_paused::decrease_pause_count()
 {
-	time_paused--;
-	Assert(time_paused >= 0);
+	Assert(time_paused > 0);
+	--time_paused;
 	if (time_paused==0) {
 		const fix64 time = timer_update();
 		last_timer_value = time - last_timer_value;
 	}
 }
 
-void game_flush_inputs()
+void start_time()
 {
-	int dx,dy,dz;
+	time_paused.decrease_pause_count();
+}
+
+void stop_time()
+{
+	time_paused.increase_pause_count();
+}
+
+pause_game_world_time::pause_game_world_time()
+{
+	stop_time();
+}
+
+pause_game_world_time::~pause_game_world_time()
+{
+	start_time();
+}
+
+static void game_flush_common_inputs()
+{
 	event_flush();
 	key_flush();
 	joy_flush();
 	mouse_flush();
-	mouse_get_delta( &dx, &dy, &dz );	// Read mouse
+}
+
+void game_flush_inputs()
+{
 	Controls = {};
+	game_flush_common_inputs();
+}
+
+void game_flush_respawn_inputs()
+{
+	static_cast<control_info::fire_controls_t &>(Controls.state) = {};
+	game_flush_common_inputs();
 }
 
 /*
@@ -366,18 +415,17 @@ void game_flush_inputs()
 void calc_d_tick()
 {
 	static fix timer = 0;
+	auto t = timer + FrameTime;
 
-	d_tick_step = 0;
-
-	timer += FrameTime;
-	if (timer >= DESIGNATED_GAME_FRAMETIME)
+	d_tick_step = t >= DESIGNATED_GAME_FRAMETIME;
+	if (d_tick_step)
 	{
-		d_tick_step = 1;
 		d_tick_count++;
 		if (d_tick_count > 1000000)
 			d_tick_count = 0;
-		timer -= DESIGNATED_GAME_FRAMETIME;
+		t -= DESIGNATED_GAME_FRAMETIME;
 	}
+	timer = t;
 }
 
 void reset_time()
@@ -389,23 +437,26 @@ void calc_frame_time()
 {
 	fix last_frametime = FrameTime;
 
-	fix64 timer_value = timer_update();
-	FrameTime = timer_value - last_timer_value;
-
-	while (FrameTime < f1_0 / (GameCfg.VSync?MAXIMUM_FPS:GameArg.SysMaxFPS))
+	const auto vsync = CGameCfg.VSync;
+	const auto bound = f1_0 / (likely(vsync) ? MAXIMUM_FPS : CGameArg.SysMaxFPS);
+	const auto may_sleep = !GameArg.SysNoNiceFPS && !vsync;
+	for (;;)
 	{
+		const auto timer_value = timer_update();
+		FrameTime = timer_value - last_timer_value;
+		if (FrameTime >= bound)
+		{
+			last_timer_value = timer_value;
+			break;
+		}
 		if (Game_mode & GM_MULTI)
 			multi_do_frame(); // during long wait, keep packets flowing
-		if (!GameArg.SysNoNiceFPS && !GameCfg.VSync)
+		if (may_sleep)
 			timer_delay(F1_0>>8);
-		timer_value = timer_update();
-		FrameTime = timer_value - last_timer_value;
 	}
 
 	if ( cheats.turbo )
 		FrameTime *= 2;
-
-	last_timer_value = timer_value;
 
 	if (FrameTime < 0)				//if bogus frametime...
 		FrameTime = (last_frametime==0?1:last_frametime);		//...then use time from last frame
@@ -413,6 +464,7 @@ void calc_frame_time()
 	GameTime64 += FrameTime;
 
 	calc_d_tick();
+        calc_d_homer_tick();
 }
 
 void move_player_2_segment(const vsegptridx_t seg,int side)
@@ -421,12 +473,12 @@ void move_player_2_segment(const vsegptridx_t seg,int side)
 	auto vp = compute_center_point_on_side(seg,side);
 	vm_vec_sub2(vp,ConsoleObject->pos);
 	vm_vector_2_matrix(ConsoleObject->orient,vp,nullptr,nullptr);
-
-	obj_relink( ConsoleObject-Objects, seg );
-
+	obj_relink(vobjptridx(ConsoleObject), seg );
 }
 
 #ifndef OGL
+namespace dsx {
+
 void save_screen_shot(int automap_flag)
 {
 	grs_canvas *screen_canv=&grd_curscreen->sc_canvas;
@@ -435,7 +487,7 @@ void save_screen_shot(int automap_flag)
         char savename[FILENAME_LEN+sizeof(SCRNS_DIR)];
 	palette_array_t pal;
 
-	stop_time();
+	pause_game_world_time p;
 
 	if (!PHYSFSX_exists(SCRNS_DIR,0))
 		PHYSFS_mkdir(SCRNS_DIR); //try making directory
@@ -450,6 +502,7 @@ void save_screen_shot(int automap_flag)
 	do
 	{
 		sprintf(savename, "%sscrn%04d.pcx",SCRNS_DIR, savenum++);
+                if (savenum >= 9999) break; // that's enough I think.
 	} while (PHYSFSX_exists(savename,0));
 
 	gr_set_current_canvas(NULL);
@@ -462,10 +515,9 @@ void save_screen_shot(int automap_flag)
 	gr_set_current_canvas(screen_canv);
 	gr_ubitmap(temp_canv->cv_bitmap);
 	gr_set_current_canvas(save_canv);
-
-	start_time();
 }
 
+}
 #endif
 
 //initialize flying
@@ -484,20 +536,24 @@ void fly_init(const vobjptr_t obj)
 static void do_cloak_stuff(void)
 {
 	for (int i = 0; i < N_players; i++)
-		if (Players[i].flags & PLAYER_FLAGS_CLOAKED) {
-			if (GameTime64 > Players[i].cloak_time+CLOAK_TIME_MAX)
+	{
+		const auto &&plobj = vobjptr(Players[i].objnum);
+		auto &player_info = plobj->ctype.player_info;
+		auto &pl_flags = player_info.powerup_flags;
+		if (pl_flags & PLAYER_FLAGS_CLOAKED)
+		{
+			if (GameTime64 > player_info.cloak_time+CLOAK_TIME_MAX)
 			{
-				Players[i].flags &= ~PLAYER_FLAGS_CLOAKED;
+				pl_flags &= ~PLAYER_FLAGS_CLOAKED;
 				if (i == Player_num) {
-					digi_play_sample( SOUND_CLOAK_OFF, F1_0);
-					if (Game_mode & GM_MULTI)
-						multi_send_play_sound(SOUND_CLOAK_OFF, F1_0);
+					multi_digi_play_sample(SOUND_CLOAK_OFF, F1_0);
 					maybe_drop_net_powerup(POW_CLOAK);
 					if ( Newdemo_state != ND_STATE_PLAYBACK )
 						multi_send_decloak(); // For demo recording
 				}
 			}
 		}
+	}
 }
 
 static int FakingInvul=0;
@@ -505,24 +561,29 @@ static int FakingInvul=0;
 //	------------------------------------------------------------------------------------
 static void do_invulnerable_stuff(void)
 {
-	if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE) {
-		if (GameTime64 > Players[Player_num].invulnerable_time+INVULNERABLE_TIME_MAX)
+	auto &plobj = get_local_plrobj();
+	auto &player_info = plobj.ctype.player_info;
+	auto &pl_flags = player_info.powerup_flags;
+	if (pl_flags & PLAYER_FLAGS_INVULNERABLE)
+	{
+		if (GameTime64 > player_info.invulnerable_time + INVULNERABLE_TIME_MAX)
 		{
-			Players[Player_num].flags ^= PLAYER_FLAGS_INVULNERABLE;
-			if (FakingInvul==0)
+			pl_flags &= ~PLAYER_FLAGS_INVULNERABLE;
+			if (FakingInvul)
 			{
-				digi_play_sample( SOUND_INVULNERABILITY_OFF, F1_0);
+				FakingInvul = 0;
+				return;
+			}
+				multi_digi_play_sample(SOUND_INVULNERABILITY_OFF, F1_0);
 				if (Game_mode & GM_MULTI)
 				{
-					multi_send_play_sound(SOUND_INVULNERABILITY_OFF, F1_0);
 					maybe_drop_net_powerup(POW_INVULNERABILITY);
 				}
-			}
-			FakingInvul=0;
 		}
 	}
 }
 
+namespace dsx {
 #if defined(DXX_BUILD_DESCENT_I)
 static inline void do_afterburner_stuff()
 {
@@ -535,17 +596,15 @@ fix64	Time_flash_last_played;
 #define AFTERBURNER_LOOP_START	((GameArg.SndDigiSampleRate==SAMPLE_RATE_22K)?32027:(32027/2))		//20098
 #define AFTERBURNER_LOOP_END		((GameArg.SndDigiSampleRate==SAMPLE_RATE_22K)?48452:(48452/2))		//25776
 
-int	Ab_scale = 4;
-
 static void do_afterburner_stuff(void)
 {
 	static sbyte func_play = 0;
 
-	if (!(Players[Player_num].flags & PLAYER_FLAGS_AFTERBURNER))
+	if (!(get_local_player_flags() & PLAYER_FLAGS_AFTERBURNER))
 		Afterburner_charge = 0;
 
-	const auto plobj = vcobjptridx(Players[Player_num].objnum);
-	if (Endlevel_sequence || Player_is_dead)
+	const auto plobj = vcobjptridx(get_local_player().objnum);
+	if (Endlevel_sequence || Player_dead_state != player_dead_state::no)
 	{
 		digi_kill_sound_linked_to_object(plobj);
 		if (Game_mode & GM_MULTI && func_play)
@@ -556,7 +615,7 @@ static void do_afterburner_stuff(void)
 	}
 
 	if ((Controls.state.afterburner != Last_afterburner_state && Last_afterburner_charge) || (Last_afterburner_state && Last_afterburner_charge && !Afterburner_charge)) {
-		if (Afterburner_charge && Controls.state.afterburner && (Players[Player_num].flags & PLAYER_FLAGS_AFTERBURNER)) {
+		if (Afterburner_charge && Controls.state.afterburner && (get_local_player_flags() & PLAYER_FLAGS_AFTERBURNER)) {
 			digi_link_sound_to_object3(SOUND_AFTERBURNER_IGNITE, plobj, 1, F1_0, vm_distance{i2f(256)}, AFTERBURNER_LOOP_START, AFTERBURNER_LOOP_END);
 			if (Game_mode & GM_MULTI)
 			{
@@ -620,6 +679,8 @@ void PALETTE_FLASH_ADD(int _dr, int _dg, int _db)
 		PaletteBlueAdd = -maxval;
 }
 
+}
+
 static void diminish_palette_color_toward_zero(int& palette_color_add, const int& dec_amount)
 {
 	if (palette_color_add > 0 ) {
@@ -634,6 +695,8 @@ static void diminish_palette_color_toward_zero(int& palette_color_add, const int
 			palette_color_add += dec_amount;
 	}
 }
+
+namespace dsx {
 
 //	------------------------------------------------------------------------------------
 //	Diminish palette effects towards normal.
@@ -705,8 +768,17 @@ static void diminish_palette_towards_normal(void)
 	gr_palette_step_up( PaletteRedAdd*brightness_correction, PaletteGreenAdd*brightness_correction, PaletteBlueAdd*brightness_correction );
 }
 
+}
+
+namespace {
+
 int	Redsave, Bluesave, Greensave;
 
+}
+
+#if defined(DXX_BUILD_DESCENT_II)
+static
+#endif
 void palette_save(void)
 {
 	Redsave = PaletteRedAdd; Bluesave = PaletteBlueAdd; Greensave = PaletteGreenAdd;
@@ -728,7 +800,8 @@ void palette_restore(void)
 //	--------------------------------------------------------------------------------------------------
 int allowed_to_fire_laser(void)
 {
-	if (Player_is_dead) {
+	if (Player_dead_state != player_dead_state::no)
+	{
 		Global_missile_firing_count = 0;
 		return 0;
 	}
@@ -746,7 +819,7 @@ int allowed_to_fire_flare(void)
 		return 0;
 
 #if defined(DXX_BUILD_DESCENT_II)
-	if (Players[Player_num].energy < Weapon_info[FLARE_ID].energy_usage)
+	if (get_local_player_energy() < Weapon_info[weapon_id_type::FLARE_ID].energy_usage)
 #define	FLARE_BIG_DELAY	(F1_0*2)
 		Next_flare_fire_time = GameTime64 + FLARE_BIG_DELAY;
 	else
@@ -780,7 +853,7 @@ void full_palette_save(void)
 #define EXT_MUSIC_TEXT "Audio CD"
 #endif
 
-static int free_help(newmenu *menu,const d_event &event, newmenu_item *items)
+static int free_help(newmenu *, const d_event &event, newmenu_item *items)
 {
 	if (event.type == EVENT_WINDOW_CLOSE)
 	{
@@ -929,54 +1002,82 @@ void show_newdemo_help()
 
 #define LEAVE_TIME 0x4000		//how long until we decide key is down	(Used to be 0x4000)
 
+enum class leave_type : uint_fast8_t
+{
+	none,
+	maybe_on_release,
+	wait_for_release,
+	on_press,
+};
+
+static leave_type leave_mode;
+
+static void end_rear_view()
+{
+	Rear_view = 0;
+	if (PlayerCfg.CockpitMode[1] == CM_REAR_VIEW)
+		select_cockpit(PlayerCfg.CockpitMode[0]);
+	if (Newdemo_state == ND_STATE_RECORDING)
+		newdemo_record_restore_rearview();
+}
+
+static void check_end_rear_view()
+{
+	leave_mode = leave_type::none;
+	if (Rear_view)
+		end_rear_view();
+}
+
 //deal with rear view - switch it on, or off, or whatever
 void check_rear_view()
 {
-	static int leave_mode;
 	static fix64 entry_time;
 
 	if (Newdemo_state == ND_STATE_PLAYBACK)
 		return;
 
-	if ( Controls.state.rear_view) {	//key/button has gone down
-		Controls.state.rear_view = 0;
-
-		if (Rear_view) {
-			Rear_view = 0;
-			if (PlayerCfg.CockpitMode[1]==CM_REAR_VIEW) {
-				select_cockpit(PlayerCfg.CockpitMode[0]);
-			}
-			if (Newdemo_state == ND_STATE_RECORDING)
-				newdemo_record_restore_rearview();
-		}
-		else {
-			Rear_view = 1;
-			leave_mode = 0;		//means wait for another key
-			entry_time = timer_query();
-			if (PlayerCfg.CockpitMode[1] == CM_FULL_COCKPIT) {
-				select_cockpit(CM_REAR_VIEW);
-			}
-			if (Newdemo_state == ND_STATE_RECORDING)
-				newdemo_record_rearview();
-		}
-	}
-	else
-		if (Controls.state.rear_view) {
-
-			if (leave_mode == 0 && (timer_query() - entry_time) > LEAVE_TIME)
-				leave_mode = 1;
-		}
-		else
-		{
-			if (leave_mode==1 && Rear_view) {
-				Rear_view = 0;
-				if (PlayerCfg.CockpitMode[1]==CM_REAR_VIEW) {
-					select_cockpit(PlayerCfg.CockpitMode[0]);
-				}
+	const auto rear_view = Controls.state.rear_view;
+	switch (leave_mode)
+	{
+		case leave_type::none:
+			if (!rear_view)
+				return;
+			if (Rear_view)
+				end_rear_view();
+			else
+			{
+				Rear_view = 1;
+				leave_mode = leave_type::maybe_on_release;		//means wait for another key
+				entry_time = timer_query();
+				if (PlayerCfg.CockpitMode[1] == CM_FULL_COCKPIT)
+					select_cockpit(CM_REAR_VIEW);
 				if (Newdemo_state == ND_STATE_RECORDING)
-					newdemo_record_restore_rearview();
+					newdemo_record_rearview();
 			}
-		}
+			return;
+		case leave_type::maybe_on_release:
+			if (rear_view)
+			{
+				if (timer_query() - entry_time > LEAVE_TIME)
+					leave_mode = leave_type::wait_for_release;
+			}
+			else
+				leave_mode = leave_type::on_press;
+			return;
+		case leave_type::wait_for_release:
+			if (!rear_view)
+				check_end_rear_view();
+			return;
+		case leave_type::on_press:
+			if (rear_view)
+			{
+				Controls.state.rear_view = 0;
+				check_end_rear_view();
+			}
+			return;
+		default:
+			break;
+	}
 }
 
 void reset_rear_view(void)
@@ -990,7 +1091,10 @@ void reset_rear_view(void)
 	select_cockpit(PlayerCfg.CockpitMode[0]);
 }
 
-int Config_menu_flag;
+int cheats_enabled()
+{
+	return cheats.enabled;
+}
 
 //turns off all cheats & resets cheater flag
 void game_disable_cheats()
@@ -1021,19 +1125,19 @@ window *game_setup(void)
 #ifdef EDITOR
 	if (!Cursegp)
 	{
-		Cursegp = &Segments[0];
+		Cursegp = segptridx(segment_first);
 		Curside = 0;
 	}
 	
 	if (Segments[ConsoleObject->segnum].segnum == segment_none)      //segment no longer exists
-		obj_relink( ConsoleObject-Objects, Cursegp );
+		obj_relink(vobjptridx(ConsoleObject), Cursegp);
 
 	if (!check_obj_seg(ConsoleObject))
 		move_player_2_segment(Cursegp,Curside);
 #endif
 
 	Viewer = ConsoleObject;
-	fly_init(ConsoleObject);
+	fly_init(vobjptr(ConsoleObject));
 	Game_suspended = 0;
 	reset_time();
 	FrameTime = 0;			//make first frame zero
@@ -1168,10 +1272,10 @@ void close_game()
 
 #if defined(DXX_BUILD_DESCENT_II)
 object *Missile_viewer=NULL;
-int Missile_viewer_sig=-1;
+object_signature_t Missile_viewer_sig;
 
-int Marker_viewer_num[2]={-1,-1};
-int Coop_view_player[2]={-1,-1};
+array<int, 2> Marker_viewer_num{{-1,-1}};
+array<int, 2> Coop_view_player{{-1,-1}};
 
 //returns ptr to escort robot, or NULL
 objptridx_t find_escort()
@@ -1180,7 +1284,7 @@ objptridx_t find_escort()
 	{
 		auto o = vobjptridx(i);
 		if (o->type == OBJ_ROBOT && Robot_info[get_robot_id(o)].companion)
-			return o;
+			return objptridx_t(o);
 	}
 	return object_none;
 }
@@ -1214,19 +1318,24 @@ static void do_ambient_sounds()
 
 void game_leave_menus(void)
 {
-	window *wind;
-
 	if (!Game_wind)
 		return;
-
-	while ((wind = window_get_front()) && (wind != Game_wind)) // go through all windows and actually close them if they want to
-		window_close(wind);
+	for (;;) // go through all windows and actually close them if they want to
+	{
+		const auto wind = window_get_front();
+		if (!wind)
+			break;
+		if (wind == Game_wind)
+			break;
+		if (!window_close(wind))
+			break;
+	}
 }
 
 void GameProcessFrame(void)
 {
-	fix player_shields = Players[Player_num].shields;
-	int player_was_dead = Player_is_dead;
+	fix player_shields = get_local_player_shields();
+	const auto player_was_dead = Player_dead_state;
 
 	update_player_stats();
 	diminish_palette_towards_normal();		//	Should leave palette effect up for as long as possible by putting right before render.
@@ -1238,12 +1347,12 @@ void GameProcessFrame(void)
 	init_ai_frame();
 	do_final_boss_frame();
 
-	if ((Players[Player_num].flags & PLAYER_FLAGS_HEADLIGHT) && (Players[Player_num].flags & PLAYER_FLAGS_HEADLIGHT_ON)) {
+	if ((get_local_player_flags() & PLAYER_FLAGS_HEADLIGHT) && (get_local_player_flags() & PLAYER_FLAGS_HEADLIGHT_ON)) {
 		static int turned_off=0;
-		Players[Player_num].energy -= (FrameTime*3/8);
-		if (Players[Player_num].energy < i2f(10)) {
+		get_local_player_energy() -= (FrameTime*3/8);
+		if (get_local_player_energy() < i2f(10)) {
 			if (!turned_off) {
-				Players[Player_num].flags &= ~PLAYER_FLAGS_HEADLIGHT_ON;
+				get_local_player_flags() &= ~PLAYER_FLAGS_HEADLIGHT_ON;
 				turned_off = 1;
 				if (Game_mode & GM_MULTI)
 					multi_send_flags(Player_num);
@@ -1252,9 +1361,10 @@ void GameProcessFrame(void)
 		else
 			turned_off = 0;
 
-		if (Players[Player_num].energy <= 0) {
-			Players[Player_num].energy = 0;
-			Players[Player_num].flags &= ~PLAYER_FLAGS_HEADLIGHT_ON;
+		if (get_local_player_energy() <= 0)
+		{
+			get_local_player_energy() = 0;
+			get_local_player_flags() &= ~PLAYER_FLAGS_HEADLIGHT_ON;
 			if (Game_mode & GM_MULTI)
 				multi_send_flags(Player_num);
 		}
@@ -1263,7 +1373,7 @@ void GameProcessFrame(void)
 
 #ifdef EDITOR
 	check_create_player_path();
-	player_follow_path(ConsoleObject);
+	player_follow_path(vobjptr(ConsoleObject));
 #endif
 
 	if (Game_mode & GM_MULTI)
@@ -1321,8 +1431,6 @@ void GameProcessFrame(void)
 	else
 	{ // Note the link to above!
 
-		Players[Player_num].homing_object_dist = -1;		//	Assume not being tracked.  Laser_do_weapon_sequence modifies this.
-
 		object_move_all();
 		powerup_grab_cheat_all();
 
@@ -1337,7 +1445,7 @@ void GameProcessFrame(void)
 			FireLaser();				// Fire Laser!
 
 		if (Auto_fire_fusion_cannon_time) {
-			if (Primary_weapon != FUSION_INDEX)
+			if (Primary_weapon != primary_weapon_index_t::FUSION_INDEX)
 				Auto_fire_fusion_cannon_time = 0;
 			else if (GameTime64 + FrameTime/2 >= Auto_fire_fusion_cannon_time) {
 				Auto_fire_fusion_cannon_time = 0;
@@ -1357,7 +1465,7 @@ void GameProcessFrame(void)
 				if (Fusion_charge > F1_0*2)
 					bump_amount = Fusion_charge*4;
 
-				bump_one_object(ConsoleObject, rand_vec, bump_amount);
+				bump_one_object(vobjptr(ConsoleObject), rand_vec, bump_amount);
 			}
 			else
 			{
@@ -1370,6 +1478,7 @@ void GameProcessFrame(void)
 
 		if (Global_laser_firing_count < 0)
 			Global_laser_firing_count = 0;
+		delayed_autoselect();
 	}
 
 	if (Do_appearance_effect) {
@@ -1377,8 +1486,8 @@ void GameProcessFrame(void)
 		Do_appearance_effect = 0;
 		if ((Game_mode & GM_MULTI) && Netgame.InvulAppear)
 		{
-			Players[Player_num].flags |= PLAYER_FLAGS_INVULNERABLE;
-			Players[Player_num].invulnerable_time = GameTime64-i2f(27);
+			get_local_player_flags() |= PLAYER_FLAGS_INVULNERABLE;
+			get_local_player_invulnerable_time() = GameTime64 - (i2f(58 - Netgame.InvulAppear) >> 1);
 			FakingInvul=1;
 		}
 	}
@@ -1389,74 +1498,81 @@ void GameProcessFrame(void)
 	flicker_lights();
 
 	//if the player is taking damage, give up guided missile control
-	if (Players[Player_num].shields != player_shields)
+	if (get_local_player_shields() != player_shields)
 		release_guided_missile(Player_num);
 #endif
 
 	// Check if we have to close in-game menus for multiplayer
-	if ((Game_mode & GM_MULTI) && (Players[Player_num].connected == CONNECT_PLAYING))
+	if ((Game_mode & GM_MULTI) && (get_local_player().connected == CONNECT_PLAYING))
 	{
-		if ( Endlevel_sequence || ((Control_center_destroyed) && (Countdown_seconds_left <= 1)) || // close menus when end of level...
-			(Automap_active && ((Player_is_dead != player_was_dead) || (Players[Player_num].shields<=0 && player_shields>0))) ) // close autmap when dying ...
-			game_leave_menus();
+		if (Endlevel_sequence || (Player_dead_state != player_was_dead) || (get_local_player_shields() < player_shields) || (Control_center_destroyed && Countdown_seconds_left < 10))
+                        game_leave_menus();
 	}
 }
 
 #if defined(DXX_BUILD_DESCENT_II)
-ubyte	Slide_segs[MAX_SEGMENTS];
-int	Slide_segs_computed;
-
-static void compute_slide_segs(void)
+void compute_slide_segs()
 {
 	range_for (const auto segnum, highest_valid(Segments))
 	{
-		Slide_segs[segnum] = 0;
+		const auto &segp = vsegptr(static_cast<segnum_t>(segnum));
+		uint8_t slide_textures = 0;
 		for (int sidenum=0;sidenum<6;sidenum++) {
-			int tmn = Segments[segnum].sides[sidenum].tmap_num;
-			if (TmapInfo[tmn].slide_u != 0 || TmapInfo[tmn].slide_v != 0)
-				Slide_segs[segnum] |= 1 << sidenum;
+			const auto &side = segp->sides[sidenum];
+			const auto &ti = TmapInfo[side.tmap_num];
+			if (!(ti.slide_u || ti.slide_v))
+				continue;
+			if (IS_CHILD(segp->children[sidenum]) && side.wall_num == wall_none)
+				/* If a wall exists, it could be visible at start or
+				 * become visible later, so always enable sliding for
+				 * walls.
+				 */
+				continue;
+			slide_textures |= 1 << sidenum;
 		}
+		segp->slide_textures = slide_textures;
 	}
+}
 
-	Slide_segs_computed = 1;
+template <fix uvl::*p>
+static void update_uv(array<uvl, 4> &uvls, uvl &i, fix a)
+{
+	if (!a)
+		return;
+	const auto ip = (i.*p += a);
+	if (ip > f2_0)
+		range_for (auto &j, uvls)
+			j.*p -= f1_0;
+	else if (ip < -f2_0)
+		range_for (auto &j, uvls)
+			j.*p += f1_0;
 }
 
 //	-----------------------------------------------------------------------------
 static void slide_textures(void)
 {
-	if (!Slide_segs_computed)
-		compute_slide_segs();
-
 	range_for (const auto segnum, highest_valid(Segments))
 	{
-		if (Slide_segs[segnum]) {
+		const auto &segp = vsegptr(static_cast<segnum_t>(segnum));
+		if (const auto slide_seg = segp->slide_textures)
+		{
 			for (int sidenum=0;sidenum<6;sidenum++) {
-				if (Slide_segs[segnum] & (1 << sidenum)) {
-					int tmn = Segments[segnum].sides[sidenum].tmap_num;
-					if (TmapInfo[tmn].slide_u != 0 || TmapInfo[tmn].slide_v != 0) {
-						for (int i=0;i<4;i++) {
-							Segments[segnum].sides[sidenum].uvls[i].u += fixmul(FrameTime,TmapInfo[tmn].slide_u<<8);
-							Segments[segnum].sides[sidenum].uvls[i].v += fixmul(FrameTime,TmapInfo[tmn].slide_v<<8);
-							if (Segments[segnum].sides[sidenum].uvls[i].u > f2_0) {
-								int j;
-								for (j=0;j<4;j++)
-									Segments[segnum].sides[sidenum].uvls[j].u -= f1_0;
-							}
-							if (Segments[segnum].sides[sidenum].uvls[i].v > f2_0) {
-								int j;
-								for (j=0;j<4;j++)
-									Segments[segnum].sides[sidenum].uvls[j].v -= f1_0;
-							}
-							if (Segments[segnum].sides[sidenum].uvls[i].u < -f2_0) {
-								int j;
-								for (j=0;j<4;j++)
-									Segments[segnum].sides[sidenum].uvls[j].u += f1_0;
-							}
-							if (Segments[segnum].sides[sidenum].uvls[i].v < -f2_0) {
-								int j;
-								for (j=0;j<4;j++)
-									Segments[segnum].sides[sidenum].uvls[j].v += f1_0;
-							}
+				if (slide_seg & (1 << sidenum))
+				{
+					auto &side = segp->sides[sidenum];
+					const auto &ti = TmapInfo[side.tmap_num];
+					const auto tiu = ti.slide_u;
+					const auto tiv = ti.slide_v;
+					if (tiu || tiv)
+					{
+						const auto frametime = FrameTime;
+						const auto ua = fixmul(frametime, tiu << 8);
+						const auto va = fixmul(frametime, tiv << 8);
+						auto &uvls = side.uvls;
+						range_for (auto &i, uvls)
+						{
+							update_uv<&uvl::u>(uvls, i, ua);
+							update_uv<&uvl::v>(uvls, i, va);
 						}
 					}
 				}
@@ -1545,20 +1661,21 @@ void FireLaser()
 
 	Global_laser_firing_count = Controls.state.fire_primary?Weapon_info[Primary_weapon_to_weapon_info[Primary_weapon]].fire_count:0;
 
-	if ((Primary_weapon == FUSION_INDEX) && (Global_laser_firing_count)) {
-		if ((Players[Player_num].energy < F1_0*2) && (Auto_fire_fusion_cannon_time == 0)) {
+	if ((Primary_weapon == primary_weapon_index_t::FUSION_INDEX) && (Global_laser_firing_count)) {
+		if ((get_local_player_energy() < F1_0*2) && (Auto_fire_fusion_cannon_time == 0)) {
 			Global_laser_firing_count = 0;
 		} else {
 			static fix64 Fusion_next_sound_time = 0;
 
 			if (Fusion_charge == 0)
-				Players[Player_num].energy -= F1_0*2;
+				get_local_player_energy() -= F1_0*2;
 
 			Fusion_charge += FrameTime;
-			Players[Player_num].energy -= FrameTime;
+			get_local_player_energy() -= FrameTime;
 
-			if (Players[Player_num].energy <= 0) {
-				Players[Player_num].energy = 0;
+			if (get_local_player_energy() <= 0)
+			{
+				get_local_player_energy() = 0;
 				Auto_fire_fusion_cannon_time = GameTime64 -1;	//	Fire now!
 			} else
 				Auto_fire_fusion_cannon_time = GameTime64 + FrameTime/2 + 1;		//	Fire the fusion cannon at this time in the future.
@@ -1581,10 +1698,8 @@ void FireLaser()
 					const auto cobjp = vobjptridx(ConsoleObject);
 					apply_damage_to_player(cobjp, cobjp, d_rand() * 4, 0);
 				} else {
-					create_awareness_event(ConsoleObject, PA_WEAPON_ROBOT_COLLISION);
-					digi_play_sample( SOUND_FUSION_WARMUP, F1_0 );
-					if (Game_mode & GM_MULTI)
-						multi_send_play_sound(SOUND_FUSION_WARMUP, F1_0);
+					create_awareness_event(vobjptr(ConsoleObject), player_awareness_type_t::PA_WEAPON_ROBOT_COLLISION);
+					multi_digi_play_sample(SOUND_FUSION_WARMUP, F1_0);
 				}
 				Fusion_next_sound_time = GameTime64 + F1_0/8 + d_rand()/4;
 			}
@@ -1622,10 +1737,10 @@ static void powerup_grab_cheat(const vobjptr_t player, const vobjptridx_t poweru
 //	way before the player gets there.
 void powerup_grab_cheat_all(void)
 {
-	auto segp = &Segments[ConsoleObject->segnum];
-	range_for (const auto objnum, objects_in(*segp))
+	const auto &&console = vobjptr(ConsoleObject);
+	range_for (const auto objnum, objects_in(vsegptr(console->segnum)))
 		if (objnum->type == OBJ_POWERUP)
-			powerup_grab_cheat(ConsoleObject, objnum);
+			powerup_grab_cheat(console, objnum);
 }
 
 int	Last_level_path_created = -1;
@@ -1685,10 +1800,14 @@ int create_special_path(void)
 {
 	//	---------- Find exit doors ----------
 	range_for (const auto i, highest_valid(Segments))
+	{
+		const auto &&segp = vcsegptr(static_cast<segnum_t>(i));
 		for (int j=0; j<MAX_SIDES_PER_SEGMENT; j++)
-			if (Segments[i].children[j] == segment_exit) {
+			if (segp->children[j] == segment_exit)
+			{
 				return mark_player_path_to_segment(i);
 			}
+	}
 
 	return 0;
 }

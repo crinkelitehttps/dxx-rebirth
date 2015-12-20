@@ -29,6 +29,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "key.h"
 #include "timer.h"
 
+namespace dcx {
+
 void ui_draw_scrollbar( UI_DIALOG *dlg, UI_GADGET_SCROLLBAR * scrollbar )
 {
 #if 0  //ndef OGL
@@ -52,14 +54,12 @@ void ui_draw_scrollbar( UI_DIALOG *dlg, UI_GADGET_SCROLLBAR * scrollbar )
 
 std::unique_ptr<UI_GADGET_SCROLLBAR> ui_add_gadget_scrollbar(UI_DIALOG * dlg, short x, short y, short w, short h, int start, int stop, int position, int window_size)
 {
-	int tw, th, taw;
+	int tw;
 
-	char up[2];
-	char down[2];
-	up[0] = 30; up[1] = 0;
-	down[0] = 31; down[1] = 0;
+	auto &up = "\x1e";
+	auto &down = "\x1f";
 
-	gr_get_string_size( up, &tw, &th, &taw );
+	gr_get_string_size(up, &tw, nullptr, nullptr);
 
 	w = tw + 10;
 
@@ -293,3 +293,4 @@ window_event_result ui_scrollbar_do( UI_DIALOG *dlg, UI_GADGET_SCROLLBAR * scrol
 	return rval;
 }
 
+}

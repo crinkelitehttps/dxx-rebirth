@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <vector>
 #include "dxxsconf.h"
+#include "fwd-segment.h"
 #include "compiler-array.h"
 #include "segnum.h"
 #include "objnum.h"

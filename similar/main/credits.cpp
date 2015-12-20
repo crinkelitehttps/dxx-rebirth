@@ -55,6 +55,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gamepal.h"
 #include "args.h"
 #endif
+#include "piggy.h"
 
 #include "compiler-make_unique.h"
 
@@ -66,6 +67,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define CREDITS_FILE    		(PHYSFSX_exists("mcredits.tex",1)?"mcredits.tex":PHYSFSX_exists("ocredits.tex",1)?"ocredits.tex":"credits.tex")
 #define ALLOWED_CHAR			(!Current_mission ? 'R' : (is_SHAREWARE ? 'S' : 'R'))
 #endif
+
+namespace {
 
 struct credits : ignore_window_pointer_t
 {
@@ -80,7 +83,9 @@ struct credits : ignore_window_pointer_t
 	grs_bitmap backdrop;
 };
 
-static window_event_result credits_handler(window *wind,const d_event &event, credits *cr)
+}
+
+static window_event_result credits_handler(window *, const d_event &event, credits *cr)
 {
 	int l, y;
 	switch (event.type)
@@ -189,9 +194,6 @@ static window_event_result credits_handler(window *wind,const d_event &event, cr
 				const auto tempp = strchr( s, '\t' );
 				if ( !tempp )	{
 					// Wacky Fast Credits thing
-					int w, h, aw;
-					
-					gr_get_string_size( s, &w, &h, &aw);
 					gr_string( 0x8000, y, s );
 				}
 			}

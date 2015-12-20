@@ -109,7 +109,7 @@ static sbyte 		bm_flag = BM_NONE;
 static int 			abm_flag = 0;
 static int 			rod_flag = 0;
 static short		wall_open_sound, wall_close_sound,wall_explodes,wall_blastable, wall_hidden;
-float		vlighting=0;
+static float		vlighting=0;
 static int			obj_eclip;
 static char 		*dest_bm;		//clip number to play when destroyed
 static int			dest_vclip;		//what vclip to play when exploding
@@ -201,7 +201,6 @@ static bitmap_index bm_load_sub(int skip, const char * filename )
 
 	grs_bitmap n;
 	iff_error = iff_read_bitmap(filename,n,BM_LINEAR,&newpal);
-	n.bm_handle=0;
 	if (iff_error != IFF_NO_ERROR)		{
 		Error("File <%s> - IFF error: %s, line %d",filename,iff_errormsg(iff_error),linenum);
 	}
@@ -396,8 +395,8 @@ int gamedata_read_tbl(int pc_shareware)
 		TmapInfo[i].destroyed = -1;
 	}
 
-	for (i=0;i<MAX_REACTORS;i++)
-		Reactors[i].model_num = -1;
+	range_for (auto &i, Reactors)
+		i.model_num = -1;
 
 	Num_effects = 0;
 	for (i=0; i<MAX_EFFECTS; i++ ) {
@@ -665,12 +664,12 @@ void bm_read_alias()
 	Num_aliases++;
 }
 
-static void set_lighting_flag(sbyte *bp)
+static void set_lighting_flag(grs_bitmap &bmp)
 {
 	if (vlighting < 0)
-		*bp |= BM_FLAG_NO_LIGHTING;
+		bmp.bm_flags |= BM_FLAG_NO_LIGHTING;
 	else
-		*bp &= (0xff ^ BM_FLAG_NO_LIGHTING);
+		bmp.bm_flags &= ~BM_FLAG_NO_LIGHTING;
 }
 
 static void set_texture_name(char *name)
@@ -723,7 +722,7 @@ static void bm_read_eclip(int skip)
 
 		Assert(clip_count < frames);
 		Effects[clip_num].vc.frames[clip_count] = bitmap;
-		set_lighting_flag(&GameBitmaps[bitmap.index].bm_flags);
+		set_lighting_flag(GameBitmaps[bitmap.index]);
 
 		Assert(!obj_eclip);		//obj eclips for non-abm files not supported!
 		Assert(crit_flag==0);
@@ -752,7 +751,7 @@ static void bm_read_eclip(int skip)
 		Effects[clip_num].vc.frame_time = Effects[clip_num].vc.play_time/Effects[clip_num].vc.num_frames;
 
 		clip_count = 0;	
-		set_lighting_flag( &GameBitmaps[bm[clip_count].index].bm_flags);
+		set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 		Effects[clip_num].vc.frames[clip_count] = bm[clip_count];
 
 		if (!obj_eclip && !crit_flag) {
@@ -780,7 +779,7 @@ static void bm_read_eclip(int skip)
 		//if for an object, Effects_bm_ptrs set in object load
 
 		for(clip_count=1;clip_count < Effects[clip_num].vc.num_frames; clip_count++) {
-			set_lighting_flag( &GameBitmaps[bm[clip_count].index].bm_flags);
+			set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 			Effects[clip_num].vc.frames[clip_count] = bm[clip_count];
 		}
 
@@ -881,7 +880,7 @@ static void bm_read_wclip(int skip)
 		WallAnims[clip_num].open_sound = wall_open_sound;
 		WallAnims[clip_num].close_sound = wall_close_sound;
 		Textures[texture_count] = bitmap;
-		set_lighting_flag(&GameBitmaps[bitmap.index].bm_flags);
+		set_lighting_flag(GameBitmaps[bitmap.index]);
 		set_texture_name( arg );
 		Assert(texture_count < MAX_TEXTURES);
 		texture_count++;
@@ -906,11 +905,11 @@ static void bm_read_wclip(int skip)
 
 		if (clip_num >= Num_wall_anims) Num_wall_anims = clip_num+1;
 
-		set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+		set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 
 		for (clip_count=0;clip_count < WallAnims[clip_num].num_frames; clip_count++)	{
 			Textures[texture_count] = bm[clip_count];
-			set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+			set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 			WallAnims[clip_num].frames[clip_count] = texture_count;
 			REMOVE_DOTS(arg);
 			snprintf(&TmapInfo[texture_count].filename[0u], TmapInfo[texture_count].filename.size(), "%s#%d", arg, clip_count);
@@ -938,7 +937,7 @@ static void bm_read_vclip(int skip)
 		Vclip[clip_num].frame_time = fl2f(play_time)/frames;
 		Vclip[clip_num].light_value = fl2f(vlighting);
 		Vclip[clip_num].sound_num = sound_num;
-		set_lighting_flag(&GameBitmaps[bi.index].bm_flags);
+		set_lighting_flag(GameBitmaps[bi.index]);
 		Assert(clip_count < frames);
 		Vclip[clip_num].frames[clip_count++] = bi;
 		if (rod_flag) {
@@ -962,10 +961,10 @@ static void bm_read_vclip(int skip)
 		Vclip[clip_num].frame_time = fl2f(play_time)/Vclip[clip_num].num_frames;
 		Vclip[clip_num].light_value = fl2f(vlighting);
 		Vclip[clip_num].sound_num = sound_num;
-		set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+		set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 
 		for (clip_count=0;clip_count < Vclip[clip_num].num_frames; clip_count++) {
-			set_lighting_flag(&GameBitmaps[bm[clip_count].index].bm_flags);
+			set_lighting_flag(GameBitmaps[bm[clip_count].index]);
 			Vclip[clip_num].frames[clip_count] = bm[clip_count];
 		}
 	}
@@ -1007,7 +1006,7 @@ static void adjust_field_of_view(array<fix, NDL> &fovp)
 		}
 		ff = ff/360;
 		tt = fl2f(ff);
-		fix_sincos(tt, nullptr, &i);
+		i = fix_cos(tt);
 	}
 }
 
@@ -1142,10 +1141,11 @@ void bm_read_robot(int skip)
 	fix			strength = F1_0*10;		// Default strength
 	fix			mass = f1_0*4;
 	fix			drag = f1_0/2;
-	short 		weapon_type = 0, weapon_type2 = -1;
+	weapon_id_type weapon_type = weapon_id_type::LASER_ID_L1, weapon_type2 = weapon_id_type::unspecified;
 	int			g,s;
 	char			name[ROBOT_NAME_LENGTH];
-	int			contains_count=0, contains_id=0, contains_prob=0, contains_type=0, behavior=AIB_NORMAL;
+	int			contains_count=0, contains_id=0, contains_prob=0, contains_type=0;
+	auto behavior = ai_behavior::AIB_NORMAL;
 	int			companion = 0, smart_blobs=0, energy_blobs=0, badass=0, energy_drain=0, kamikaze=0, thief=0, pursuit=0, lightcast=0, death_roll=0;
 	fix			glow=0, aim=F1_0;
 	int			deathroll_sound = SOUND_BOSS_SHARE_DIE;	//default
@@ -1196,9 +1196,9 @@ void bm_read_robot(int skip)
 					Error( "In bitmaps.tbl, lighting value of %.2f is out of range 0..1.\n", f2fl(lighting));
 				}
 			} else if (!d_stricmp( arg, "weapon_type" )) {
-				weapon_type = atoi(equal_ptr);
+				weapon_type = static_cast<weapon_id_type>(atoi(equal_ptr));
 			} else if (!d_stricmp( arg, "weapon_type2" )) {
-				weapon_type2 = atoi(equal_ptr);
+				weapon_type2 = static_cast<weapon_id_type>(atoi(equal_ptr));
 			} else if (!d_stricmp( arg, "strength" )) {
 				strength = i2f(atoi(equal_ptr));
 			} else if (!d_stricmp( arg, "mass" )) {
@@ -1260,19 +1260,19 @@ void bm_read_robot(int skip)
 					flags |= RIF_BIG_RADIUS;
 			} else if (!d_stricmp( arg, "behavior" )) {
 				if (!d_stricmp(equal_ptr, "STILL"))
-					behavior = AIB_STILL;
+					behavior = ai_behavior::AIB_STILL;
 				else if (!d_stricmp(equal_ptr, "NORMAL"))
-					behavior = AIB_NORMAL;
+					behavior = ai_behavior::AIB_NORMAL;
 				else if (!d_stricmp(equal_ptr, "BEHIND"))
-					behavior = AIB_BEHIND;
+					behavior = ai_behavior::AIB_BEHIND;
 				else if (!d_stricmp(equal_ptr, "RUN_FROM"))
-					behavior = AIB_RUN_FROM;
+					behavior = ai_behavior::AIB_RUN_FROM;
 				else if (!d_stricmp(equal_ptr, "SNIPE"))
-					behavior = AIB_SNIPE;
+					behavior = ai_behavior::AIB_SNIPE;
 				else if (!d_stricmp(equal_ptr, "STATION"))
-					behavior = AIB_STATION;
+					behavior = ai_behavior::AIB_STATION;
 				else if (!d_stricmp(equal_ptr, "FOLLOW"))
-					behavior = AIB_FOLLOW;
+					behavior = ai_behavior::AIB_FOLLOW;
 				else
 					Int3();	//	Error.  Illegal behavior type for current robot.
 			} else if (!d_stricmp( arg, "name" )) {
@@ -1382,7 +1382,7 @@ void bm_read_reactor(void)
 	fix	lighting = F1_0/2;		// Default
 	int type=-1;
 
-	Assert(Num_reactors < MAX_REACTORS);
+	assert(Num_reactors < Reactors.size());
 
 	if (0 /*skip*/) {
 		Num_reactors++;
@@ -1440,7 +1440,7 @@ void bm_read_reactor(void)
 		Error("No object type specfied for object in BITMAPS.TBL on line %d\n",linenum);
 
 	Reactors[Num_reactors].model_num = model_num;
-	Reactors[Num_reactors].n_guns = read_model_guns(model_name,Reactors[Num_reactors].gun_points,Reactors[Num_reactors].gun_dirs);
+	read_model_guns(model_name, Reactors[Num_reactors]);
 
 	Num_reactors++;
 }
@@ -1614,9 +1614,6 @@ void bm_read_player_ship(void)
 
 		arg = strtok( NULL, space_tab );
 	}
-
-	Assert(model_name != NULL);
-
 	if (First_multi_bitmap_num!=-1 && last_multi_bitmap_num==-1)
 		last_multi_bitmap_num=N_ObjBitmapPtrs;
 
@@ -1811,7 +1808,7 @@ void bm_read_weapon(int skip, int unused_flag)
 	Weapon_info[n].flash = 0;
 	Weapon_info[n].multi_damage_scale = F1_0;
 	Weapon_info[n].afterburner_size = 0;
-	Weapon_info[n].children = -1;
+	Weapon_info[n].children = weapon_id_type::unspecified;
 
 	// Process arguments
 	arg = strtok( NULL, space_tab );
@@ -1941,7 +1938,7 @@ void bm_read_weapon(int skip, int unused_flag)
 			} else if (!d_stricmp(arg, "afterburner_size" )) {
 				Weapon_info[n].afterburner_size = f2i(16*fl2f(atof(equal_ptr)));
 			} else if (!d_stricmp(arg, "children" )) {
-				Weapon_info[n].children = atoi(equal_ptr);
+				Weapon_info[n].children = static_cast<weapon_id_type>(atoi(equal_ptr));
 			} else if (!d_stricmp(arg, "placable" )) {
 				if (atoi(equal_ptr)) {
 					Weapon_info[n].flags |= WIF_PLACABLE;
@@ -2195,7 +2192,7 @@ void bm_write_all(PHYSFS_file *fp)
 
 void bm_write_extra_robots()
 {
-	u_int32_t t;
+	uint32_t t;
 	int i;
 	auto fp = PHYSFSX_openWriteBuffered("robots.ham");
 	t = 0x5848414d; /* 'XHAM' */

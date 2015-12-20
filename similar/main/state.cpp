@@ -51,6 +51,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "weapon.h"
 #include "render.h"
 #include "gameseq.h"
+#include "event.h"
+#include "robot.h"
 #include "gauges.h"
 #include "newdemo.h"
 #include "automap.h"
@@ -67,6 +69,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "fireball.h"
 #include "controls.h"
 #include "laser.h"
+#include "hudmsg.h"
 #include "state.h"
 #include "multi.h"
 #include "gr.h"
@@ -81,6 +84,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #if defined(DXX_BUILD_DESCENT_I)
 #define STATE_VERSION 7
+#define STATE_MATCEN_VERSION 25 // specific version of metcen info written into D1 savegames. Currenlty equal to GAME_VERSION (see gamesave.cpp). If changed, then only along with STATE_VERSION.
 #define STATE_COMPATIBLE_VERSION 6
 #elif defined(DXX_BUILD_DESCENT_II)
 #define STATE_VERSION 22
@@ -112,8 +116,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define THUMBNAIL_H 50
 #define DESC_LENGTH 20
 
-int sc_last_item= 0;
-
 static const char dgss_id[4] = {'D', 'G', 'S', 'S'};
 
 unsigned state_game_id;
@@ -122,7 +124,7 @@ unsigned state_game_id;
 // turn object to object_rw to be saved to Savegame.
 static void state_object_to_object_rw(const vcobjptr_t obj, object_rw *obj_rw)
 {
-	obj_rw->signature     = obj->signature;
+	obj_rw->signature     = obj->signature.get();
 	obj_rw->type          = obj->type;
 	obj_rw->id            = obj->id;
 	obj_rw->next          = obj->next;
@@ -147,9 +149,7 @@ static void state_object_to_object_rw(const vcobjptr_t obj, object_rw *obj_rw)
 	obj_rw->orient.uvec.z = obj->orient.uvec.z;
 	obj_rw->size          = obj->size;
 	obj_rw->shields       = obj->shields;
-	obj_rw->last_pos.x    = obj->last_pos.x;
-	obj_rw->last_pos.y    = obj->last_pos.y;
-	obj_rw->last_pos.z    = obj->last_pos.z;
+	obj_rw->last_pos    = obj->last_pos;
 	obj_rw->contains_type = obj->contains_type;
 	obj_rw->contains_id   = obj->contains_id;
 	obj_rw->contains_count= obj->contains_count;
@@ -189,7 +189,7 @@ static void state_object_to_object_rw(const vcobjptr_t obj, object_rw *obj_rw)
 		case CT_WEAPON:
 			obj_rw->ctype.laser_info.parent_type      = obj->ctype.laser_info.parent_type;
 			obj_rw->ctype.laser_info.parent_num       = obj->ctype.laser_info.parent_num;
-			obj_rw->ctype.laser_info.parent_signature = obj->ctype.laser_info.parent_signature;
+			obj_rw->ctype.laser_info.parent_signature = obj->ctype.laser_info.parent_signature.get();
 			if (obj->ctype.laser_info.creation_time - GameTime64 < F1_0*(-18000))
 				obj_rw->ctype.laser_info.creation_time = F1_0*(-18000);
 			else
@@ -211,7 +211,7 @@ static void state_object_to_object_rw(const vcobjptr_t obj, object_rw *obj_rw)
 		case CT_AI:
 		{
 			int i;
-			obj_rw->ctype.ai_info.behavior               = obj->ctype.ai_info.behavior; 
+			obj_rw->ctype.ai_info.behavior               = static_cast<uint8_t>(obj->ctype.ai_info.behavior);
 			for (i = 0; i < MAX_AI_FLAGS; i++)
 				obj_rw->ctype.ai_info.flags[i]       = obj->ctype.ai_info.flags[i]; 
 			obj_rw->ctype.ai_info.hide_segment           = obj->ctype.ai_info.hide_segment;
@@ -219,10 +219,10 @@ static void state_object_to_object_rw(const vcobjptr_t obj, object_rw *obj_rw)
 			obj_rw->ctype.ai_info.path_length            = obj->ctype.ai_info.path_length;
 			obj_rw->ctype.ai_info.cur_path_index         = obj->ctype.ai_info.cur_path_index;
 			obj_rw->ctype.ai_info.danger_laser_num       = obj->ctype.ai_info.danger_laser_num;
-			obj_rw->ctype.ai_info.danger_laser_signature = obj->ctype.ai_info.danger_laser_signature;
+			obj_rw->ctype.ai_info.danger_laser_signature = obj->ctype.ai_info.danger_laser_signature.get();
 #if defined(DXX_BUILD_DESCENT_I)
-			obj_rw->ctype.ai_info.follow_path_start_seg  = obj->ctype.ai_info.follow_path_start_seg;
-			obj_rw->ctype.ai_info.follow_path_end_seg    = obj->ctype.ai_info.follow_path_end_seg;
+			obj_rw->ctype.ai_info.follow_path_start_seg  = segment_none;
+			obj_rw->ctype.ai_info.follow_path_end_seg    = segment_none;
 #elif defined(DXX_BUILD_DESCENT_II)
 			obj_rw->ctype.ai_info.dying_sound_playing    = obj->ctype.ai_info.dying_sound_playing;
 			if (obj->ctype.ai_info.dying_start_time == 0) // if bot not dead, anything but 0 will kill it
@@ -289,7 +289,7 @@ static void state_object_to_object_rw(const vcobjptr_t obj, object_rw *obj_rw)
 // turn object_rw to object after reading from Savegame
 static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 {
-	obj->signature     = obj_rw->signature;
+	obj->signature     = object_signature_t{static_cast<uint16_t>(obj_rw->signature)};
 	obj->type          = obj_rw->type;
 	obj->id            = obj_rw->id;
 	obj->next          = obj_rw->next;
@@ -314,9 +314,7 @@ static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 	obj->orient.uvec.z = obj_rw->orient.uvec.z;
 	obj->size          = obj_rw->size;
 	obj->shields       = obj_rw->shields;
-	obj->last_pos.x    = obj_rw->last_pos.x;
-	obj->last_pos.y    = obj_rw->last_pos.y;
-	obj->last_pos.z    = obj_rw->last_pos.z;
+	obj->last_pos    = obj_rw->last_pos;
 	obj->contains_type = obj_rw->contains_type;
 	obj->contains_id   = obj_rw->contains_id;
 	obj->contains_count= obj_rw->contains_count;
@@ -356,14 +354,13 @@ static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 		case CT_WEAPON:
 			obj->ctype.laser_info.parent_type      = obj_rw->ctype.laser_info.parent_type;
 			obj->ctype.laser_info.parent_num       = obj_rw->ctype.laser_info.parent_num;
-			obj->ctype.laser_info.parent_signature = obj_rw->ctype.laser_info.parent_signature;
+			obj->ctype.laser_info.parent_signature = object_signature_t{static_cast<uint16_t>(obj_rw->ctype.laser_info.parent_signature)};
 			obj->ctype.laser_info.creation_time    = obj_rw->ctype.laser_info.creation_time;
 			obj->ctype.laser_info.last_hitobj      = obj_rw->ctype.laser_info.last_hitobj;
 			if (obj->ctype.laser_info.last_hitobj != object_none)
 				obj->ctype.laser_info.hitobj_list[obj->ctype.laser_info.last_hitobj] = true; // restore most recent hitobj to hitobj_list
 			obj->ctype.laser_info.track_goal       = obj_rw->ctype.laser_info.track_goal;
 			obj->ctype.laser_info.multiplier       = obj_rw->ctype.laser_info.multiplier;
-			obj->ctype.laser_info.track_turn_time  = HOMING_TURN_TIME;
 #if defined(DXX_BUILD_DESCENT_II)
 			obj->ctype.laser_info.last_afterburner_time = 0;
 #endif
@@ -381,7 +378,7 @@ static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 		case CT_AI:
 		{
 			int i;
-			obj->ctype.ai_info.behavior               = obj_rw->ctype.ai_info.behavior; 
+			obj->ctype.ai_info.behavior               = static_cast<ai_behavior>(obj_rw->ctype.ai_info.behavior);
 			for (i = 0; i < MAX_AI_FLAGS; i++)
 				obj->ctype.ai_info.flags[i]       = obj_rw->ctype.ai_info.flags[i]; 
 			obj->ctype.ai_info.hide_segment           = obj_rw->ctype.ai_info.hide_segment;
@@ -389,10 +386,8 @@ static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 			obj->ctype.ai_info.path_length            = obj_rw->ctype.ai_info.path_length;
 			obj->ctype.ai_info.cur_path_index         = obj_rw->ctype.ai_info.cur_path_index;
 			obj->ctype.ai_info.danger_laser_num       = obj_rw->ctype.ai_info.danger_laser_num;
-			obj->ctype.ai_info.danger_laser_signature = obj_rw->ctype.ai_info.danger_laser_signature;
+			obj->ctype.ai_info.danger_laser_signature = object_signature_t{static_cast<uint16_t>(obj_rw->ctype.ai_info.danger_laser_signature)};
 #if defined(DXX_BUILD_DESCENT_I)
-			obj->ctype.ai_info.follow_path_start_seg  = obj_rw->ctype.ai_info.follow_path_start_seg;
-			obj->ctype.ai_info.follow_path_end_seg    = obj_rw->ctype.ai_info.follow_path_end_seg;
 #elif defined(DXX_BUILD_DESCENT_II)
 			obj->ctype.ai_info.dying_sound_playing    = obj_rw->ctype.ai_info.dying_sound_playing;
 			obj->ctype.ai_info.dying_start_time       = obj_rw->ctype.ai_info.dying_start_time;
@@ -406,7 +401,10 @@ static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 			
 		case CT_POWERUP:
 			obj->ctype.powerup_info.count         = obj_rw->ctype.powerup_info.count;
-#if defined(DXX_BUILD_DESCENT_II)
+#if defined(DXX_BUILD_DESCENT_I)
+			obj->ctype.powerup_info.creation_time = 0;
+			obj->ctype.powerup_info.flags         = 0;
+#elif defined(DXX_BUILD_DESCENT_II)
 			obj->ctype.powerup_info.creation_time = obj_rw->ctype.powerup_info.creation_time;
 			obj->ctype.powerup_info.flags         = obj_rw->ctype.powerup_info.flags;
 #endif
@@ -414,10 +412,7 @@ static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 		case CT_CNTRLCEN:
 		{
 			// gun points of reactor now part of the object but of course not saved in object_rw and overwritten due to reset_objects(). Let's just recompute them.
-			int i = 0;
-			reactor *reactor = get_reactor_definition(get_reactor_id(obj));
-			for (i=0; i<reactor->n_guns; i++)
-				calc_controlcen_gun_point(reactor, obj, i);
+			calc_controlcen_gun_point(obj);
 			break;
 		}
 	}
@@ -461,7 +456,7 @@ static void state_object_rw_to_object(object_rw *obj_rw, const vobjptr_t obj)
 
 // Following functions convert player to player_rw and back to be written to/read from Savegames. player only differ to player_rw in terms of timer values (fix/fix64). as we reset GameTime64 for writing so it can fit into fix it's not necessary to increment savegame version. But if we once store something else into object which might be useful after restoring, it might be handy to increment Savegame version and actually store these new infos.
 // turn player to player_rw to be saved to Savegame.
-static void state_player_to_player_rw(const player *pl, player_rw *pl_rw)
+static void state_player_to_player_rw(const fix pl_shields, const player *pl, player_rw *pl_rw, const player_info &pl_info)
 {
 	int i=0;
 	pl_rw->callsign = pl->callsign;
@@ -470,31 +465,31 @@ static void state_player_to_player_rw(const player *pl, player_rw *pl_rw)
 	pl_rw->objnum                    = pl->objnum;
 	pl_rw->n_packets_got             = 0;
 	pl_rw->n_packets_sent            = 0;
-	pl_rw->flags                     = pl->flags;
-	pl_rw->energy                    = pl->energy;
-	pl_rw->shields                   = pl->shields;
+	pl_rw->flags                     = pl_info.powerup_flags.get_player_flags();
+	pl_rw->energy                    = pl_info.energy;
+	pl_rw->shields                   = pl_shields;
 	pl_rw->lives                     = pl->lives;
 	pl_rw->level                     = pl->level;
-	pl_rw->laser_level               = pl->laser_level;
+	pl_rw->laser_level               = pl_info.laser_level;
 	pl_rw->starting_level            = pl->starting_level;
-	pl_rw->killer_objnum             = pl->killer_objnum;
-	pl_rw->primary_weapon_flags      = pl->primary_weapon_flags;
-	pl_rw->secondary_weapon_flags    = pl->secondary_weapon_flags;
-	pl_rw->vulcan_ammo   = pl->vulcan_ammo;
+	pl_rw->killer_objnum             = pl_info.killer_objnum;
+	pl_rw->primary_weapon_flags      = pl_info.primary_weapon_flags;
+	pl_rw->secondary_weapon_flags    = 0;
+	pl_rw->vulcan_ammo   = pl_info.vulcan_ammo;
 	for (i = 0; i < MAX_SECONDARY_WEAPONS; i++)
-		pl_rw->secondary_ammo[i] = pl->secondary_ammo[i];
+		pl_rw->secondary_ammo[i] = pl_info.secondary_ammo[i];
 	pl_rw->last_score                = pl->last_score;
 	pl_rw->score                     = pl->score;
 	pl_rw->time_level                = pl->time_level;
 	pl_rw->time_total                = pl->time_total;
-	if (pl->cloak_time - GameTime64 < F1_0*(-18000))
+	if (pl_info.cloak_time - GameTime64 < F1_0*(-18000))
 		pl_rw->cloak_time        = F1_0*(-18000);
 	else
-		pl_rw->cloak_time        = pl->cloak_time - GameTime64;
-	if (pl->invulnerable_time - GameTime64 < F1_0*(-18000))
+		pl_rw->cloak_time        = pl_info.cloak_time - GameTime64;
+	if (pl_info.invulnerable_time - GameTime64 < F1_0*(-18000))
 		pl_rw->invulnerable_time = F1_0*(-18000);
 	else
-		pl_rw->invulnerable_time = pl->invulnerable_time - GameTime64;
+		pl_rw->invulnerable_time = pl_info.invulnerable_time - GameTime64;
 #if defined(DXX_BUILD_DESCENT_II)
 	pl_rw->KillGoalCount             = pl->KillGoalCount;
 #endif
@@ -508,37 +503,36 @@ static void state_player_to_player_rw(const player *pl, player_rw *pl_rw)
 	pl_rw->hostages_total            = pl->hostages_total;
 	pl_rw->hostages_on_board         = pl->hostages_on_board;
 	pl_rw->hostages_level            = pl->hostages_level;
-	pl_rw->homing_object_dist        = pl->homing_object_dist;
+	pl_rw->homing_object_dist        = pl_info.homing_object_dist;
 	pl_rw->hours_level               = pl->hours_level;
 	pl_rw->hours_total               = pl->hours_total;
 }
 
 // turn player_rw to player after reading from Savegame
-static void state_player_rw_to_player(const player_rw *pl_rw, player *pl)
+static void state_player_rw_to_player(const player_rw *pl_rw, player *pl, player_info &pl_info, fix &pl_shields)
 {
 	int i=0;
 	pl->callsign = pl_rw->callsign;
 	pl->connected                 = pl_rw->connected;
 	pl->objnum                    = pl_rw->objnum;
-	pl->flags                     = pl_rw->flags;
-	pl->energy                    = pl_rw->energy;
-	pl->shields                   = pl_rw->shields;
+	pl_info.powerup_flags         = player_flags(pl_rw->flags);
+	pl_info.energy                = pl_rw->energy;
+	pl_shields                    = pl_rw->shields;
 	pl->lives                     = pl_rw->lives;
 	pl->level                     = pl_rw->level;
-	pl->laser_level               = pl_rw->laser_level;
+	pl_info.laser_level               = stored_laser_level(pl_rw->laser_level);
 	pl->starting_level            = pl_rw->starting_level;
-	pl->killer_objnum             = pl_rw->killer_objnum;
-	pl->primary_weapon_flags      = pl_rw->primary_weapon_flags;
-	pl->secondary_weapon_flags    = pl_rw->secondary_weapon_flags;
-	pl->vulcan_ammo   = pl_rw->vulcan_ammo;
+	pl_info.killer_objnum         = pl_rw->killer_objnum;
+	pl_info.primary_weapon_flags  = pl_rw->primary_weapon_flags;
+	pl_info.vulcan_ammo   = pl_rw->vulcan_ammo;
 	for (i = 0; i < MAX_SECONDARY_WEAPONS; i++)
-		pl->secondary_ammo[i] = pl_rw->secondary_ammo[i];
+		pl_info.secondary_ammo[i] = pl_rw->secondary_ammo[i];
 	pl->last_score                = pl_rw->last_score;
 	pl->score                     = pl_rw->score;
 	pl->time_level                = pl_rw->time_level;
 	pl->time_total                = pl_rw->time_total;
-	pl->cloak_time                = pl_rw->cloak_time;
-	pl->invulnerable_time         = pl_rw->invulnerable_time;
+	pl_info.cloak_time                = pl_rw->cloak_time;
+	pl_info.invulnerable_time         = pl_rw->invulnerable_time;
 #if defined(DXX_BUILD_DESCENT_II)
 	pl->KillGoalCount             = pl_rw->KillGoalCount;
 #endif
@@ -552,25 +546,27 @@ static void state_player_rw_to_player(const player_rw *pl_rw, player *pl)
 	pl->hostages_total            = pl_rw->hostages_total;
 	pl->hostages_on_board         = pl_rw->hostages_on_board;
 	pl->hostages_level            = pl_rw->hostages_level;
-	pl->homing_object_dist        = pl_rw->homing_object_dist;
+	pl_info.homing_object_dist        = pl_rw->homing_object_dist;
 	pl->hours_level               = pl_rw->hours_level;
 	pl->hours_total               = pl_rw->hours_total;
 }
 
-static void state_write_player(PHYSFS_file *fp, const player &pl)
+static void state_write_player(PHYSFS_file *fp, const player &pl, const fix pl_shields, const player_info &pl_info)
 {
 	player_rw pl_rw;
-	state_player_to_player_rw(&pl, &pl_rw);
+	state_player_to_player_rw(pl_shields, &pl, &pl_rw, pl_info);
 	PHYSFS_write(fp, &pl_rw, sizeof(pl_rw), 1);
 }
 
-static void state_read_player(PHYSFS_file *fp, player &pl, int swap)
+static void state_read_player(PHYSFS_file *fp, player &pl, int swap, player_info &pl_info, fix &pl_shields)
 {
 	player_rw pl_rw;
 	PHYSFS_read(fp, &pl_rw, sizeof(pl_rw), 1);
 	player_rw_swap(&pl_rw, swap);
-	state_player_rw_to_player(&pl_rw, &pl);
+	state_player_rw_to_player(&pl_rw, &pl, pl_info, pl_shields);
 }
+
+namespace {
 
 //-------------------------------------------------------------------
 struct state_userdata
@@ -578,6 +574,8 @@ struct state_userdata
 	int citem;
 	array<grs_bitmap_ptr, NUM_SAVES> sc_bmp;
 };
+
+}
 
 static int state_callback(newmenu *menu,const d_event &event, state_userdata *const userdata)
 {
@@ -590,8 +588,10 @@ static int state_callback(newmenu *menu,const d_event &event, state_userdata *co
 	{
 		if ( sc_bmp[citem-1] )	{
 			grs_canvas *save_canv = grd_curcanv;
+			const auto &&fspacx = FSPACX();
+			const auto &&fspacy = FSPACY();
 #ifndef OGL
-			auto temp_canv = gr_create_canvas(FSPACX(THUMBNAIL_W),FSPACY(THUMBNAIL_H));
+			auto temp_canv = gr_create_canvas(fspacx(THUMBNAIL_W), fspacy(THUMBNAIL_H));
 #else
 			auto temp_canv = gr_create_canvas(THUMBNAIL_W*2,(THUMBNAIL_H*24/10));
 #endif
@@ -604,9 +604,9 @@ static int state_callback(newmenu *menu,const d_event &event, state_userdata *co
 			scale_bitmap(*sc_bmp[citem-1].get(), vertbuf, 0);
 			gr_set_current_canvas( save_canv );
 #ifndef OGL
-			gr_bitmap( (grd_curcanv->cv_bitmap.bm_w/2)-FSPACX(THUMBNAIL_W/2),items[0].y-3, temp_canv->cv_bitmap);
+			gr_bitmap((grd_curcanv->cv_bitmap.bm_w / 2) - fspacx(THUMBNAIL_W / 2), items[0].y - 3, temp_canv->cv_bitmap);
 #else
-			ogl_ubitmapm_cs((grd_curcanv->cv_bitmap.bm_w/2)-FSPACX(THUMBNAIL_W/2),items[0].y-FSPACY(3),FSPACX(THUMBNAIL_W),FSPACY(THUMBNAIL_H),temp_canv->cv_bitmap,-1,F1_0);
+			ogl_ubitmapm_cs((grd_curcanv->cv_bitmap.bm_w / 2) - fspacx(THUMBNAIL_W / 2), items[0].y - fspacy(3), fspacx(THUMBNAIL_W), fspacy(THUMBNAIL_H), temp_canv->cv_bitmap, -1, F1_0);
 #endif
 		}
 		return 1;
@@ -641,7 +641,7 @@ int state_quick_item = -1;
  * For restoring, dsc should be NULL, in which case empty slots will not be
  * selectable and savagames descriptions will not be editable.
  */
-static int state_get_savegame_filename(char * fname, char * dsc, const char * caption, int blind_save)
+static int state_get_savegame_filename(char * fname, char * dsc, const char * caption, blind_save blind)
 {
 	int i, choice, version, nsaves;
 	newmenu_item m[NUM_SAVES+1];
@@ -655,7 +655,7 @@ static int state_get_savegame_filename(char * fname, char * dsc, const char * ca
 	nsaves=0;
 	nm_set_item_text(m[0], "\n\n\n\n");
 	for (i=0;i<NUM_SAVES; i++ )	{
-		snprintf(filename[i], sizeof(filename[i]), PLAYER_DIRECTORY_STRING("%.8s.%cg%x"), static_cast<const char *>(Players[Player_num].callsign), (Game_mode & GM_MULTI_COOP)?'m':'s', i );
+		snprintf(filename[i], sizeof(filename[i]), PLAYER_DIRECTORY_STRING("%.8s.%cg%x"), static_cast<const char *>(get_local_player().callsign), (Game_mode & GM_MULTI_COOP)?'m':'s', i );
 		valid = 0;
 		if (auto fp = PHYSFSX_openReadBuffered(filename[i]))
 		{
@@ -707,12 +707,10 @@ static int state_get_savegame_filename(char * fname, char * dsc, const char * ca
 		return 0;
 	}
 
-	sc_last_item = -1;
+	if (blind != blind_save::no && state_quick_item < 0)
+		blind = blind_save::no;		// haven't picked a slot yet
 
-	if (blind_save && state_quick_item < 0)
-		blind_save = 0;		// haven't picked a slot yet
-
-	if (blind_save)
+	if (blind != blind_save::no)
 		choice = state_default_item + 1;
 	else
 	{
@@ -730,15 +728,17 @@ static int state_get_savegame_filename(char * fname, char * dsc, const char * ca
 	return 0;
 }
 
-int state_get_save_file(char * fname, char * dsc, int blind_save)
+int state_get_save_file(char * fname, char * dsc, blind_save blind_save)
 {
 	return state_get_savegame_filename(fname, dsc, "Save Game", blind_save);
 }
 
-int state_get_restore_file(char * fname, int blind_save)
+int state_get_restore_file(char * fname, blind_save blind_save)
 {
 	return state_get_savegame_filename(fname, NULL, "Select Game to Restore", blind_save);
 }
+
+namespace dsx {
 
 #if defined(DXX_BUILD_DESCENT_I)
 #elif defined(DXX_BUILD_DESCENT_II)
@@ -787,18 +787,19 @@ static int copy_file(const char *old_file, const char *new_file)
 
 //	-----------------------------------------------------------------------------------
 #if defined(DXX_BUILD_DESCENT_I)
-int state_save_all(int secret_save, std::nullptr_t, int blind_save)
+int state_save_all(const blind_save blind_save)
 #elif defined(DXX_BUILD_DESCENT_II)
-int state_save_all(int secret_save, const char *filename_override, int blind_save)
+int state_save_all(const secret_save secret, const blind_save blind_save)
 #endif
 {
 	int	rval, filenum = -1;
 	char	filename[PATH_MAX], desc[DESC_LENGTH+1];
 
 #if defined(DXX_BUILD_DESCENT_I)
-	secret_save = 0;
+	static constexpr tt::integral_constant<secret_save, secret_save::none> secret{};
 #elif defined(DXX_BUILD_DESCENT_II)
-	if ((Current_level_num < 0) && (secret_save == 0)) {
+	if (Current_level_num < 0 && secret == secret_save::none)
+	{
 		HUD_init_message_literal(HM_DEFAULT,  "Can't save in secret level!" );
 		return 0;
 	}
@@ -817,29 +818,27 @@ int state_save_all(int secret_save, const char *filename_override, int blind_sav
 #if defined(DXX_BUILD_DESCENT_II)
 	//	If this is a secret save and the control center has been destroyed, don't allow
 	//	return to the base level.
-	if (secret_save && (Control_center_destroyed)) {
+	if (secret != secret_save::none && Control_center_destroyed) {
 		PHYSFS_delete(SECRETB_FILENAME);
 		return 0;
 	}
 #endif
 
-	stop_time();
+	{
+		pause_game_world_time p;
 
 	memset(&filename, '\0', PATH_MAX);
 	memset(&desc, '\0', DESC_LENGTH+1);
 #if defined(DXX_BUILD_DESCENT_II)
-	if (secret_save == 1) {
-		filename_override = filename;
+	if (secret == secret_save::b) {
 		sprintf(filename, SECRETB_FILENAME);
-	} else if (secret_save == 2) {
-		filename_override = filename;
+	} else if (secret == secret_save::c) {
 		sprintf(filename, SECRETC_FILENAME);
 	} else
 #endif
 	{
 		if (!(filenum = state_get_save_file(filename, desc, blind_save)))
 		{
-			start_time();
 			return 0;
 		}
 	}
@@ -848,7 +847,7 @@ int state_save_all(int secret_save, const char *filename_override, int blind_sav
 	//	Do special secret level stuff.
 	//	If secret.sgc exists, then copy it to Nsecret.sgc (where N = filenum).
 	//	If it doesn't exist, then delete Nsecret.sgc
-	if (!secret_save && !(Game_mode & GM_MULTI_COOP)) {
+	if (secret == secret_save::none && !(Game_mode & GM_MULTI_COOP)) {
 		int	rval;
 		char	temp_fname[PATH_MAX], fc;
 
@@ -876,10 +875,11 @@ int state_save_all(int secret_save, const char *filename_override, int blind_sav
 		}
 	}
 #endif
+	}
 
 	rval = state_save_all_sub(filename, desc);
 
-	if (rval && !secret_save)
+	if (rval && secret == secret_save::none)
 		HUD_init_message_literal(HM_DEFAULT, "Game saved");
 
 	return rval;
@@ -890,9 +890,6 @@ int state_save_all_sub(const char *filename, const char *desc)
 {
 	int i;
 	char mission_filename[9];
-#ifdef OGL
-	GLint gl_draw_buffer;
-#endif
 	fix tmptime32 = 0;
 
 	#ifndef NDEBUG
@@ -903,9 +900,10 @@ int state_save_all_sub(const char *filename, const char *desc)
 	auto fp = PHYSFSX_openWriteBuffered(filename);
 	if ( !fp ) {
 		nm_messagebox(NULL, 1, TXT_OK, "Error writing savegame.\nPossibly out of disk\nspace.");
-		start_time();
 		return 0;
 	}
+
+	pause_game_world_time p;
 
 //Save id
 	PHYSFS_write(fp, dgss_id, sizeof(char) * 4, 1);
@@ -918,7 +916,7 @@ int state_save_all_sub(const char *filename, const char *desc)
 	if (Game_mode & GM_MULTI_COOP)
 	{
 		PHYSFS_write(fp, &state_game_id, sizeof(uint), 1);
-		PHYSFS_write(fp, &Players[Player_num].callsign, sizeof(char)*CALLSIGN_LEN+1, 1);
+		PHYSFS_write(fp, &get_local_player().callsign, sizeof(char)*CALLSIGN_LEN+1, 1);
 	}
 
 //Save description
@@ -939,6 +937,7 @@ int state_save_all_sub(const char *filename, const char *desc)
 		RAIIdmem<uint8_t[]> buf;
 		MALLOC(buf, uint8_t[], THUMBNAIL_W * THUMBNAIL_H * 4);
 #ifndef OGLES
+		GLint gl_draw_buffer;
  		glGetIntegerv(GL_DRAW_BUFFER, &gl_draw_buffer);
  		glReadBuffer(gl_draw_buffer);
 #endif
@@ -982,7 +981,7 @@ int state_save_all_sub(const char *filename, const char *desc)
 
 //Save player info
 	//PHYSFS_write(fp, &Players[Player_num], sizeof(player), 1);
-	state_write_player(fp, Players[Player_num]);
+	state_write_player(fp, get_local_player(), get_local_player_shields(), get_local_plrobj().ctype.player_info);
 
 // Save the current weapon info
 	PHYSFS_write(fp, &Primary_weapon, sizeof(sbyte), 1);
@@ -1000,9 +999,11 @@ int state_save_all_sub(const char *filename, const char *desc)
 //Finish all morph objects
 	range_for (const auto i, highest_valid(Objects))
 	{
-		if ( (Objects[i].type != OBJ_NONE) && (Objects[i].render_type==RT_MORPH))	{
+		const auto &&objp = vobjptr(static_cast<objnum_t>(i));
+		if (objp->type != OBJ_NONE && objp->render_type == RT_MORPH)
+		{
 			morph_data *md;
-			md = find_morph_data(&Objects[i]);
+			md = find_morph_data(objp);
 			if (md) {					
 				md->obj->control_type = md->morph_save_control_type;
 				md->obj->movement_type = md->morph_save_movement_type;
@@ -1010,10 +1011,10 @@ int state_save_all_sub(const char *filename, const char *desc)
 				md->obj->mtype.phys_info = md->morph_save_phys_info;
 				md->obj = NULL;
 			} else {						//maybe loaded half-morphed from disk
-				Objects[i].flags |= OF_SHOULD_BE_DEAD;
-				Objects[i].render_type = RT_POLYOBJ;
-				Objects[i].control_type = CT_NONE;
-				Objects[i].movement_type = MT_NONE;
+				objp->flags |= OF_SHOULD_BE_DEAD;
+				objp->render_type = RT_POLYOBJ;
+				objp->control_type = CT_NONE;
+				objp->movement_type = MT_NONE;
 			}
 		}
 	}
@@ -1024,8 +1025,9 @@ int state_save_all_sub(const char *filename, const char *desc)
 	//PHYSFS_write(fp, Objects, sizeof(object), i);
 	range_for (const auto i, highest_valid(Objects))
 	{
+		const auto &&objp = vcobjptr(static_cast<objnum_t>(i));
 		object_rw obj_rw;
-		state_object_to_object_rw(&Objects[i], &obj_rw);
+		state_object_to_object_rw(objp, &obj_rw);
 		PHYSFS_write(fp, &obj_rw, sizeof(obj_rw), 1);
 	}
 	
@@ -1071,7 +1073,8 @@ int state_save_all_sub(const char *filename, const char *desc)
 //Save tmap info
 	range_for (const auto i, highest_valid(Segments))
 	{
-		range_for (auto &j, Segments[i].sides)
+		const auto &&segp = vcsegptr(static_cast<segnum_t>(i));
+		range_for (const auto &j, segp->sides)
 			segment_side_wall_tmap_write(fp, j);
 	}
 
@@ -1084,7 +1087,11 @@ int state_save_all_sub(const char *filename, const char *desc)
 #endif
 	PHYSFS_write(fp, &Num_robot_centers, sizeof(int), 1);
 	range_for (auto &r, partial_range(RobotCenters, Num_robot_centers))
+#if defined(DXX_BUILD_DESCENT_I)
+		matcen_info_write(fp, r, STATE_MATCEN_VERSION);
+#elif defined(DXX_BUILD_DESCENT_II)
 		matcen_info_write(fp, r, 0x7f);
+#endif
 	control_center_triggers_write(&ControlCenterTriggers, fp);
 	PHYSFS_write(fp, &Num_fuelcenters, sizeof(int), 1);
 	range_for (auto &s, partial_range(Station, Num_fuelcenters))
@@ -1155,12 +1162,18 @@ int state_save_all_sub(const char *filename, const char *desc)
 	if ( Highest_segment_index+1 > MAX_SEGMENTS_ORIGINAL )
 	{
 		range_for (const auto i, highest_valid(Segments))
-			PHYSFSX_writeU8(fp, Segments[i].light_subtracted);
+		{
+			const auto &&segp = vcsegptr(static_cast<segnum_t>(i));
+			PHYSFSX_writeU8(fp, segp->light_subtracted);
+		}
 	}
 	else
 	{
 		for (i = 0; i < MAX_SEGMENTS_ORIGINAL; ++i)
-			PHYSFSX_writeU8(fp, Segments[i].light_subtracted);
+		{
+			const auto &&segp = vcsegptr(static_cast<segnum_t>(i));
+			PHYSFSX_writeU8(fp, segp->light_subtracted);
+		}
 	}
 	PHYSFS_write(fp, &First_secret_visit, sizeof(First_secret_visit), 1);
 	PHYSFS_write(fp, &Omega_charge, sizeof(Omega_charge), 1);
@@ -1169,9 +1182,15 @@ int state_save_all_sub(const char *filename, const char *desc)
 // Save Coop Info
 	if (Game_mode & GM_MULTI_COOP)
 	{
+		/* Write local player's shields for everyone.  Remote players'
+		 * shields are ignored, and using local everywhere is cheaper
+		 * than using it only for the one slot where it may matter.
+		 */
+		const auto shields = get_local_player_shields();
+		const auto &pl_info = get_local_plrobj().ctype.player_info;
 		for (i = 0; i < MAX_PLAYERS; i++) // I know, I know we only allow 4 players in coop. I screwed that up. But if we ever allow 8 players in coop, who's gonna laugh then?
 		{
-			state_write_player(fp, Players[i]);
+			state_write_player(fp, Players[i], shields, pl_info);
 		}
 		PHYSFS_write(fp, Netgame.mission_title.data(), Netgame.mission_title.size(), 1);
 		PHYSFS_write(fp, Netgame.mission_name.data(), Netgame.mission_name.size(), 1);
@@ -1183,7 +1202,6 @@ int state_save_all_sub(const char *filename, const char *desc)
 		PHYSFS_write(fp, &Netgame.numconnected, sizeof(ubyte), 1);
 		PHYSFS_write(fp, &Netgame.level_time, sizeof(int), 1);
 	}
-	start_time();
 	return 1;
 }
 
@@ -1192,29 +1210,30 @@ int state_save_all_sub(const char *filename, const char *desc)
 #if defined(DXX_BUILD_DESCENT_II)
 void set_pos_from_return_segment(void)
 {
-	auto plobjnum = Players[Player_num].objnum;
-
-	compute_segment_center(Objects[plobjnum].pos, &Segments[Secret_return_segment]);
-	obj_relink(plobjnum, Secret_return_segment);
+	const auto &&plobjnum = vobjptridx(get_local_player().objnum);
+	const auto &&segp = vsegptridx(Secret_return_segment);
+	compute_segment_center(plobjnum->pos, segp);
+	obj_relink(plobjnum, segp);
 	reset_player_object();
-	Objects[plobjnum].orient = Secret_return_orient;
+	plobjnum->orient = Secret_return_orient;
 }
 #endif
 
 //	-----------------------------------------------------------------------------------
 #if defined(DXX_BUILD_DESCENT_I)
-int state_restore_all(int in_game, int secret_restore, std::nullptr_t, int blind_save)
+int state_restore_all(const int in_game, std::nullptr_t, const blind_save blind)
 #elif defined(DXX_BUILD_DESCENT_II)
-int state_restore_all(int in_game, int secret_restore, const char *filename_override, int blind_save)
+int state_restore_all(const int in_game, const secret_restore secret, const char *const filename_override, const blind_save blind)
 #endif
 {
 	char filename[PATH_MAX];
 	int	filenum = -1;
 
 #if defined(DXX_BUILD_DESCENT_I)
-	secret_restore = 0;
+	static constexpr tt::integral_constant<secret_restore, secret_restore::none> secret{};
 #elif defined(DXX_BUILD_DESCENT_II)
-	if (in_game && (Current_level_num < 0) && (secret_restore == 0)) {
+	if (in_game && Current_level_num < 0 && secret == secret_restore::none)
+	{
 		HUD_init_message_literal(HM_DEFAULT,  "Can't restore in secret level!" );
 		return 0;
 	}
@@ -1233,7 +1252,8 @@ int state_restore_all(int in_game, int secret_restore, const char *filename_over
 		return 0;
 	}
 
-	stop_time();
+	{
+		pause_game_world_time p;
 
 #if defined(DXX_BUILD_DESCENT_II)
 	if (filename_override) {
@@ -1241,8 +1261,8 @@ int state_restore_all(int in_game, int secret_restore, const char *filename_over
 		filenum = NUM_SAVES+1; // place outside of save slots
 	} else
 #endif
-	if (!(filenum = state_get_restore_file(filename, blind_save)))	{
-		start_time();
+	if (!(filenum = state_get_restore_file(filename, blind)))
+	{
 		return 0;
 	}
 #if defined(DXX_BUILD_DESCENT_II)
@@ -1250,7 +1270,8 @@ int state_restore_all(int in_game, int secret_restore, const char *filename_over
 	//	Do special secret level stuff.
 	//	If Nsecret.sgc (where N = filenum) exists, then copy it to secret.sgc.
 	//	If it doesn't exist, then delete secret.sgc
-	if (!secret_restore) {
+	if (secret == secret_restore::none)
+	{
 		int	rval;
 		char	temp_fname[PATH_MAX], fc;
 
@@ -1272,23 +1293,25 @@ int state_restore_all(int in_game, int secret_restore, const char *filename_over
 		}
 	}
 #endif
-	if ( !secret_restore && in_game && !blind_save ) {
+	if (secret == secret_restore::none && in_game && blind == blind_save::no)
+	{
 		int choice;
 		choice =  nm_messagebox( NULL, 2, "Yes", "No", "Restore Game?" );
 		if ( choice != 0 )	{
-			start_time();
 			return 0;
 		}
 	}
-
-	start_time();
-
-	return state_restore_all_sub(filename, secret_restore);
+	}
+	return state_restore_all_sub(filename, secret);
 }
 
-int state_restore_all_sub(const char *filename, int secret_restore)
+#if defined(DXX_BUILD_DESCENT_I)
+int state_restore_all_sub(const char *filename)
+#elif defined(DXX_BUILD_DESCENT_II)
+int state_restore_all_sub(const char *filename, const secret_restore secret)
+#endif
 {
-	int version,i, j, coop_player_got[MAX_PLAYERS], coop_org_objnum = Players[Player_num].objnum;
+	int version,i, j, coop_player_got[MAX_PLAYERS], coop_org_objnum = get_local_player().objnum;
 	int swap = 0;	// if file is not endian native, have to swap all shorts and ints
 	int current_level;
 	char mission[16];
@@ -1299,7 +1322,7 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	short TempTmapNum2[MAX_SEGMENTS][MAX_SIDES_PER_SEGMENT];
 
 #if defined(DXX_BUILD_DESCENT_I)
-	secret_restore = 0;
+	static constexpr tt::integral_constant<secret_restore, secret_restore::none> secret{};
 #elif defined(DXX_BUILD_DESCENT_II)
 	fix64	old_gametime = GameTime64;
 #endif
@@ -1337,7 +1360,7 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 		callsign_t saved_callsign;
 		state_game_id = PHYSFSX_readSXE32(fp, swap);
 		PHYSFS_read(fp, &saved_callsign, sizeof(char)*CALLSIGN_LEN+1, 1);
-		if (!(saved_callsign == Players[Player_num].callsign)) // check the callsign of the palyer who saved this state. It MUST match. If we transferred this savegame from pilot A to pilot B, others won't be able to restore us. So bail out here if this is the case.
+		if (!(saved_callsign == get_local_player().callsign)) // check the callsign of the palyer who saved this state. It MUST match. If we transferred this savegame from pilot A to pilot B, others won't be able to restore us. So bail out here if this is the case.
 		{
 			return 0;
 		}
@@ -1380,15 +1403,16 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 		change_playernum_to(0);
 		N_players = 1;
 		org_callsign = Players[0].callsign;
-		if (!secret_restore) {
+		if (secret == secret_restore::none)
+		{
 			InitPlayerObject();				//make sure player's object set up
 			init_player_stats_game(0);		//clear all stats
 		}
 	}
 	else // in coop we want to stay the player we are already.
 	{
-		org_callsign = Players[Player_num].callsign;
-		if (!secret_restore)
+		org_callsign = get_local_player().callsign;
+		if (secret == secret_restore::none)
 			init_player_stats_game(Player_num);
 	}
 
@@ -1397,47 +1421,49 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 
 //Read player info
 
+	player_info pl_info;
+	fix pl_shields;
 	{
-		StartNewLevelSub(current_level, 1, secret_restore);
+		StartNewLevelSub(current_level, 1, secret);
 
 #if defined(DXX_BUILD_DESCENT_II)
-		if (secret_restore) {
+		if (secret != secret_restore::none) {
 			player	dummy_player;
-			state_read_player(fp, dummy_player, swap);
-			if (secret_restore == 1) {		//	This means he didn't die, so he keeps what he got in the secret level.
-				Players[Player_num].level = dummy_player.level;
-				Players[Player_num].last_score = dummy_player.last_score;
-				Players[Player_num].time_level = dummy_player.time_level;
+			state_read_player(fp, dummy_player, swap, pl_info, pl_shields);
+			if (secret == secret_restore::survived) {		//	This means he didn't die, so he keeps what he got in the secret level.
+				get_local_player().level = dummy_player.level;
+				get_local_player().last_score = dummy_player.last_score;
+				get_local_player().time_level = dummy_player.time_level;
 
-				Players[Player_num].num_robots_level = dummy_player.num_robots_level;
-				Players[Player_num].num_robots_total = dummy_player.num_robots_total;
-				Players[Player_num].hostages_rescued_total = dummy_player.hostages_rescued_total;
-				Players[Player_num].hostages_total = dummy_player.hostages_total;
-				Players[Player_num].hostages_on_board = dummy_player.hostages_on_board;
-				Players[Player_num].hostages_level = dummy_player.hostages_level;
-				Players[Player_num].homing_object_dist = dummy_player.homing_object_dist;
-				Players[Player_num].hours_level = dummy_player.hours_level;
-				Players[Player_num].hours_total = dummy_player.hours_total;
+				get_local_player().num_robots_level = dummy_player.num_robots_level;
+				get_local_player().num_robots_total = dummy_player.num_robots_total;
+				get_local_player().hostages_rescued_total = dummy_player.hostages_rescued_total;
+				get_local_player().hostages_total = dummy_player.hostages_total;
+				get_local_player().hostages_on_board = dummy_player.hostages_on_board;
+				get_local_player().hostages_level = dummy_player.hostages_level;
+				get_local_plrobj().ctype.player_info.homing_object_dist = -1;
+				get_local_player().hours_level = dummy_player.hours_level;
+				get_local_player().hours_total = dummy_player.hours_total;
 				do_cloak_invul_secret_stuff(old_gametime);
 			} else {
-				Players[Player_num] = dummy_player;
+				get_local_player() = dummy_player;
 			}
 		} else
 #endif
 		{
-			state_read_player(fp, Players[Player_num], swap);
+			state_read_player(fp, get_local_player(), swap, pl_info, pl_shields);
 		}
 	}
-	Players[Player_num].callsign = org_callsign;
+	get_local_player().callsign = org_callsign;
 	if (Game_mode & GM_MULTI_COOP)
-		Players[Player_num].objnum = coop_org_objnum;
+		get_local_player().objnum = coop_org_objnum;
 
 // Restore the weapon states
 	PHYSFS_read(fp, &Primary_weapon, sizeof(sbyte), 1);
 	PHYSFS_read(fp, &Secondary_weapon, sizeof(sbyte), 1);
 
-	select_weapon(Primary_weapon, 0, 0, 0);
-	select_weapon(Secondary_weapon, 1, 0, 0);
+	select_primary_weapon(nullptr, Primary_weapon, 0);
+	select_secondary_weapon(nullptr, Secondary_weapon, 0);
 
 // Restore the difficulty level
 	Difficulty_level = PHYSFSX_readSXE32(fp, swap);
@@ -1453,7 +1479,10 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 
 	//Clear out all the objects from the lvl file
 	range_for (const auto segnum, highest_valid(Segments))
-		Segments[segnum].objects = object_none;
+	{
+		const auto &&segp = vsegptr(static_cast<segnum_t>(segnum));
+		segp->objects = object_none;
+	}
 	reset_objects(1);
 
 	//Read objects, and pop 'em into their respective segments.
@@ -1462,10 +1491,11 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	//object_read_n_swap(Objects, i, swap, fp);
 	range_for (const auto i, highest_valid(Objects))
 	{
+		const auto &&objp = vobjptr(static_cast<objnum_t>(i));
 		object_rw obj_rw;
 		PHYSFS_read(fp, &obj_rw, sizeof(obj_rw), 1);
 		object_rw_swap(&obj_rw, swap);
-		state_object_rw_to_object(&obj_rw, &Objects[i]);
+		state_object_rw_to_object(&obj_rw, objp);
 	}
 
 	range_for (const auto i, highest_valid(Objects))
@@ -1475,7 +1505,7 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 		auto segnum = exchange(obj->segnum, segment_none);
 		obj->next = obj->prev = object_none;
 		if ( obj->type != OBJ_NONE )	{
-			obj_link(obj,segnum);
+			obj_link(obj, vsegptridx(segnum));
 		}
 #if defined(DXX_BUILD_DESCENT_II)
 		//look for, and fix, boss with bogus shields
@@ -1493,13 +1523,17 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 #endif
 	}
 	special_reset_objects();
+	get_local_player_shields() = pl_shields;
+	get_local_plrobj().ctype.player_info = pl_info;
 
 	//	1 = Didn't die on secret level.
 	//	2 = Died on secret level.
-	if (secret_restore && (Current_level_num >= 0)) {
+	if (secret != secret_restore::none && (Current_level_num >= 0)) {
 		set_pos_from_return_segment();
-		if (secret_restore == 2)
+#if defined(DXX_BUILD_DESCENT_II)
+		if (secret == secret_restore::died)
 			init_player_stats_new_ship(Player_num);
+#endif
 	}
 
 	//Restore wall info
@@ -1544,8 +1578,9 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	//Restore tmap info (to temp values so we can use compiled-in tmap info to compute static_light
 	range_for (const auto i, highest_valid(Segments))
 	{
+		const auto &&segp = vsegptr(static_cast<segnum_t>(i));
 		for (j=0; j<6; j++ )	{
-			Segments[i].sides[j].wall_num = PHYSFSX_readSXE16(fp, swap);
+			segp->sides[j].wall_num = PHYSFSX_readSXE16(fp, swap);
 			TempTmapNum[i][j] = PHYSFSX_readSXE16(fp, swap);
 			TempTmapNum2[i][j] = PHYSFSX_readSXE16(fp, swap);
 		}
@@ -1561,11 +1596,11 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	Num_robot_centers = PHYSFSX_readSXE32(fp, swap);
 	range_for (auto &r, partial_range(RobotCenters, Num_robot_centers))
 #if defined(DXX_BUILD_DESCENT_I)
-		matcen_info_read(fp, r, version);
+		matcen_info_read(fp, r, STATE_MATCEN_VERSION);
 #elif defined(DXX_BUILD_DESCENT_II)
 		matcen_info_read(fp, r);
 #endif
-	control_center_triggers_read_swap(&ControlCenterTriggers, swap, fp);
+	control_center_triggers_read(&ControlCenterTriggers, fp);
 	Num_fuelcenters = PHYSFSX_readSXE32(fp, swap);
 	range_for (auto &s, partial_range(Station, Num_fuelcenters))
 		fuelcen_read(fp, s);
@@ -1595,7 +1630,7 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	// Restore the automap visited info
 	if ( Highest_segment_index+1 > MAX_SEGMENTS_ORIGINAL )
 	{
-		Automap_visited.fill(0);
+		Automap_visited = {};
 		PHYSFS_read(fp, &Automap_visited[0], sizeof(ubyte), Highest_segment_index + 1);
 	}
 	else
@@ -1647,7 +1682,7 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	}
 
 	if (version>=11) {
-		if (secret_restore != 1)
+		if (secret != secret_restore::survived)
 			Afterburner_charge = PHYSFSX_readSXE32(fp, swap);
 		else {
 			PHYSFSX_readSXE32(fp, swap);
@@ -1679,20 +1714,30 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 		if ( Highest_segment_index+1 > MAX_SEGMENTS_ORIGINAL )
 		{
 			range_for (const auto i, highest_valid(Segments))
-				PHYSFS_read(fp, &Segments[i].light_subtracted, sizeof(Segments[i].light_subtracted), 1);
+			{
+				const auto &&segp = vsegptr(static_cast<segnum_t>(i));
+				PHYSFS_read(fp, &segp->light_subtracted, sizeof(segp->light_subtracted), 1);
+			}
 		}
 		else
 		{
 			for (i = 0; i < MAX_SEGMENTS_ORIGINAL; ++i)
-				PHYSFS_read(fp, &Segments[i].light_subtracted, sizeof(Segments[i].light_subtracted), 1);
+			{
+				const auto &&segp = vsegptr(static_cast<segnum_t>(i));
+				PHYSFS_read(fp, &segp->light_subtracted, sizeof(segp->light_subtracted), 1);
+			}
 		}
 		apply_all_changed_light();
 	} else {
 		range_for (const auto i, highest_valid(Segments))
-			Segments[i].light_subtracted = 0;
+		{
+			const auto &&segp = vsegptr(static_cast<segnum_t>(i));
+			segp->light_subtracted = 0;
+		}
 	}
 
-	if (!secret_restore) {
+	if (secret == secret_restore::none)
+	{
 		if (version >= 20) {
 			First_secret_visit = PHYSFSX_readSXE32(fp, swap);
 		} else
@@ -1702,7 +1747,7 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 
 	if (version >= 22)
 	{
-		if (secret_restore != 1)
+		if (secret != secret_restore::survived)
 			Omega_charge = PHYSFSX_readSXE32(fp, swap);
 		else
 			PHYSFSX_readSXE32(fp, swap);
@@ -1712,9 +1757,10 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	// static_light should now be computed - now actually set tmap info
 	range_for (const auto i, highest_valid(Segments))
 	{
+		const auto &&segp = vsegptr(static_cast<segnum_t>(i));
 		for (j=0; j<6; j++ )	{
-			Segments[i].sides[j].tmap_num=TempTmapNum[i][j];
-			Segments[i].sides[j].tmap_num2=TempTmapNum2[i][j];
+			segp->sides[j].tmap_num = TempTmapNum[i][j];
+			segp->sides[j].tmap_num2 = TempTmapNum2[i][j];
 		}
 	}
 
@@ -1727,18 +1773,20 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 
 		for (playernum_t i = 0; i < MAX_PLAYERS; i++) 
 		{
-			object *obj;
-
 			// prepare arrays for mapping our players below
 			coop_player_got[i] = 0;
 
 			// read the stored players
-			state_read_player(fp, restore_players[i], swap);
+			player_info pl_info;
+			fix shields;
+			state_read_player(fp, restore_players[i], swap, pl_info, shields);
 			
 			// make all (previous) player objects to ghosts but store them first for later remapping
-			obj = &Objects[restore_players[i].objnum];
+			const auto &&obj = vobjptr(restore_players[i].objnum);
 			if (restore_players[i].connected == CONNECT_PLAYING && obj->type == OBJ_PLAYER)
 			{
+				obj->ctype.player_info = pl_info;
+				obj->shields = shields;
 				restore_objects[i] = *obj;
 				obj->type = OBJ_GHOST;
 				multi_reset_player_object(obj);
@@ -1801,12 +1849,13 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 		{
 			Netgame.killed[i] = Players[i].net_killed_total;
 			Netgame.player_score[i] = Players[i].score;
-			Netgame.player_flags[i] = Players[i].flags;
+			const auto &&objp = vobjptr(Players[i].objnum);
+			Netgame.net_player_flags[i] = objp->ctype.player_info.powerup_flags;
 		}
 		for (playernum_t i = 0; i < MAX_PLAYERS; i++) // Disconnect connected players not available in this Savegame
 			if (!coop_player_got[i] && Players[i].connected == CONNECT_PLAYING)
 				multi_disconnect_player(i);
-		Viewer = ConsoleObject = &Objects[Players[Player_num].objnum]; // make sure Viewer and ConsoleObject are set up (which we skipped by not using InitPlayerObject but we need since objects changed while loading)
+		Viewer = ConsoleObject = &get_local_plrobj(); // make sure Viewer and ConsoleObject are set up (which we skipped by not using InitPlayerObject but we need since objects changed while loading)
 		special_reset_objects(); // since we juggeled around with objects to remap coop players rebuild the index of free objects
 	}
 	if (Game_wind)
@@ -1815,6 +1864,8 @@ int state_restore_all_sub(const char *filename, int secret_restore)
 	reset_time();
 
 	return 1;
+}
+
 }
 
 int state_get_game_id(const char *filename)
@@ -1857,7 +1908,7 @@ int state_get_game_id(const char *filename)
 // Read Coop state_game_id to validate the savegame we are about to load matches the others
 	state_game_id = PHYSFSX_readSXE32(fp, swap);
 	PHYSFS_read(fp, &saved_callsign, sizeof(char)*CALLSIGN_LEN+1, 1);
-	if (!(saved_callsign == Players[Player_num].callsign)) // check the callsign of the palyer who saved this state. It MUST match. If we transferred this savegame from pilot A to pilot B, others won't be able to restore us. So bail out here if this is the case.
+	if (!(saved_callsign == get_local_player().callsign)) // check the callsign of the palyer who saved this state. It MUST match. If we transferred this savegame from pilot A to pilot B, others won't be able to restore us. So bail out here if this is the case.
 		return 0;
 
 	return state_game_id;

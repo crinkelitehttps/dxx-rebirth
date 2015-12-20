@@ -37,7 +37,7 @@
 # endif
 #endif
 
-#include "gr.h"
+#include "fwd-gr.h"
 #include "palette.h"
 #include "pstypes.h"
 #include "3d.h"
@@ -78,14 +78,8 @@ void ogl_init_texture(ogl_texture &t, int w, int h, int flags);
 
 void ogl_init_shared_palette(void);
 
-extern int gl_initialized;
-
-extern int active_texture_unit;
+namespace dcx {
 extern GLfloat ogl_maxanisotropy;
-
-void ogl_setActiveTexture(int t);
-
-int ogl_init_window(int x, int y);//create a window/switch modes/etc
 
 #define OGL_FLAG_MIPMAP (1 << 0)
 #define OGL_FLAG_NOCOLOR (1 << 1)
@@ -96,7 +90,6 @@ void ogl_freebmtexture(grs_bitmap &bm);
 void ogl_start_frame(void);
 void ogl_end_frame(void);
 void ogl_set_screen_mode(void);
-void ogl_cache_level_textures(void);
 
 void ogl_urect(int left, int top, int right, int bot);
 bool ogl_ubitmapm_cs(int x, int y,int dw, int dh, grs_bitmap &bm,int c, int scale);
@@ -105,6 +98,12 @@ bool ogl_ubitblt(unsigned w, unsigned h, unsigned dx, unsigned dy, unsigned sx, 
 void ogl_upixelc(int x, int y, int c);
 unsigned char ogl_ugpixel(const grs_bitmap &bitmap, unsigned x, unsigned y);
 void ogl_ulinec(int left, int top, int right, int bot, int c);
+}
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+void ogl_cache_level_textures();
+}
+#endif
 
 #include "3d.h"
 void _g3_draw_tmap_2(unsigned nv, const g3s_point *const *const pointlist, const g3s_uvl *uvl_list, const g3s_lrgb *light_rgb, grs_bitmap *bmbot, grs_bitmap *bm, int orient);
@@ -113,17 +112,19 @@ template <std::size_t N>
 static inline void g3_draw_tmap_2(unsigned nv, const array<cg3s_point *, N> &pointlist, const array<g3s_uvl, N> &uvl_list, const array<g3s_lrgb, N> &light_rgb, grs_bitmap *bmbot, grs_bitmap *bm, int orient)
 {
 	static_assert(N <= MAX_POINTS_PER_POLY, "too many points in tmap");
-#ifdef DXX_HAVE_BUILTIN_CONSTANT_P
-	if (__builtin_constant_p(nv) && nv > N)
+#ifdef DXX_CONSTANT_TRUE
+	if (DXX_CONSTANT_TRUE(nv > N))
 		DXX_ALWAYS_ERROR_FUNCTION(dxx_trap_tmap_overread, "reading beyond array");
 #endif
 	_g3_draw_tmap_2(nv, &pointlist[0], &uvl_list[0], &light_rgb[0], bmbot, bm, orient);
 }
 
 void ogl_draw_vertex_reticle(int cross,int primary,int secondary,int color,int alpha,int size_offs);
+namespace dcx {
 void ogl_toggle_depth_test(int enable);
 void ogl_set_blending();
 unsigned pow2ize(unsigned x);//from ogl.c
+}
 
 #endif
 

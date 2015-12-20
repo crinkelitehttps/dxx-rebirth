@@ -20,21 +20,21 @@
 #include "dxxsconf.h"
 #include "compiler-array.h"
 
+namespace dcx {
 class submodel_angles;
 
 const std::size_t MAX_POLYGON_VECS = 1000;
 struct polygon_model_points : array<g3s_point, MAX_POLYGON_VECS> {};
+}
 
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 #if defined(DXX_BUILD_DESCENT_I)
 static const size_t glow_array_size = 1;
 #elif defined(DXX_BUILD_DESCENT_II)
 static const size_t glow_array_size = 2;
 #endif
 struct glow_values_t : public array<fix, glow_array_size> {};
-#else
-struct glow_values_t;
-#endif
 
 //Object functions:
 
@@ -44,6 +44,8 @@ void g3_draw_polygon_model(const uint8_t *model_ptr,grs_bitmap **model_bitmaps,s
 
 //init code for bitmap models
 int16_t g3_init_polygon_model(void *model_ptr);
+}
+#endif
 
 //un-initialize, i.e., convert color entries back to RGB15
 static inline void g3_uninit_polygon_model(void *model_ptr)
@@ -51,21 +53,22 @@ static inline void g3_uninit_polygon_model(void *model_ptr)
 	(void)model_ptr;
 }
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 //alternate interpreter for morphing object
 void g3_draw_morphing_model(const uint8_t *model_ptr,grs_bitmap **model_bitmaps,submodel_angles anim_angles,g3s_lrgb light,const vms_vector *new_points, polygon_model_points &Interp_point_list);
 
-//this remaps the 15bpp colors for the models into a new palette.  It should
-//be called whenever the palette changes
-void g3_remap_interp_colors(void);
-
 // check a polymodel for it's color and return it
 int g3_poly_get_color(const uint8_t *model_ptr);
+}
+#endif
 
+namespace dcx {
 #ifdef WORDS_BIGENDIAN
 // routine to convert little to big endian in polygon model data
 void swap_polygon_model_data(ubyte *data);
-//routines to convert little to big endian in vectors
-void vms_vector_swap(vms_vector &v);
+#else
+static inline void swap_polygon_model_data(uint8_t *) {}
 #endif
 
 #ifdef WORDS_NEED_ALIGNMENT
@@ -91,5 +94,6 @@ struct chunk
  */
 int get_chunks(const uint8_t *data, uint8_t *new_data, chunk *list, int *no);
 #endif //def WORDS_NEED_ALIGNMENT
+}
 
 #endif

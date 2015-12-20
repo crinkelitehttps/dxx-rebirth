@@ -7,9 +7,13 @@
 #pragma once
 
 #ifdef __cplusplus
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include "dxxsconf.h"
 #include <vector>
+
+namespace dcx {
 
 #if defined(macintosh)
 #define snprintf macintosh_snprintf
@@ -32,7 +36,8 @@ extern void d_strlwr( char *s1 );
 extern void d_strupr( char *s1 );
 extern void d_strrev( char *s1 );
 #ifdef DEBUG_MEMORY_ALLOCATIONS
-extern char *d_strdup(const char *str) __attribute_malloc();
+char *d_strdup(const char *str, const char *, const char *, unsigned) __attribute_malloc();
+#define d_strdup(str)	(d_strdup(str, #str, __FILE__,__LINE__))
 #else
 #include <cstring>
 #define d_strdup strdup
@@ -76,5 +81,7 @@ public:
 };
 
 int string_array_sort_func(char **e0, char **e1);
+
+}
 
 #endif

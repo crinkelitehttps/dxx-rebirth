@@ -29,6 +29,9 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+extern const char copyright[];
+
+const
 #if defined(DXX_BUILD_DESCENT_I)
 char copyright[] = "DESCENT   COPYRIGHT (C) 1994,1995 PARALLAX SOFTWARE CORPORATION";
 #elif defined(DXX_BUILD_DESCENT_II)
@@ -56,6 +59,7 @@ char copyright[] = "DESCENT II  COPYRIGHT (C) 1994-1996 PARALLAX SOFTWARE CORPOR
 #include "bm.h"
 #include "inferno.h"
 #include "dxxerror.h"
+#include "player.h"
 #include "game.h"
 #include "segment.h"		//for Side_to_verts
 #include "u_mem.h"
@@ -109,13 +113,13 @@ char copyright[] = "DESCENT II  COPYRIGHT (C) 1994-1996 PARALLAX SOFTWARE CORPOR
 #  include "curlutil.h"
 #endif
 
+namespace dsx {
+
 int Screen_mode=-1;					//game screen or editor screen?
 
 #if defined(DXX_BUILD_DESCENT_I)
 int HiresGFXAvailable = 0;
 int MacHog = 0;	// using a Mac hogfile?
-#elif defined(DXX_BUILD_DESCENT_II)
-
 #endif
 
 //read help from a file & print to screen
@@ -125,15 +129,18 @@ static void print_commandline_help()
 	printf( "  -nonicefps                    Don't free CPU-cycles\n");
 	printf( "  -maxfps <n>                   Set maximum framerate to <n>\n\t\t\t\t(default: %i, available: %i-%i)\n", MAXIMUM_FPS, MINIMUM_FPS, MAXIMUM_FPS);
 	printf( "  -hogdir <s>                   set shared data directory to <s>\n");
+#if defined(__unix__)
 	printf( "  -nohogdir                     don't try to use shared data directory\n");
-	printf( "  -use_players_dir              put player files and saved games in Players subdirectory\n");
+#endif
+	printf( "  -add-missions-dir <s>         Add contents of location <s> to the missions directory\n");
+	printf( "  -use_players_dir              Put player files and saved games in Players subdirectory\n");
 	printf( "  -lowmem                       Lowers animation detail for better performance with\n\t\t\t\tlow memory\n");
 	printf( "  -pilot <s>                    Select pilot <s> automatically\n");
 	printf( "  -auto-record-demo             Start recording on level entry\n");
 	printf( "  -record-demo-format           Set demo name automatically\n");
 	printf( "  -autodemo                     Start in demo mode\n");
 	printf( "  -window                       Run the game in a window\n");
-	printf( "  -noborders                    Do not show borders in window mode\n");
+	printf( "  -noborders                    Don't show borders in window mode\n");
 #if defined(DXX_BUILD_DESCENT_I)
 	printf( "  -notitles                     Skip title screens\n");
 #elif defined(DXX_BUILD_DESCENT_II)
@@ -157,13 +164,21 @@ static void print_commandline_help()
 #endif // USE SDLMIXER
 
 	printf( "\n Graphics:\n\n");
-	printf( "  -lowresfont                   Force to use LowRes fonts\n");
+	printf( "  -lowresfont                   Force use of low resolution fonts\n");
 #if defined(DXX_BUILD_DESCENT_II)
-	printf( "  -lowresgraphics               Force to use LowRes graphics\n");
+	printf( "  -lowresgraphics               Force use of low resolution graphics\n");
 	printf( "  -lowresmovies                 Play low resolution movies if available (for slow machines)\n");
 #endif
 #ifdef    OGL
-	printf( "  -gl_fixedfont                 Do not scale fonts to current resolution\n");
+	printf( "  -gl_fixedfont                 Don't scale fonts to current resolution\n");
+	printf( "  -gl_syncmethod <n>            OpenGL sync method (default: %i)\n", OGL_SYNC_METHOD_DEFAULT);
+	printf( "                                    0: Disabled\n");
+	printf( "                                    1: Fence syncs, limit GPU latency to at most one frame\n");
+	printf( "                                    2: Like 1, but sleep during sync to reduce CPU load\n");
+	printf( "                                    3: Immediately sync after buffer swap\n");
+	printf( "                                    4: Immediately sync after buffer swap\n");
+	printf( "                                    5: Auto. use mode 2 if available, 0 otherwise\n");
+	printf( "  -gl_syncwait <n>              Wait interval (ms) for sync mode 2 (default: %i)\n", OGL_SYNC_WAIT_DEFAULT);
 #endif // OGL
 
 #if defined(USE_UDP)
@@ -183,8 +198,8 @@ static void print_commandline_help()
 	printf( "  -nobm                         Don't load BITMAPS.TBL and BITMAPS.BIN - use internal data\n");
 #elif defined(DXX_BUILD_DESCENT_II)
 	printf( "  -autoload <s>                 Autoload level <s> in the editor\n");
-	printf( "  -macdata                      Read and write mac data files in editor (swap colors)\n");
-	printf( "  -hoarddata                    Make the hoard ham file from some files, then exit\n");
+	printf( "  -macdata                      Read and write Mac data files in editor (swap colors)\n");
+	printf( "  -hoarddata                    Make the Hoard ham file from some files, then exit\n");
 #endif
 #endif // EDITOR
 
@@ -193,10 +208,10 @@ static void print_commandline_help()
 	printf( "  -verbose                      Enable verbose output.\n");
 	printf( "  -safelog                      Write gamelog.txt unbuffered.\n\t\t\t\tUse to keep helpful output to trace program crashes.\n");
 	printf( "  -norun                        Bail out after initialization\n");
-	printf( "  -no-grab                      Never grab keymoard/mouse\n");
+	printf( "  -no-grab                      Never grab keyboard/mouse\n");
 	printf( "  -renderstats                  Enable renderstats info by default\n");
 	printf( "  -text <s>                     Specify alternate .tex file\n");
-	printf( "  -tmap <s>                     Select texmapper <s> to use\n\t\t\t\t(default: c, available: c, fp, quad, i386)\n");
+	printf( "  -tmap <s>                     Select texmapper <s> to use\n\t\t\t\t(default: c, available: c, fp, quad)\n");
 	printf( "  -showmeminfo                  Show memory statistics\n");
 	printf( "  -nodoublebuffer               Disable Doublebuffering\n");
 	printf( "  -bigpig                       Use uncompressed RLE bitmaps\n");
@@ -219,6 +234,10 @@ static void print_commandline_help()
 }
 
 int Quitting = 0;
+
+}
+
+namespace dcx {
 
 // Default event handler for everything except the editor
 int standard_handler(const d_event &event)
@@ -284,12 +303,6 @@ int standard_handler(const d_event &event)
 					gr_toggle_fullscreen();
 					return 1;
 
-#ifndef NDEBUG
-				case KEY_BACKSP:
-					Int3();
-					return 1;
-#endif
-
 #if defined(__APPLE__) || defined(macintosh)
 				case KEY_COMMAND+KEY_Q:
 					// Alt-F4 already taken, too bad
@@ -322,6 +335,10 @@ int standard_handler(const d_event &event)
 	return 0;
 }
 
+}
+
+namespace dsx {
+
 #define PROGNAME argv[0]
 
 //	DESCENT by Parallax Software
@@ -329,7 +346,7 @@ int standard_handler(const d_event &event)
 //	(varies based on preprocessor options)
 //		Descent Main
 
-int main(int argc, char *argv[])
+static int main(int argc, char *argv[])
 {
 	mem_init();
 #ifdef __linux__
@@ -351,7 +368,7 @@ int main(int argc, char *argv[])
 	freopen( "CON", "w", stderr );
 #endif
 
-	if (GameArg.SysShowCmdHelp) {
+	if (CGameArg.SysShowCmdHelp) {
 		print_commandline_help();
 
 		return(0);
@@ -398,7 +415,7 @@ int main(int argc, char *argv[])
 		"\tIn a subdirectory called 'Data'\n"	\
 		DXX_HOGFILE_APPLICATION_BUNDLE	\
 		"Or use the -hogdir option to specify an alternate location."
-		Error(DXX_MISSING_HOGFILE_ERROR_TEXT);
+		UserError(DXX_MISSING_HOGFILE_ERROR_TEXT);
 	}
 
 #if defined(DXX_BUILD_DESCENT_I)
@@ -426,7 +443,7 @@ int main(int argc, char *argv[])
 	con_printf(CON_NORMAL, "Copyright (C) 1999 Peter Hawkins, 2002 Bradley Bell, 2005-2013 Christian Beckhaeuser");
 #endif
 
-	if (GameArg.DbgVerbose)
+	if (CGameArg.DbgVerbose)
 		con_puts(CON_VERBOSE, TXT_VERBOSE_1);
 	
 	ReadConfigFile();
@@ -454,8 +471,6 @@ int main(int argc, char *argv[])
 
 	con_printf(CON_DEBUG, "Initializing font system..." );
 	gamefont_init();	// must load after palette data loaded.
-
-	set_default_handler(standard_handler);
 
 #if defined(DXX_BUILD_DESCENT_II)
 	con_printf( CON_DEBUG, "Initializing movie libraries..." );
@@ -491,7 +506,7 @@ int main(int argc, char *argv[])
 	con_printf( CON_DEBUG, "\nRunning game..." );
 	init_game();
 
-	Players[Player_num].callsign.fill(0);
+	get_local_player().callsign = {};
 
 #if defined(DXX_BUILD_DESCENT_I)
 	key_flush();
@@ -499,18 +514,18 @@ int main(int argc, char *argv[])
 	//	If built with editor, option to auto-load a level and quit game
 	//	to write certain data.
 	#ifdef	EDITOR
-	if (GameArg.EdiAutoLoad) {
+	if (!GameArg.EdiAutoLoad.empty()) {
 		Players[0].callsign = "dummy";
 	} else
 	#endif
 #endif
 	{
-		if(GameArg.SysPilot)
+		if (!GameArg.SysPilot.empty())
 		{
 			char filename[32] = "";
 			unsigned j;
 
-			snprintf(filename, sizeof(filename), "%s%.12s", PLAYER_DIRECTORY_STRING(""), GameArg.SysPilot);
+			snprintf(filename, sizeof(filename), PLAYER_DIRECTORY_STRING("%.12s"), GameArg.SysPilot.c_str());
 			for (j = GameArg.SysUsePlayersDir? 8 : 0; filename[j] != '\0'; j++) {
 				switch (filename[j]) {
 					case ' ':
@@ -526,7 +541,7 @@ int main(int argc, char *argv[])
 			{
 				filename[j - 4] = 0;
 				char *b = GameArg.SysUsePlayersDir? &filename[8] : filename;
-				Players[Player_num].callsign.copy(b, std::distance(b, end(filename)));
+				get_local_player().callsign.copy(b, std::distance(b, end(filename)));
 				read_player_file();
 				WriteConfigFile();
 			}
@@ -535,9 +550,9 @@ int main(int argc, char *argv[])
 
 #if defined(DXX_BUILD_DESCENT_II)
 #ifdef EDITOR
-	if (GameArg.EdiAutoLoad) {
+	if (!GameArg.EdiAutoLoad.empty()) {
 		/* Any number >= FILENAME_LEN works */
-		Level_names[0].copy_if(GameArg.EdiAutoLoad, Level_names[0].size());
+		Level_names[0].copy_if(GameArg.EdiAutoLoad.c_str(), GameArg.EdiAutoLoad.size());
 		LoadLevel(1, 1);
 	}
 	else
@@ -571,10 +586,16 @@ int main(int argc, char *argv[])
 	gamedata_close();
 	gamefont_close();
 	free_text();
-	args_exit();
 	newmenu_free_background();
 	Current_mission.reset();
 	PHYSFSX_removeArchiveContent();
 
 	return(0);		//presumably successful exit
+}
+
+}
+
+int main(int argc, char *argv[])
+{
+	return dsx::main(argc, argv);
 }

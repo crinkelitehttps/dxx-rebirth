@@ -23,13 +23,12 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _INFERNO_H
-#define _INFERNO_H
+#pragma once
 
-#include <algorithm>
+#include "fwd-event.h"
 #include "ntstring.h"
 
-struct d_event;
+namespace dcx {
 
 #if defined(__APPLE__) || defined(macintosh)
 #define KEY_MAC(x) x
@@ -48,6 +47,9 @@ struct d_event;
 // the maximum length of a filename
 static const std::size_t FILENAME_LEN = 13;
 
+// Default event handler for everything except the editor
+int standard_handler(const d_event &event);
+
 // a filename, useful for declaring arrays of filenames
 struct d_fname : ntstring<FILENAME_LEN - 1>
 {
@@ -61,6 +63,11 @@ struct d_fname : ntstring<FILENAME_LEN - 1>
 		}
 };
 
+}
+
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+
 /**
  **	Global variables
  **/
@@ -71,7 +78,5 @@ extern int Screen_mode;			// editor screen or game screen?
 extern int MacHog;
 #endif
 
-// Default event handler for everything except the editor
-int standard_handler(const d_event &event);
-
+}
 #endif

@@ -23,7 +23,8 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
+#include <cctype>
+#include <utility>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +50,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "timer.h"
 #include "render.h"
 #include "laser.h"
+#include "event.h"
 #include "screens.h"
 #include "textures.h"
 #include "slew.h"
@@ -78,10 +80,11 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gameseq.h"
 #include "gamefont.h"
 #include "newmenu.h"
+#include "hudmsg.h"
 #include "endlevel.h"
+#include "kmatrix.h"
 #  include "multi.h"
 #include "playsave.h"
-#include "ctype.h"
 #include "fireball.h"
 #include "kconfig.h"
 #include "config.h"
@@ -105,7 +108,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #endif
 #include "strutil.h"
 #include "rle.h"
-#include "byteutil.h"
 #include "segment.h"
 #include "gameseg.h"
 #include "fmtcheck.h"
@@ -118,48 +120,57 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "custom.h"
 #define GLITZ_BACKGROUND	Menu_pcx_name
 
-static int AdvanceLevel(int secret_flag);
 #elif defined(DXX_BUILD_DESCENT_II)
 #include "movie.h"
 #define GLITZ_BACKGROUND	STARS_BACKGROUND
 
+namespace dsx {
 static void StartNewLevelSecret(int level_num, int page_in_textures);
 static void InitPlayerPosition(int random_flag);
 static void DoEndGame(void);
 static void filter_objects_from_level();
-static void AdvanceLevel(int secret_flag);
+PHYSFSX_gets_line_t<FILENAME_LEN> Current_level_palette;
+int	First_secret_visit = 1;
+}
 #endif
+namespace dsx {
+static void AdvanceLevel(int secret_flag);
+}
 static void StartLevel(int random_flag);
 static void copy_defaults_to_robot_all(void);
 
+namespace dcx {
 //Current_level_num starts at 1 for the first level
 //-1,-2,-3 are secret levels
 //0 means not a real level loaded
 int	Current_level_num=0,Next_level_num;
 PHYSFSX_gets_line_t<LEVEL_NAME_LEN> Current_level_name;
-PHYSFSX_gets_line_t<FILENAME_LEN> Current_level_palette;
 
 // Global variables describing the player
 unsigned	N_players=1;	// Number of players ( >1 means a net game, eh?)
 playernum_t Player_num;	// The player number who is on the console.
+}
 array<player, MAX_PLAYERS + DXX_PLAYER_HEADER_ADD_EXTRA_PLAYERS> Players;   // Misc player info
-#if defined(DXX_BUILD_DESCENT_II)
-int	First_secret_visit = 1;
-#endif
-obj_position	Player_init[MAX_PLAYERS];
+namespace dcx {
+fix StartingShields=INITIAL_SHIELDS;
+array<obj_position, MAX_PLAYERS> Player_init;
 
 // Global variables telling what sort of game we have
 unsigned NumNetPlayerPositions;
 int	Do_appearance_effect=0;
+}
+
+namespace dsx {
 
 //--------------------------------------------------------------------
 static void verify_console_object()
 {
 	Assert(Player_num < Players.size());
-	Assert( Players[Player_num].objnum != object_none );
-	ConsoleObject = &Objects[Players[Player_num].objnum];
-	Assert( ConsoleObject->type==OBJ_PLAYER );
-	Assert( get_player_id(ConsoleObject)==Player_num );
+	Assert( get_local_player().objnum != object_none );
+	const auto &&console = vobjptr(get_local_player().objnum);
+	ConsoleObject = console;
+	Assert(console->type == OBJ_PLAYER);
+	Assert(get_player_id(console) == Player_num);
 }
 
 static int count_number_of_robots()
@@ -168,7 +179,8 @@ static int count_number_of_robots()
 	robot_count = 0;
 	range_for (const auto i, highest_valid(Objects))
 	{
-		if (Objects[i].type == OBJ_ROBOT)
+		const auto &&objp = vcobjptr(static_cast<objnum_t>(i));
+		if (objp->type == OBJ_ROBOT)
 			robot_count++;
 	}
 
@@ -182,7 +194,8 @@ static int count_number_of_hostages()
 	count = 0;
 	range_for (const auto i, highest_valid(Objects))
 	{
-		if (Objects[i].type == OBJ_HOSTAGE)
+		const auto &&objp = vcobjptr(static_cast<objnum_t>(i));
+		if (objp->type == OBJ_HOSTAGE)
 			count++;
 	}
 
@@ -250,8 +263,6 @@ void gameseq_remove_unused_players()
 	}
 }
 
-fix StartingShields=INITIAL_SHIELDS;
-
 // Setup player for new game
 void init_player_stats_game(ubyte pnum)
 {
@@ -263,7 +274,6 @@ void init_player_stats_game(ubyte pnum)
 	Players[pnum].time_total = 0;
 	Players[pnum].hours_level = 0;
 	Players[pnum].hours_total = 0;
-	Players[pnum].killer_objnum = object_none;
 	Players[pnum].net_killed_total = 0;
 	Players[pnum].net_kills_total = 0;
 	Players[pnum].num_kills_level = 0;
@@ -274,8 +284,8 @@ void init_player_stats_game(ubyte pnum)
 	Players[pnum].hostages_rescued_total = 0;
 	Players[pnum].hostages_level = 0;
 	Players[pnum].hostages_total = 0;
-	Players[pnum].laser_level = 0;
-	Players[pnum].flags = 0;
+	const auto &&plobj = vobjptr(Players[pnum].objnum);
+	plobj->ctype.player_info.powerup_flags = {};
 
 	init_player_stats_new_ship(pnum);
 #if defined(DXX_BUILD_DESCENT_II)
@@ -286,16 +296,13 @@ void init_player_stats_game(ubyte pnum)
 
 static void init_ammo_and_energy(void)
 {
-	if (Players[Player_num].energy < INITIAL_ENERGY)
-		Players[Player_num].energy = INITIAL_ENERGY;
-	if (Players[Player_num].shields < StartingShields)
-		Players[Player_num].shields = StartingShields;
-
-//	for (i=0; i<MAX_SECONDARY_WEAPONS; i++)
-//		if (Players[Player_num].secondary_ammo[i] < Default_secondary_ammo_level[i])
-//			Players[Player_num].secondary_ammo[i] = Default_secondary_ammo_level[i];
-	if (Players[Player_num].secondary_ammo[0] < 2 + NDL - Difficulty_level)
-		Players[Player_num].secondary_ammo[0] = 2 + NDL - Difficulty_level;
+	if (get_local_player_energy() < INITIAL_ENERGY)
+		get_local_player_energy() = INITIAL_ENERGY;
+	if (get_local_player_shields() < StartingShields)
+		get_local_player_shields() = StartingShields;
+	auto &concussion = get_local_player_secondary_ammo()[CONCUSSION_INDEX];
+	if (concussion < 2 + NDL - Difficulty_level)
+		concussion = 2 + NDL - Difficulty_level;
 }
 
 #if defined(DXX_BUILD_DESCENT_II)
@@ -303,54 +310,57 @@ extern	ubyte	Last_afterburner_state;
 #endif
 
 // Setup player for new level (After completion of previous level)
-void init_player_stats_level(int secret_flag)
+#if defined(DXX_BUILD_DESCENT_I)
+void init_player_stats_level()
+#elif defined(DXX_BUILD_DESCENT_II)
+void init_player_stats_level(const secret_restore secret_flag)
+#endif
 {
 #if defined(DXX_BUILD_DESCENT_I)
-	secret_flag = 0;
+	static constexpr tt::integral_constant<secret_restore, secret_restore::none> secret_flag{};
 #endif
 	// int	i;
 
-	Players[Player_num].last_score = Players[Player_num].score;
+	get_local_player().last_score = get_local_player().score;
 
-	Players[Player_num].level = Current_level_num;
+	get_local_player().level = Current_level_num;
 
 	if (!Network_rejoined) {
-		Players[Player_num].time_level = 0;
-		Players[Player_num].hours_level = 0;
+		get_local_player().time_level = 0;
+		get_local_player().hours_level = 0;
 	}
 
-	Players[Player_num].killer_objnum = object_none;
+	get_local_plrobj().ctype.player_info.homing_object_dist = -F1_0; // Added by RH
+	get_local_plrobj().ctype.player_info.killer_objnum = object_none;
 
-	Players[Player_num].num_kills_level = 0;
-	Players[Player_num].num_robots_level = count_number_of_robots();
-	Players[Player_num].num_robots_total += Players[Player_num].num_robots_level;
+	get_local_player().num_kills_level = 0;
+	get_local_player().num_robots_level = count_number_of_robots();
+	get_local_player().num_robots_total += get_local_player().num_robots_level;
 
-	Players[Player_num].hostages_level = count_number_of_hostages();
-	Players[Player_num].hostages_total += Players[Player_num].hostages_level;
-	Players[Player_num].hostages_on_board = 0;
+	get_local_player().hostages_level = count_number_of_hostages();
+	get_local_player().hostages_total += get_local_player().hostages_level;
+	get_local_player().hostages_on_board = 0;
 
-	if (!secret_flag) {
+	if (secret_flag == secret_restore::none) {
 		init_ammo_and_energy();
 
-		Players[Player_num].flags &= (~KEY_BLUE);
-		Players[Player_num].flags &= (~KEY_RED);
-		Players[Player_num].flags &= (~KEY_GOLD);
-
-		Players[Player_num].flags &= ~(PLAYER_FLAGS_INVULNERABLE | PLAYER_FLAGS_CLOAKED);
+		get_local_player_flags() &= ~(PLAYER_FLAGS_INVULNERABLE | PLAYER_FLAGS_CLOAKED);
 #if defined(DXX_BUILD_DESCENT_II)
-		Players[Player_num].flags &= ~(PLAYER_FLAGS_MAP_ALL);
+		get_local_player_flags() &= ~(PLAYER_FLAGS_MAP_ALL);
 #endif
 
-		Players[Player_num].cloak_time = 0;
-		Players[Player_num].invulnerable_time = 0;
+		DXX_MAKE_VAR_UNDEFINED(get_local_player_cloak_time());
+		DXX_MAKE_VAR_UNDEFINED(get_local_player_invulnerable_time());
 
+		const auto all_keys = PLAYER_FLAGS_BLUE_KEY | PLAYER_FLAGS_GOLD_KEY | PLAYER_FLAGS_RED_KEY;
 		if ((Game_mode & GM_MULTI) && !(Game_mode & GM_MULTI_COOP))
-			Players[Player_num].flags |= (KEY_BLUE | KEY_RED | KEY_GOLD);
+			get_local_player_flags() |= all_keys;
+		else
+			get_local_player_flags() &= ~all_keys;
 	}
 
-	Player_is_dead = 0; // Added by RH
+	Player_dead_state = player_dead_state::no; // Added by RH
 	Dead_player_camera = NULL;
-	Players[Player_num].homing_object_dist = -F1_0; // Added by RH
 
 	// properly init these cursed globals
 	Next_flare_fire_time = Last_laser_fired_time = Next_laser_fire_time = Next_missile_fire_time = GameTime64;
@@ -358,7 +368,7 @@ void init_player_stats_level(int secret_flag)
 	Controls.state.afterburner = 0;
 	Last_afterburner_state = 0;
 
-	digi_kill_sound_linked_to_object(vcobjptridx(Players[Player_num].objnum));
+	digi_kill_sound_linked_to_object(vcobjptridx(get_local_player().objnum));
 #endif
 	init_gauges();
 #if defined(DXX_BUILD_DESCENT_II)
@@ -369,55 +379,96 @@ void init_player_stats_level(int secret_flag)
 // Setup player for a brand-new ship
 void init_player_stats_new_ship(ubyte pnum)
 {
+	auto &plr = Players[pnum];
+	const auto &&plrobj = vobjptridx(plr.objnum);
+	plrobj->shields = StartingShields;
+	auto &player_info = plrobj->ctype.player_info;
+	player_info.energy = INITIAL_ENERGY;
+	player_info.killer_objnum = object_none;
+	player_info.secondary_ammo = {{
+		static_cast<uint8_t>(2 + NDL - Difficulty_level)
+	}};
+	const auto GrantedItems = (Game_mode & GM_MULTI) ? Netgame.SpawnGrantedItems : 0;
+	player_info.vulcan_ammo = map_granted_flags_to_vulcan_ammo(GrantedItems);
+	const auto granted_laser_level = map_granted_flags_to_laser_level(GrantedItems);
+	player_info.laser_level = granted_laser_level;
+	const auto granted_primary_weapon_flags = HAS_LASER_FLAG | map_granted_flags_to_primary_weapon_flags(GrantedItems);
+	player_info.primary_weapon_flags = granted_primary_weapon_flags;
 	if (pnum == Player_num)
 	{
+		Primary_weapon = [=]{
+			range_for (auto i, PlayerCfg.PrimaryOrder)
+			{
+				if (i >= MAX_PRIMARY_WEAPONS)
+					break;
+				if (i == primary_weapon_index_t::LASER_INDEX)
+					break;
+#if defined(DXX_BUILD_DESCENT_II)
+				if (i == primary_weapon_index_t::SUPER_LASER_INDEX)
+				{
+					if (granted_laser_level <= LASER_LEVEL_4)
+						/* Granted lasers are not super lasers */
+						continue;
+					/* Super lasers still set LASER_INDEX, not
+					 * SUPER_LASER_INDEX
+					 */
+					break;
+				}
+#endif
+				if (HAS_PRIMARY_FLAG(i) & static_cast<unsigned>(granted_primary_weapon_flags))
+					return static_cast<primary_weapon_index_t>(i);
+			}
+			return primary_weapon_index_t::LASER_INDEX;
+		}();
+#if defined(DXX_BUILD_DESCENT_II)
+		Primary_last_was_super[0] = 0;
+		for (uint_fast32_t i = primary_weapon_index_t::VULCAN_INDEX; i != primary_weapon_index_t::SUPER_LASER_INDEX; ++i)
+		{
+			uint8_t last;
+			/* If no super granted, force to non-super. */
+			if (!(HAS_PRIMARY_FLAG(i + 5) & granted_primary_weapon_flags))
+				last = 0;
+			/* If only super granted, force to super. */
+			else if (!(HAS_PRIMARY_FLAG(i) & granted_primary_weapon_flags))
+				last = 1;
+			/* else both granted, so leave as-is. */
+			else
+				continue;
+			Primary_last_was_super[i] = last;
+		}
+#endif
 		if (Newdemo_state == ND_STATE_RECORDING)
 		{
-			newdemo_record_laser_level(Players[Player_num].laser_level, 0);
+			newdemo_record_laser_level(player_info.laser_level, 0);
 			newdemo_record_player_weapon(0, 0);
 			newdemo_record_player_weapon(1, 0);
 		}
-		Primary_weapon = 0;
 		Secondary_weapon = 0;
 		dead_player_end(); //player no longer dead
-		Player_is_dead = 0;
+		Player_dead_state = player_dead_state::no;
 		Player_exploded = 0;
 		Player_eggs_dropped = 0;
 		Dead_player_camera = 0;
 		Global_laser_firing_count=0;
 #if defined(DXX_BUILD_DESCENT_II)
-		range_for (auto &i, Primary_last_was_super)
-			i = 0;
-		range_for (auto &i, Secondary_last_was_super)
-			i = 0;
-		Afterburner_charge = 0;
+		Secondary_last_was_super = {};
+		Afterburner_charge = GrantedItems.has_afterburner() ? F1_0 : 0;
 		Controls.state.afterburner = 0;
 		Last_afterburner_state = 0;
-		Missile_viewer=NULL; //reset missile camera if out there
-		Missile_viewer_sig=-1;
+		Missile_viewer = nullptr; //reset missile camera if out there
 		init_ai_for_ship();
 #endif
 	}
-
-	Players[pnum].energy = INITIAL_ENERGY;
-	Players[pnum].shields = StartingShields;
-	Players[pnum].laser_level = 0;
-	Players[pnum].killer_objnum = object_none;
 	Players[pnum].hostages_on_board = 0;
-	Players[pnum].vulcan_ammo = 0;
-	range_for (auto &i, partial_range(Players[pnum].secondary_ammo, 1u, MAX_SECONDARY_WEAPONS))
-		i = 0;
-	Players[pnum].secondary_ammo[0] = 2 + NDL - Difficulty_level;
-	Players[pnum].primary_weapon_flags = HAS_LASER_FLAG;
-	Players[pnum].secondary_weapon_flags = HAS_CONCUSSION_FLAG;
-	Players[pnum].flags &= ~(PLAYER_FLAGS_QUAD_LASERS | PLAYER_FLAGS_CLOAKED | PLAYER_FLAGS_INVULNERABLE);
+	player_info.powerup_flags &= ~(PLAYER_FLAGS_QUAD_LASERS | PLAYER_FLAGS_CLOAKED | PLAYER_FLAGS_INVULNERABLE);
 #if defined(DXX_BUILD_DESCENT_II)
-	Players[pnum].flags &= ~(PLAYER_FLAGS_AFTERBURNER | PLAYER_FLAGS_MAP_ALL | PLAYER_FLAGS_CONVERTER | PLAYER_FLAGS_AMMO_RACK | PLAYER_FLAGS_HEADLIGHT | PLAYER_FLAGS_HEADLIGHT_ON | PLAYER_FLAGS_FLAG);
+	player_info.powerup_flags &= ~(PLAYER_FLAGS_AFTERBURNER | PLAYER_FLAGS_MAP_ALL | PLAYER_FLAGS_CONVERTER | PLAYER_FLAGS_AMMO_RACK | PLAYER_FLAGS_HEADLIGHT | PLAYER_FLAGS_HEADLIGHT_ON | PLAYER_FLAGS_FLAG);
 #endif
-	Players[pnum].cloak_time = 0;
-	Players[pnum].invulnerable_time = 0;
-	Players[pnum].homing_object_dist = -F1_0; // Added by RH
-	digi_kill_sound_linked_to_object(vcobjptridx(Players[pnum].objnum));
+	player_info.powerup_flags |= map_granted_flags_to_player_flags(GrantedItems);
+	DXX_MAKE_VAR_UNDEFINED(player_info.cloak_time);
+	DXX_MAKE_VAR_UNDEFINED(player_info.invulnerable_time);
+	player_info.homing_object_dist = -F1_0; // Added by RH
+	digi_kill_sound_linked_to_object(plrobj);
 }
 
 #ifdef EDITOR
@@ -425,12 +476,12 @@ void init_player_stats_new_ship(ubyte pnum)
 void editor_reset_stuff_on_level()
 {
 	gameseq_init_network_players();
-	init_player_stats_level(0);
-	Viewer = ConsoleObject;
-	ConsoleObject = Viewer = &Objects[Players[Player_num].objnum];
-	set_player_id(ConsoleObject, Player_num);
-	ConsoleObject->control_type = CT_FLYING;
-	ConsoleObject->movement_type = MT_PHYSICS;
+	init_player_stats_level(secret_restore::none);
+	const auto &&console = vobjptr(get_local_player().objnum);
+	ConsoleObject = Viewer = console;
+	set_player_id(console, Player_num);
+	console->control_type = CT_FLYING;
+	console->movement_type = MT_PHYSICS;
 	Game_suspended = 0;
 	verify_console_object();
 	Control_center_destroyed = 0;
@@ -447,13 +498,14 @@ void editor_reset_stuff_on_level()
 	automap_clear_visited();
 	init_stuck_objects();
 	init_thief_for_level();
-
-	Slide_segs_computed = 0;
+	compute_slide_segs();
 #endif
 	if (!Game_wind)
 		Game_wind = window_create(&grd_curscreen->sc_canvas, 0, 0, SWIDTH, SHEIGHT, game_handler, unused_window_userdata);
 }
 #endif
+
+}
 
 //do whatever needs to be done when a player dies in multiplayer
 
@@ -469,16 +521,18 @@ static void DoGameOver()
 //update various information about the player
 void update_player_stats()
 {
-	Players[Player_num].time_level += FrameTime;	//the never-ending march of time...
-	if ( Players[Player_num].time_level > i2f(3600) )	{
-		Players[Player_num].time_level -= i2f(3600);
-		Players[Player_num].hours_level++;
+	get_local_player().time_level += FrameTime;	//the never-ending march of time...
+	if (get_local_player().time_level > i2f(3600))
+	{
+		get_local_player().time_level -= i2f(3600);
+		get_local_player().hours_level++;
 	}
 
-	Players[Player_num].time_total += FrameTime;	//the never-ending march of time...
-	if ( Players[Player_num].time_total > i2f(3600) )	{
-		Players[Player_num].time_total -= i2f(3600);
-		Players[Player_num].hours_total++;
+	get_local_player().time_total += FrameTime;	//the never-ending march of time...
+	if (get_local_player().time_total > i2f(3600))
+	{
+		get_local_player().time_total -= i2f(3600);
+		get_local_player().hours_total++;
 	}
 }
 
@@ -494,7 +548,7 @@ static void set_sound_sources()
 
 	range_for (const auto segnum, highest_valid(Segments))
 	{
-		auto seg = &Segments[segnum];
+		const auto &&seg = vcsegptridx(static_cast<segnum_t>(segnum));
 		for (sidenum=0;sidenum<MAX_SIDES_PER_SEGMENT;sidenum++) {
 			int tm,ec,sn;
 
@@ -517,7 +571,7 @@ static void set_sound_sources()
 
 						if (IS_CHILD(csegnum) && csegnum < segnum) {
 							if (wid & (WID_FLY_FLAG|WID_RENDPAST_FLAG)) {
-								auto csegp = &Segments[seg->children[sidenum]];
+								const auto &&csegp = vcsegptr(seg->children[sidenum]);
 								auto csidenum = find_connect_side(seg, csegp);
 
 								if (csegp->sides[csidenum].tmap_num2 == seg->sides[sidenum].tmap_num2)
@@ -572,7 +626,7 @@ static const d_fname &get_level_file(int level_num)
 }
 
 // routine to calculate the checksum of the segments.
-static void do_checksum_calc(ubyte *b, int len, unsigned int *s1, unsigned int *s2)
+static void do_checksum_calc(const uint8_t *b, int len, unsigned int *s1, unsigned int *s2)
 {
 
 	while(len--) {
@@ -593,7 +647,7 @@ static ushort netmisc_calc_checksum()
 	for (i = 0; i < Highest_segment_index + 1; i++) {
 		range_for (auto &j, Segments[i].sides)
 		{
-			do_checksum_calc((unsigned char *)&(j.get_type()), 1, &sum1, &sum2);
+			do_checksum_calc(reinterpret_cast<const uint8_t *>(&(j.get_type())), 1, &sum1, &sum2);
 			s = INTEL_SHORT(j.wall_num);
 			do_checksum_calc((ubyte *)&s, 2, &sum1, &sum2);
 			s = INTEL_SHORT(j.tmap_num);
@@ -624,7 +678,7 @@ static ushort netmisc_calc_checksum()
 			s = INTEL_SHORT(j);
 			do_checksum_calc((ubyte *)&s, 2, &sum1, &sum2);
 		}
-		range_for (uint16_t j, Segments[i].verts)
+		range_for (const uint16_t j, Segments[i].verts)
 		{
 			s = INTEL_SHORT(j);
 			do_checksum_calc((ubyte *)&s, 2, &sum1, &sum2);
@@ -638,8 +692,6 @@ static ushort netmisc_calc_checksum()
 		do_checksum_calc((ubyte *)&s, 2, &sum1, &sum2);
 		t = INTEL_INT(((int)Segments[i].static_light));
 		do_checksum_calc((ubyte *)&t, 4, &sum1, &sum2);
-		s = INTEL_SHORT(0); // no matter if we need alignment on our platform, if we have editor we MUST consider this integer to get the same checksum as non-editor games calculate
-		do_checksum_calc((ubyte *)&s, 2, &sum1, &sum2);
 #endif
 	}
 	sum2 %= 255;
@@ -647,6 +699,7 @@ static ushort netmisc_calc_checksum()
 }
 
 #if defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 // load just the hxm file
 void load_level_robots(int level_num)
 {
@@ -659,6 +712,7 @@ void load_level_robots(int level_num)
 	}
 	load_robot_replacements(level_name);
 }
+}
 #endif
 
 //load a level off disk. level numbers start at 1.  Secret levels are -1,-2,-3
@@ -666,7 +720,7 @@ void LoadLevel(int level_num,int page_in_textures)
 {
 	player save_player;
 
-	save_player = Players[Player_num];
+	save_player = get_local_player();
 
 	Assert(level_num <= Last_level  && level_num >= Last_secret_level  && level_num != 0);
 	const d_fname &level_name = get_level_file(level_num);
@@ -713,7 +767,7 @@ void LoadLevel(int level_num,int page_in_textures)
 
 	reset_network_objects();
 
-	Players[Player_num] = save_player;
+	get_local_player() = save_player;
 
 	set_sound_sources();
 
@@ -732,18 +786,17 @@ void InitPlayerObject()
 	Assert(Player_num<MAX_PLAYERS);
 
 	if (Player_num != 0 )	{
-		Players[0] = Players[Player_num];
+		Players[0] = get_local_player();
 		Player_num = 0;
 	}
 
-	Players[Player_num].objnum = object_first;
-
-	ConsoleObject = &Objects[Players[Player_num].objnum];
-
-	ConsoleObject->type				= OBJ_PLAYER;
-	set_player_id(ConsoleObject, Player_num);
-	ConsoleObject->control_type	= CT_FLYING;
-	ConsoleObject->movement_type	= MT_PHYSICS;
+	get_local_player().objnum = object_first;
+	const auto &&console = vobjptr(get_local_player().objnum);
+	ConsoleObject = console;
+	console->type				= OBJ_PLAYER;
+	set_player_id(console, Player_num);
+	console->control_type	= CT_FLYING;
+	console->movement_type	= MT_PHYSICS;
 }
 
 //starts a new game on the given level
@@ -768,7 +821,7 @@ void StartNewGame(int start_level)
 #endif
 		StartNewLevel(start_level);
 
-	Players[Player_num].starting_level = start_level;		// Mark where they started
+	get_local_player().starting_level = start_level;		// Mark where they started
 
 	game_disable_cheats();
 #if defined(DXX_BUILD_DESCENT_II)
@@ -798,12 +851,12 @@ void DoEndLevelScoreGlitz(int network)
 	int				mine_level;
 
 	//	Compute level player is on, deal with secret levels (negative numbers)
-	mine_level = Players[Player_num].level;
+	mine_level = get_local_player().level;
 	if (mine_level < 0)
 		mine_level *= -(Last_level/N_secret_levels);
 #endif
 
-	level_points = Players[Player_num].score-Players[Player_num].last_score;
+	level_points = get_local_player().score - get_local_player().last_score;
 
 	if (!cheats.enabled) {
 		if (Difficulty_level > 1) {
@@ -816,13 +869,13 @@ void DoEndLevelScoreGlitz(int network)
 		} else
 			skill_points = 0;
 
-		hostage_points = Players[Player_num].hostages_on_board * 500 * (Difficulty_level+1);
+		hostage_points = get_local_player().hostages_on_board * 500 * (Difficulty_level+1);
 #if defined(DXX_BUILD_DESCENT_I)
-		shield_points = f2i(Players[Player_num].shields) * 10 * (Difficulty_level+1);
-		energy_points = f2i(Players[Player_num].energy) * 5 * (Difficulty_level+1);
+		shield_points = f2i(get_local_player_shields()) * 10 * (Difficulty_level+1);
+		energy_points = f2i(get_local_player_energy()) * 5 * (Difficulty_level+1);
 #elif defined(DXX_BUILD_DESCENT_II)
-		shield_points = f2i(Players[Player_num].shields) * 5 * mine_level;
-		energy_points = f2i(Players[Player_num].energy) * 2 * mine_level;
+		shield_points = f2i(get_local_player_shields()) * 5 * mine_level;
+		energy_points = f2i(get_local_player_energy()) * 2 * mine_level;
 
 		shield_points -= shield_points % 50;
 		energy_points -= energy_points % 50;
@@ -837,14 +890,14 @@ void DoEndLevelScoreGlitz(int network)
 	all_hostage_text[0] = 0;
 	endgame_text[0] = 0;
 
-	if (!cheats.enabled && (Players[Player_num].hostages_on_board == Players[Player_num].hostages_level)) {
-		all_hostage_points = Players[Player_num].hostages_on_board * 1000 * (Difficulty_level+1);
+	if (!cheats.enabled && (get_local_player().hostages_on_board == get_local_player().hostages_level)) {
+		all_hostage_points = get_local_player().hostages_on_board * 1000 * (Difficulty_level+1);
 		sprintf(all_hostage_text, "%s%i\n", TXT_FULL_RESCUE_BONUS, all_hostage_points);
 	} else
 		all_hostage_points = 0;
 
-	if (!cheats.enabled && !(Game_mode & GM_MULTI) && (Players[Player_num].lives) && (Current_level_num == Last_level)) {		//player has finished the game!
-		endgame_points = Players[Player_num].lives * 10000;
+	if (!cheats.enabled && !(Game_mode & GM_MULTI) && (get_local_player().lives) && (Current_level_num == Last_level)) {		//player has finished the game!
+		endgame_points = get_local_player().lives * 10000;
 		sprintf(endgame_text, "%s%i\n", TXT_SHIP_BONUS, endgame_points);
 		is_last_level=1;
 	} else
@@ -859,11 +912,11 @@ void DoEndLevelScoreGlitz(int network)
 	sprintf(m_str[c++], "%s%i", TXT_SKILL_BONUS, skill_points);
 
 	sprintf(m_str[c++], "%s", all_hostage_text);
-	if (!(Game_mode & GM_MULTI) && (Players[Player_num].lives) && (Current_level_num == Last_level))
+	if (!(Game_mode & GM_MULTI) && (get_local_player().lives) && (Current_level_num == Last_level))
 		sprintf(m_str[c++], "%s", endgame_text);
 
 	sprintf(m_str[c++], "%s%i\n", TXT_TOTAL_BONUS, shield_points+energy_points+hostage_points+skill_points+all_hostage_points+endgame_points);
-	sprintf(m_str[c++], "%s%i", TXT_TOTAL_SCORE, Players[Player_num].score);
+	sprintf(m_str[c++], "%s%i", TXT_TOTAL_SCORE, get_local_player().score);
 
 	for (i=0; i<c; i++) {
 		nm_set_item_text(m[i], m_str[i]);
@@ -887,7 +940,7 @@ void DoEndLevelScoreGlitz(int network)
 //called when the player is starting a level (new game or new ship)
 static void StartSecretLevel()
 {
-	Assert(!Player_is_dead);
+	Assert(Player_dead_state == player_dead_state::no);
 
 	InitPlayerPosition(0);
 
@@ -958,14 +1011,15 @@ static void do_screen_message(const char *msg)
 		return;
 
 	gr_palette_load(gr_palette);
-	array<newmenu_item, 1> nm_message_items{
+	array<newmenu_item, 1> nm_message_items{{
 		nm_item_menu(TXT_OK),
-	};
+	}};
 	newmenu_do( NULL, msg, nm_message_items, draw_endlevel_background, static_cast<grs_bitmap *>(&background));
 	gr_free_bitmap_data(background);
 }
 
 #if defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 static void do_screen_message_fmt(const char *fmt, ...) __attribute_format_printf(1, 2);
 static void do_screen_message_fmt(const char *fmt, ...)
 {
@@ -1021,7 +1075,7 @@ static void StartNewLevelSecret(int level_num, int page_in_textures)
 
 	automap_clear_visited();
 
-	Viewer = &Objects[Players[Player_num].objnum];
+	Viewer = &get_local_plrobj();
 
 	gameseq_remove_unused_players();
 
@@ -1043,11 +1097,11 @@ static void StartNewLevelSecret(int level_num, int page_in_textures)
 	} else {
 		if (PHYSFSX_exists(SECRETC_FILENAME,0))
 		{
-			int	pw_save, sw_save;
+			int	sw_save;
 
-			pw_save = Primary_weapon;
+			const auto pw_save = Primary_weapon;
 			sw_save = Secondary_weapon;
-			state_restore_all(1, 1, SECRETC_FILENAME, 0);
+			state_restore_all(1, secret_restore::survived, SECRETC_FILENAME, blind_save::no);
 			Primary_weapon = pw_save;
 			Secondary_weapon = sw_save;
 			reset_special_effects();
@@ -1071,7 +1125,7 @@ static void StartNewLevelSecret(int level_num, int page_in_textures)
 	First_secret_visit = 0;
 }
 
-int	Entered_from_level;
+static int Entered_from_level;
 
 // ---------------------------------------------------------------------------------------------------------------
 //	Called from switch.c when player is on a secret level and hits exit to return to base level.
@@ -1084,17 +1138,17 @@ void ExitSecretLevel(void)
 		window_set_visible(Game_wind, 0);
 
 	if (!Control_center_destroyed) {
-		state_save_all(2, SECRETC_FILENAME, 0);
+		state_save_all(secret_save::c, blind_save::no);
 	}
 
 	if (PHYSFSX_exists(SECRETB_FILENAME,0))
 	{
-		int	pw_save, sw_save;
+		int	sw_save;
 
 		do_screen_message(TXT_SECRET_RETURN);
-		pw_save = Primary_weapon;
+		const auto pw_save = Primary_weapon;
 		sw_save = Secondary_weapon;
-		state_restore_all(1, 1, SECRETB_FILENAME, 0);
+		state_restore_all(1, secret_restore::survived, SECRETB_FILENAME, blind_save::no);
 		Primary_weapon = pw_save;
 		Secondary_weapon = sw_save;
 	} else {
@@ -1117,18 +1171,18 @@ void ExitSecretLevel(void)
 //	be invulnerable or cloaked.
 void do_cloak_invul_secret_stuff(fix64 old_gametime)
 {
-	if (Players[Player_num].flags & PLAYER_FLAGS_INVULNERABLE) {
+	if (get_local_player_flags() & PLAYER_FLAGS_INVULNERABLE) {
 		fix64	time_used;
 
-		time_used = old_gametime - Players[Player_num].invulnerable_time;
-		Players[Player_num].invulnerable_time = GameTime64 - time_used;
+		time_used = old_gametime - get_local_player_invulnerable_time();
+		get_local_player_invulnerable_time() = GameTime64 - time_used;
 	}
 
-	if (Players[Player_num].flags & PLAYER_FLAGS_CLOAKED) {
+	if (get_local_player_flags() & PLAYER_FLAGS_CLOAKED) {
 		fix	time_used;
 
-		time_used = old_gametime - Players[Player_num].cloak_time;
-		Players[Player_num].cloak_time = GameTime64 - time_used;
+		time_used = old_gametime - get_local_player_cloak_time();
+		get_local_player_cloak_time() = GameTime64 - time_used;
 	}
 }
 
@@ -1153,7 +1207,7 @@ void EnterSecretLevel(void)
 		DoEndLevelScoreGlitz(0);
 
 	if (Newdemo_state != ND_STATE_PLAYBACK)
-		state_save_all(1, nullptr, 0);	//	Not between levels (ie, save all), IS a secret level, NO filename override
+		state_save_all(secret_save::b, blind_save::no);	//	Not between levels (ie, save all), IS a secret level, NO filename override
 
 	//	Find secret level number to go to, stuff in Next_level_num.
 	for (i=0; i<-Last_secret_level; i++)
@@ -1185,6 +1239,7 @@ void EnterSecretLevel(void)
 		window_set_visible(Game_wind, 1);
 	reset_time();
 }
+}
 #endif
 
 //called when the player has finished a level
@@ -1194,234 +1249,35 @@ void PlayerFinishedLevel(int secret_flag)
 		window_set_visible(Game_wind, 0);
 
 	//credit the player for hostages
-	Players[Player_num].hostages_rescued_total += Players[Player_num].hostages_on_board;
+	get_local_player().hostages_rescued_total += get_local_player().hostages_on_board;
 #if defined(DXX_BUILD_DESCENT_I)
-	int	rval;
-	int 	was_multi = 0;
-
 	if (!(Game_mode & GM_MULTI) && (secret_flag)) {
-		array<newmenu_item, 1> m{
+		array<newmenu_item, 1> m{{
 			nm_item_text(" "),			//TXT_SECRET_EXIT;
-		};
+		}};
 		newmenu_do2(NULL, TXT_SECRET_EXIT, m.size(), m.data(), unused_newmenu_subfunction, unused_newmenu_userdata, 0, Menu_pcx_name);
 	}
-
-// -- mk mk mk -- used to be here -- mk mk mk --
-
-	if (Game_mode & GM_NETWORK)
-         {
-		if (secret_flag)
-			Players[Player_num].connected = CONNECT_FOUND_SECRET; // Finished and went to secret level
-		else
-			Players[Player_num].connected = CONNECT_WAITING; // Finished but did not die
-         }
-	last_drawn_cockpit = -1;
-
-	if (Current_level_num == Last_level) {
-		if ((Game_mode & GM_MULTI) && !(Game_mode & GM_MULTI_COOP))
-		{
-			was_multi = 1;
-			multi_endlevel_score();
-			rval = AdvanceLevel(secret_flag);				//now go on to the next one (if one)
-		}
-		else
-		{	// Note link to above else!
-			rval = AdvanceLevel(secret_flag);				//now go on to the next one (if one)
-			DoEndLevelScoreGlitz(0);		//give bonuses
-		}
-	} else {
-		if (Game_mode & GM_MULTI)
-			multi_endlevel_score();
-		else
-			DoEndLevelScoreGlitz(0);		//give bonuses
-		rval = AdvanceLevel(secret_flag);				//now go on to the next one (if one)
-	}
-
-	if (!was_multi && rval) {
-		if (PLAYING_BUILTIN_MISSION)
-			scores_maybe_add_player(0);
-		if (Game_wind)
-			window_close(Game_wind);		// Exit out of game loop
-	}
-	else if (rval && Game_wind)
-		window_close(Game_wind);
 #elif defined(DXX_BUILD_DESCENT_II)
-
 	Assert(!secret_flag);
-
+#endif
 	if (Game_mode & GM_NETWORK)
-		Players[Player_num].connected = CONNECT_WAITING; // Finished but did not die
+		get_local_player().connected = CONNECT_WAITING; // Finished but did not die
 
 	last_drawn_cockpit = -1;
 
 	AdvanceLevel(secret_flag);				//now go on to the next one (if one)
-#endif
-	if (Game_wind)
-		window_set_visible(Game_wind, 1);
-	reset_time();
-}
-
-#if defined(DXX_BUILD_DESCENT_I)
-static int AdvanceLevel(int secret_flag)
-{
-	Control_center_destroyed = 0;
-
-	#ifdef EDITOR
-	if (Current_level_num == 0)
-	{
-		return 1;		//not a real level
-	}
-	#endif
-
-	key_flush();
-
-	if (Game_mode & GM_MULTI)
-	{
-		int result;
-		result = multi_endlevel(&secret_flag); // Wait for other players to reach this point
-		if (result) // failed to sync
-		{
-			return (Current_level_num == Last_level);
-		}
-	}
-
-	key_flush();
-
-	if (Current_level_num == Last_level) {		//player has finished the game!
-
-		if ((Newdemo_state == ND_STATE_RECORDING) || (Newdemo_state == ND_STATE_PAUSED))
-			newdemo_stop_recording();
-
-		do_end_briefing_screens(Ending_text_filename);
-
-		return 1;
-
-	} else {
-
-		Next_level_num = Current_level_num+1;		//assume go to next normal level
-
-		if (secret_flag) {			//go to secret level instead
-			int i;
-
-			for (i=0;i<-Last_secret_level;i++)
-				if (Secret_level_table[i]==Current_level_num) {
-					Next_level_num = -(i+1);
-					break;
-				}
-			Assert(i<-Last_secret_level);		//couldn't find which secret level
-		}
-
-		if (Current_level_num < 0)	{			//on secret level, where to go?
-
-			Assert(!secret_flag);				//shouldn't be going to secret level
-			Assert(Current_level_num<=-1 && Current_level_num>=Last_secret_level);
-
-			Next_level_num = Secret_level_table[(-Current_level_num)-1]+1;
-		}
-
-		StartNewLevel(Next_level_num);
-
-	}
-
-	key_flush();
-
-	return 0;
-}
-
-//called when the player has died
-void DoPlayerDead()
-{
-	if (Game_wind)
-		window_set_visible(Game_wind, 0);
-
-	reset_palette_add();
-
-	gr_palette_load (gr_palette);
-
-	dead_player_end();		//terminate death sequence (if playing)
-
-	#ifdef EDITOR
-	if (Game_mode == GM_EDITOR) {			//test mine, not real level
-		object * player = &Objects[Players[Player_num].objnum];
-		//nm_messagebox( "You're Dead!", 1, "Continue", "Not a real game, though." );
-		if (Game_wind)
-			window_set_visible(Game_wind, 1);
-		load_level("gamesave.lvl");
-		init_player_stats_new_ship(Player_num);
-		player->flags &= ~OF_SHOULD_BE_DEAD;
-		StartLevel(0);
-		return;
-	}
-	#endif
-
-	if ( Game_mode&GM_MULTI )
-	{
-		multi_do_death(Players[Player_num].objnum);
-	}
-	else
-	{				//Note link to above else!
-		Players[Player_num].lives--;
-		if (Players[Player_num].lives == 0)
-		{
-			DoGameOver();
-			return;
-		}
-	}
-
-	if ( Control_center_destroyed ) {
-
-		//clear out stuff so no bonus
-		Players[Player_num].hostages_on_board = 0;
-		Players[Player_num].energy = 0;
-		Players[Player_num].shields = 0;
-		Players[Player_num].connected = CONNECT_DIED_IN_MINE;
-
-		do_screen_message(TXT_DIED_IN_MINE); // Give them some indication of what happened
-
-		int	rval;
-		if (Current_level_num == Last_level) {
-			if ((Game_mode & GM_MULTI) && !(Game_mode & GM_MULTI_COOP))
-			{
-				multi_endlevel_score();
-				rval = AdvanceLevel(0);			//if finished, go on to next level
-			}
-			else
-			{			// Note link to above else!
-				rval = AdvanceLevel(0);			//if finished, go on to next level
-				DoEndLevelScoreGlitz(0);
-			}
-			init_player_stats_new_ship(Player_num);
-			last_drawn_cockpit = -1;
-		} else {
-			if (Game_mode & GM_MULTI)
-				multi_endlevel_score();
-			else
-				DoEndLevelScoreGlitz(0);		// Note above link!
-
-			rval = AdvanceLevel(0);			//if finished, go on to next level
-			init_player_stats_new_ship(Player_num);
-			last_drawn_cockpit = -1;
-		}
-
-		if (rval) {
-			if (PLAYING_BUILTIN_MISSION)
-				scores_maybe_add_player(0);
-			if (Game_wind)
-				window_close(Game_wind);		// Exit out of game loop
-		}
-	} else {
-		init_player_stats_new_ship(Player_num);
-		StartLevel(1);
-	}
 
 	if (Game_wind)
 		window_set_visible(Game_wind, 1);
 	reset_time();
 }
-#elif defined(DXX_BUILD_DESCENT_II)
+
+#if defined(DXX_BUILD_DESCENT_II)
 #define MOVIE_REQUIRED 1
-
 #define ENDMOVIE "end"
+#endif
+
+namespace dsx {
 
 //called when the player has finished the last level
 static void DoEndGame(void)
@@ -1437,16 +1293,18 @@ static void DoEndGame(void)
 
 	if (PLAYING_BUILTIN_MISSION && !(Game_mode & GM_MULTI))
 	{ //only built-in mission, & not multi
+#if defined(DXX_BUILD_DESCENT_II)
 		int played=MOVIE_NOT_PLAYED;	//default is not played
 
 		played = PlayMovie(ENDMOVIE ".tex", ENDMOVIE,MOVIE_REQUIRED);
 		if (!played)
+#endif
 		{
 			do_end_briefing_screens(Ending_text_filename);
 		}
-   }
-   else if (!(Game_mode & GM_MULTI))    //not multi
-   {
+        }
+        else if (!(Game_mode & GM_MULTI))    //not multi
+        {
 		char tname[FILENAME_LEN];
 
 		do_end_briefing_screens (Ending_text_filename);
@@ -1467,7 +1325,9 @@ static void DoEndGame(void)
 	if (PLAYING_BUILTIN_MISSION && !((Game_mode & GM_MULTI) && !(Game_mode & GM_MULTI_COOP))) {
 		gr_set_current_canvas( NULL );
 		gr_clear_canvas(BM_XRGB(0,0,0));
+#if defined(DXX_BUILD_DESCENT_II)
 		load_palette(D2_DEFAULT_PALETTE,0,1);
+#endif
 		scores_maybe_add_player(0);
 	}
 
@@ -1480,11 +1340,20 @@ static void DoEndGame(void)
 //	Return true if game over.
 static void AdvanceLevel(int secret_flag)
 {
+#if defined(DXX_BUILD_DESCENT_II)
 	Assert(!secret_flag);
-
+#endif
 	if (Current_level_num != Last_level) {
 		if (Game_mode & GM_MULTI)
-			multi_endlevel_score();
+                {
+					const auto result = multi_endlevel_score();
+					if (result == kmatrix_result::abort)
+                        {
+				if (Game_wind)
+					window_close(Game_wind);		// Exit out of game loop
+                                return;
+                        }
+                }
 		else
 			// NOTE LINK TO ABOVE!!!
 			DoEndLevelScoreGlitz(0);		//give bonuses
@@ -1512,11 +1381,34 @@ static void AdvanceLevel(int secret_flag)
 		}
 	}
 
-	if (Current_level_num == Last_level) {		//player has finished the game!
+        if (Current_level_num == Last_level) {		//player has finished the game!
 
 		DoEndGame();
 
 	} else {
+#if defined(DXX_BUILD_DESCENT_I)
+		Next_level_num = Current_level_num+1;		//assume go to next normal level
+
+		if (secret_flag) {			//go to secret level instead
+			int i;
+
+			for (i=0;i<-Last_secret_level;i++)
+				if (Secret_level_table[i]==Current_level_num) {
+					Next_level_num = -(i+1);
+					break;
+				}
+			Assert(i<-Last_secret_level);		//couldn't find which secret level
+		}
+
+		if (Current_level_num < 0)	{			//on secret level, where to go?
+
+			Assert(!secret_flag);				//shouldn't be going to secret level
+			Assert(Current_level_num<=-1 && Current_level_num>=Last_secret_level);
+
+			Next_level_num = Secret_level_table[(-Current_level_num)-1]+1;
+		}
+#elif defined(DXX_BUILD_DESCENT_II)
+
 		//NMN 04/08/07 If we are in a secret level and playing a D1
 		// 	       level, then use Entered_from_level # instead
 		if (Current_level_num < 0 && EMULATING_D1)
@@ -1526,9 +1418,8 @@ static void AdvanceLevel(int secret_flag)
 		  Next_level_num = Current_level_num+1;		//assume go to next normal level
                 }
 		// END NMN
-
+#endif
 		StartNewLevel(Next_level_num);
-
 	}
 }
 
@@ -1545,7 +1436,7 @@ void DoPlayerDead()
 
 	#ifdef EDITOR
 	if (Game_mode == GM_EDITOR) {			//test mine, not real level
-		object * playerobj = &Objects[Players[Player_num].objnum];
+		const auto playerobj = &get_local_plrobj();
 		//nm_messagebox( "You're Dead!", 1, "Continue", "Not a real game, though." );
 		if (Game_wind)
 			window_set_visible(Game_wind, 1);
@@ -1559,12 +1450,12 @@ void DoPlayerDead()
 
 	if ( Game_mode&GM_MULTI )
 	{
-		multi_do_death(Players[Player_num].objnum);
+		multi_do_death(get_local_player().objnum);
 	}
 	else
 	{				//Note link to above else!
-		Players[Player_num].lives--;
-		if (Players[Player_num].lives == 0)
+		get_local_player().lives--;
+		if (get_local_player().lives == 0)
 		{
 			DoGameOver();
 			return;
@@ -1574,20 +1465,20 @@ void DoPlayerDead()
 	if ( Control_center_destroyed ) {
 
 		//clear out stuff so no bonus
-		Players[Player_num].hostages_on_board = 0;
-		Players[Player_num].energy = 0;
-		Players[Player_num].shields = 0;
-		Players[Player_num].connected = CONNECT_DIED_IN_MINE;
+		get_local_player().hostages_on_board = 0;
+		get_local_player_energy() = 0;
+		get_local_player_shields() = 0;
+		get_local_player().connected = CONNECT_DIED_IN_MINE;
 
 		do_screen_message(TXT_DIED_IN_MINE); // Give them some indication of what happened
-
+#if defined(DXX_BUILD_DESCENT_II)
 		if (Current_level_num < 0) {
 			if (PHYSFSX_exists(SECRETB_FILENAME,0))
 			{
 				do_screen_message(TXT_SECRET_RETURN);
-				state_restore_all(1, 2, SECRETB_FILENAME, 0);			//	2 means you died
+				state_restore_all(1, secret_restore::died, SECRETB_FILENAME, blind_save::no);			//	2 means you died
 				set_pos_from_return_segment();
-				Players[Player_num].lives--;						//	re-lose the life, Players[Player_num].lives got written over in restore.
+				get_local_player().lives--;						//	re-lose the life, get_local_player().lives got written over in restore.
 			} else {
 				if (Entered_from_level == Last_level)
 					DoEndGame();
@@ -1597,23 +1488,25 @@ void DoPlayerDead()
 					init_player_stats_new_ship(Player_num);	//	New, MK, 05/29/96!, fix bug with dying in secret level, advance to next level, keep powerups!
 				}
 			}
-		} else {
+		} else 
+#endif
+                {
 
 			AdvanceLevel(0);			//if finished, go on to next level
 
 			init_player_stats_new_ship(Player_num);
 			last_drawn_cockpit = -1;
 		}
-
+#if defined(DXX_BUILD_DESCENT_II)
 	} else if (Current_level_num < 0) {
 		if (PHYSFSX_exists(SECRETB_FILENAME,0))
 		{
 			do_screen_message(TXT_SECRET_RETURN);
 			if (!Control_center_destroyed)
-				state_save_all(2, SECRETC_FILENAME, 0);
-			state_restore_all(1, 2, SECRETB_FILENAME, 0);
+				state_save_all(secret_save::c, blind_save::no);
+			state_restore_all(1, secret_restore::died, SECRETB_FILENAME, blind_save::no);
 			set_pos_from_return_segment();
-			Players[Player_num].lives--;						//	re-lose the life, Players[Player_num].lives got written over in restore.
+			get_local_player().lives--;						//	re-lose the life, get_local_player().lives got written over in restore.
 		} else {
 			do_screen_message(TXT_DIED_IN_MINE); // Give them some indication of what happened
 			if (Entered_from_level == Last_level)
@@ -1624,6 +1517,7 @@ void DoPlayerDead()
 				init_player_stats_new_ship(Player_num);	//	New, MK, 05/29/96!, fix bug with dying in secret level, advance to next level, keep powerups!
 			}
 		}
+#endif
 	} else {
 		init_player_stats_new_ship(Player_num);
 		StartLevel(1);
@@ -1635,19 +1529,22 @@ void DoPlayerDead()
 		window_set_visible(Game_wind, 1);
 	reset_time();
 }
-#endif
 
 //called when the player is starting a new level for normal game mode and restore state
 //	secret_flag set if came from a secret level
-void StartNewLevelSub(int level_num, int page_in_textures, int secret_flag)
+#if defined(DXX_BUILD_DESCENT_I)
+void StartNewLevelSub(const int level_num, const int page_in_textures)
+#elif defined(DXX_BUILD_DESCENT_II)
+void StartNewLevelSub(const int level_num, const int page_in_textures, const secret_restore secret_flag)
+#endif
 {
 	if (!(Game_mode & GM_MULTI)) {
 		last_drawn_cockpit = -1;
 	}
 #if defined(DXX_BUILD_DESCENT_I)
-	secret_flag = 0;
+	static constexpr tt::integral_constant<secret_restore, secret_restore::none> secret_flag{};
 #elif defined(DXX_BUILD_DESCENT_II)
-   BigWindowSwitch=0;
+        BigWindowSwitch=0;
 #endif
 
 
@@ -1666,7 +1563,7 @@ void StartNewLevelSub(int level_num, int page_in_textures, int secret_flag)
 	gameseq_init_network_players(); // Initialize the Players array for
 											  // this level
 
-	Viewer = &Objects[Players[Player_num].objnum];
+	Viewer = &get_local_plrobj();
 
 	Assert(N_players <= NumNetPlayerPositions);
 		//If this assert fails, there's not enough start positions
@@ -1697,7 +1594,10 @@ void StartNewLevelSub(int level_num, int page_in_textures, int secret_flag)
 	{
 		int i;
 		for (i = 0; i < N_players; i++)
-			Players[i].flags |= Netgame.player_flags[i];
+		{
+			const auto &&plobj = vobjptr(Players[i].objnum);
+			plobj->ctype.player_info.powerup_flags |= Netgame.net_player_flags[i];
+		}
 	}
 
 	if (Game_mode & GM_MULTI)
@@ -1737,7 +1637,6 @@ void StartNewLevelSub(int level_num, int page_in_textures, int secret_flag)
 	reset_special_effects();
 
 #ifdef OGL
-	gr_remap_mono_fonts();
 	ogl_cache_level_textures();
 #endif
 
@@ -1765,26 +1664,30 @@ void StartNewLevelSub(int level_num, int page_in_textures, int secret_flag)
 		game();
 }
 
+}
+
 void (bash_to_shield)(const vobjptr_t i)
 {
 	enum powerup_type_t type = (enum powerup_type_t) get_powerup_id(i);
-	PowerupsInMine[type]=MaxPowerupsAllowed[type]=0;
+	PowerupCaps.reset_powerup_both(type);
 	set_powerup_id(i, POW_SHIELD_BOOST);
-	i->size = Powerup_info[get_powerup_id(i)].size;
-	i->rtype.vclip_info.vclip_num = Powerup_info[get_powerup_id(i)].vclip_num;
-	i->rtype.vclip_info.frametime = Vclip[i->rtype.vclip_info.vclip_num].frame_time;
 }
 
 
 #if defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+
 static void filter_objects_from_level()
  {
 	range_for (const auto i, highest_valid(Objects))
 	{
 		const auto objp = vobjptridx(i);
 		if (objp->type==OBJ_POWERUP)
-			if (objp->id==POW_FLAG_RED || objp->id==POW_FLAG_BLUE)
+		{
+			const auto powerup_id = get_powerup_id(objp);
+			if (powerup_id == POW_FLAG_RED || powerup_id == POW_FLAG_BLUE)
 				bash_to_shield(objp);
+		}
    }
 
  }
@@ -1865,6 +1768,7 @@ static void maybe_set_first_secret_visit(int level_num)
 		}
 	}
 }
+}
 #endif
 
 //called when the player is starting a new level for normal game model
@@ -1888,54 +1792,110 @@ void StartNewLevel(int level_num)
 	ShowLevelIntro(level_num);
 #endif
 
-	StartNewLevelSub(level_num, 1, 0 );
+	StartNewLevelSub(level_num, 1, secret_restore::none);
 
 }
+
+namespace
+{
+
+class respawn_locations
+{
+	typedef std::pair<int, fix> site;
+	unsigned max_usable_spawn_sites;
+	array<site, MAX_PLAYERS> sites;
+public:
+	respawn_locations()
+	{
+		const auto player_num = Player_num;
+		const auto find_closest_player = [player_num](const obj_position &candidate) {
+			fix closest_dist = 0x7fffffff;
+			for (uint_fast32_t i = N_players; i--;)
+			{
+				if (i == player_num)
+					continue;
+				const auto &&objp = vobjptr(Players[i].objnum);
+				if (objp->type != OBJ_PLAYER)
+					continue;
+				const auto dist = find_connected_distance(objp->pos, objp->segnum, candidate.pos, candidate.segnum, -1, WALL_IS_DOORWAY_FLAG<0>());
+				if (dist >= 0 && closest_dist > dist)
+					closest_dist = dist;
+			}
+			return closest_dist;
+		};
+		const auto max_spawn_sites = std::min(NumNetPlayerPositions, static_cast<unsigned>(sites.size()));
+		for (uint_fast32_t i = max_spawn_sites; i--;)
+		{
+			auto &s = sites[i];
+			s.first = i;
+			s.second = find_closest_player(Player_init[i]);
+		}
+		const unsigned SecludedSpawns = Netgame.SecludedSpawns + 1;
+		if (max_spawn_sites > SecludedSpawns)
+		{
+			max_usable_spawn_sites = SecludedSpawns;
+			const auto a = [](const site &a, const site &b) {
+				return a.second > b.second;
+			};
+			const auto b = sites.begin();
+			const auto m = std::next(b, SecludedSpawns);
+			const auto e = std::next(b, max_spawn_sites);
+			std::partial_sort(b, m, e, a);
+		}
+		else
+			max_usable_spawn_sites = max_spawn_sites;
+	}
+	unsigned get_usable_sites() const
+	{
+		return max_usable_spawn_sites;
+	}
+	const site &operator[](std::size_t i) const
+	{
+		return sites[i];
+	}
+};
+
+}
+
+namespace dsx {
 
 //initialize the player object position & orientation (at start of game, or new ship)
 static void InitPlayerPosition(int random_flag)
 {
+	reset_cruise();
 	int NewPlayer=0;
 
 	if (! ((Game_mode & GM_MULTI) && !(Game_mode&GM_MULTI_COOP)) ) // If not deathmatch
 		NewPlayer = Player_num;
 	else if (random_flag == 1)
 	{
-		int i;
+		const respawn_locations locations;
+		if (!locations.get_usable_sites())
+			return;
 		uint_fast32_t trys=0;
-		fix closest_dist = 0x7ffffff, dist;
-
 		d_srand(static_cast<fix>(timer_update()));
 		do {
 			trys++;
-			NewPlayer = d_rand() % NumNetPlayerPositions;
-
-			closest_dist = 0x7fffffff;
-
-			for (i=0; i<N_players; i++ )	{
-				if ( (i!=Player_num) && (Objects[Players[i].objnum].type == OBJ_PLAYER) )	{
-					dist = find_connected_distance(Objects[Players[i].objnum].pos, Objects[Players[i].objnum].segnum, Player_init[NewPlayer].pos, Player_init[NewPlayer].segnum, 15, WID_FLY_FLAG ); // Used to be 5, search up to 15 segments
-					if ( (dist < closest_dist) && (dist >= 0) )	{
-						closest_dist = dist;
-					}
-				}
-			}
-
-		} while ( (closest_dist<i2f(15*20)) && (trys<MAX_PLAYERS*2) );
+			NewPlayer = d_rand() % locations.get_usable_sites();
+			const auto closest_dist = locations[NewPlayer].second;
+			if (closest_dist >= i2f(15*20))
+				break;
+		} while (trys < MAX_PLAYERS * 2);
+		NewPlayer = locations[NewPlayer].first;
 	}
 	else {
 		// If deathmatch and not random, positions were already determined by sync packet
 		reset_player_object();
-		reset_cruise();
 		return;
 	}
 	Assert(NewPlayer >= 0);
 	Assert(NewPlayer < NumNetPlayerPositions);
 	ConsoleObject->pos = Player_init[NewPlayer].pos;
 	ConsoleObject->orient = Player_init[NewPlayer].orient;
-	obj_relink(ConsoleObject-Objects,Player_init[NewPlayer].segnum);
+	obj_relink(vobjptridx(ConsoleObject), Player_init[NewPlayer].segnum);
 	reset_player_object();
-	reset_cruise();
+}
+
 }
 
 //	-----------------------------------------------------------------------------------------------------
@@ -1984,15 +1944,18 @@ void copy_defaults_to_robot(const vobjptr_t objp)
 static void copy_defaults_to_robot_all(void)
 {
 	range_for (const auto i, highest_valid(Objects))
-		if (Objects[i].type == OBJ_ROBOT)
-			copy_defaults_to_robot(&Objects[i]);
+	{
+		const auto &&objp = vobjptr(static_cast<objnum_t>(i));
+		if (objp->type == OBJ_ROBOT)
+			copy_defaults_to_robot(objp);
+	}
 }
 
 //	-----------------------------------------------------------------------------------------------------
 //called when the player is starting a level (new game or new ship)
 static void StartLevel(int random_flag)
 {
-	Assert(!Player_is_dead);
+	assert(Player_dead_state == player_dead_state::no);
 
 	InitPlayerPosition(random_flag);
 

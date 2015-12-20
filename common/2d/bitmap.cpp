@@ -38,6 +38,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "compiler-make_unique.h"
 
+namespace dcx {
+
 // Allocated a bitmap and makes its data be raw_data that is already somewhere.
 static grs_bitmap_ptr gr_create_bitmap_raw(uint16_t w, uint16_t h, unsigned char * raw_data);
 
@@ -70,7 +72,7 @@ void gr_init_bitmap(grs_bitmap &bm, uint8_t mode, uint16_t x, uint16_t y, uint16
 	bm.bm_w = w;
 	bm.bm_h = h;
 	bm.bm_flags = 0;
-	bm.bm_type = mode;
+	bm.set_type(mode);
 	bm.bm_rowsize = bytesperline;
 
 	bm.bm_data = nullptr;
@@ -123,7 +125,7 @@ void gr_init_sub_bitmap (grs_bitmap &bm, grs_bitmap &bmParent, uint16_t x, uint1
 	bm.bm_w = w;
 	bm.bm_h = h;
 	bm.bm_flags = bmParent.bm_flags;
-	bm.bm_type = bmParent.bm_type;
+	bm.set_type(bmParent.get_type());
 	bm.bm_rowsize = bmParent.bm_rowsize;
 
 #ifdef OGL
@@ -147,43 +149,13 @@ static void gr_set_super_transparent(grs_bitmap &bm, bool bOpaque)
 	gr_set_bitmap_flags(bm, bOpaque ? bm_flags & ~BM_FLAG_SUPER_TRANSPARENT : bm_flags | BM_FLAG_SUPER_TRANSPARENT);
 }
 
-void build_colormap_good(palette_array_t &palette, array<color_t, 256> &colormap, array<unsigned, 256> &freq)
+void build_colormap_good(const palette_array_t &palette, array<color_t, 256> &colormap, array<unsigned, 256> &freq)
 {
-	for (uint_fast32_t i = 0; i != colormap.size(); ++i)
-	{
-		auto &p = palette[i];
-		int r = p.r;
-		int g = p.g;
-		int b = p.b;
- 		colormap[i] = gr_find_closest_color( r, g, b );
-		freq[i] = 0;
-	}
-}
-
-void gr_remap_bitmap( grs_bitmap * bmp, palette_array_t &palette, int transparent_color, int super_transparent_color )
-{
-	array<uint8_t, 256> colormap;
-	array<unsigned, 256> freq;
-
-	if (bmp->bm_type != BM_LINEAR)
-		return;	 //can't do it
-
-	// This should be build_colormap_asm, but we're not using invert table, so...
-	build_colormap_good( palette, colormap, freq );
-
-	if ( (super_transparent_color>=0) && (super_transparent_color<=255))
-		colormap[super_transparent_color] = 254;
-
-	if ( (transparent_color>=0) && (transparent_color<=255))
-		colormap[transparent_color] = TRANSPARENCY_COLOR;
-
-	decode_data(bmp->get_bitmap_data(), bmp->bm_w * bmp->bm_h, colormap, freq );
-
-	if ( (transparent_color>=0) && (transparent_color<=255) && (freq[transparent_color]>0) )
-		gr_set_transparent(*bmp, 1);
-
-	if ( (super_transparent_color>=0) && (super_transparent_color<=255) && (freq[super_transparent_color]>0) )
-		gr_set_super_transparent(*bmp, 0);
+	const auto a = [](const rgb_t &p) {
+		return gr_find_closest_color(p.r, p.g, p.b);
+	};
+	freq = {};
+	std::transform(palette.begin(), palette.end(), colormap.begin(), a);
 }
 
 void gr_remap_bitmap_good(grs_bitmap &bmp, palette_array_t &palette, uint_fast32_t transparent_color, uint_fast32_t super_transparent_color)
@@ -213,22 +185,4 @@ void gr_remap_bitmap_good(grs_bitmap &bmp, palette_array_t &palette, uint_fast32
 		gr_set_super_transparent(bmp, 1);
 }
 
-void gr_bitmap_check_transparency( grs_bitmap * bmp )
-{
-	auto data = bmp->bm_data;
-	const uint_fast32_t bm_h = bmp->bm_h;
-	const uint_fast32_t bm_w = bmp->bm_w;
-	const uint_fast32_t stride = bmp->bm_rowsize - bm_w;
-	for (uint_fast32_t y = 0; y != bm_h; ++y)
-	{
-		for (uint_fast32_t x = 0; x != bm_w; ++x)
-		{
-			if (*data++ == TRANSPARENCY_COLOR )	{
-				gr_set_transparent(*bmp, 1);
-				return;
-			}
-		}
-		data += stride;
-	}
-	bmp->bm_flags = 0;
 }

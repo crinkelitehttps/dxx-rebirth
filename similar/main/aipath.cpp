@@ -49,6 +49,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #include "compiler-range_for.h"
 #include "highest_valid.h"
+#include "partial_range.h"
 
 //	Length in segments of avoidance path
 #define	AVOID_SEG_LENGTH	7
@@ -70,15 +71,13 @@ static void ai_path_set_orient_and_vel(const vobjptr_t objp, const vms_vector &g
 static void maybe_ai_path_garbage_collect(void);
 static void ai_path_garbage_collect(void);
 #if PATH_VALIDATION
-static int validate_path(int debug_flag, point_seg* psegs, int num_points);
+static int validate_path(int, point_seg* psegs, uint_fast32_t num_points);
 #endif
 
 //	------------------------------------------------------------------------
 static void create_random_xlate(array<uint8_t, MAX_SIDES_PER_SEGMENT> &xt)
 {
-	int	i;
-
-	for (i=0; i<MAX_SIDES_PER_SEGMENT; i++)
+	for (int i = 0; i<MAX_SIDES_PER_SEGMENT; i++)
 		xt[i] = i;
 
 	range_for (auto &i, xt)
@@ -102,11 +101,12 @@ static uint_fast32_t insert_center_points(point_seg *psegs, uint_fast32_t count)
 	for (uint_fast32_t i = last_point; i; --i)
 	{
 		psegs[2*i] = psegs[i];
-		auto connect_side = find_connect_side(&Segments[psegs[i].segnum], &Segments[psegs[i-1].segnum]);
+		const auto &&seg1 = vcsegptr(psegs[i-1].segnum);
+		auto connect_side = find_connect_side(vcsegptridx(psegs[i].segnum), seg1);
 		Assert(connect_side != -1);	//	Impossible!  These two segments must be connected, they were created by create_path_points (which was created by mk!)
 		if (connect_side == -1)			//	Try to blow past the assert, this should at least prevent a hang.
 			connect_side = 0;
-		const auto center_point = compute_center_point_on_side(&Segments[psegs[i-1].segnum], connect_side);
+		const auto &&center_point = compute_center_point_on_side(seg1, connect_side);
 		auto new_point = vm_vec_sub(psegs[i-1].point, center_point);
 		new_point.x /= 16;
 		new_point.y /= 16;
@@ -153,7 +153,7 @@ static uint_fast32_t insert_center_points(point_seg *psegs, uint_fast32_t count)
 static void move_towards_outside(point_seg *psegs, int *num_points, const vobjptridx_t objp, int rand_flag)
 {
 	int	i;
-	point_seg	new_psegs[200];
+	array<point_seg, 200> new_psegs;
 
 	Assert(*num_points < 200);
 
@@ -288,7 +288,7 @@ int create_path_points(const vobjptridx_t objp, segnum_t start_seg, segnum_t end
 	validate_all_paths();
 #endif
 
-if ((objp->type == OBJ_ROBOT) && (objp->ctype.ai_info.behavior == AIB_RUN_FROM)) {
+if ((objp->type == OBJ_ROBOT) && (objp->ctype.ai_info.behavior == ai_behavior::AIB_RUN_FROM)) {
 	random_flag = 1;
 	avoid_seg = ConsoleObject->segnum;
 	// Int3();
@@ -322,8 +322,7 @@ if ((objp->type == OBJ_ROBOT) && (objp->ctype.ai_info.behavior == AIB_RUN_FROM))
 	cur_depth = 0;
 
 	while (cur_seg != end_seg) {
-		segment	*segp = &Segments[cur_seg];
-
+		const auto &&segp = vcsegptr(cur_seg);
 #if defined(DXX_BUILD_DESCENT_II)
 		if (random_flag)
 			if (d_rand() < 8192)
@@ -423,9 +422,8 @@ cpp_done1: ;
 
 		this_seg = seg_queue[qtail].end;
 		parent_seg = seg_queue[qtail].start;
-		Assert((this_seg >= 0) && (this_seg <= Highest_segment_index));
 		psegs->segnum = this_seg;
-		compute_segment_center(psegs->point,&Segments[this_seg]);
+		compute_segment_center(psegs->point, vcsegptr(this_seg));
 		psegs++;
 		l_num_points++;
 #if defined(DXX_BUILD_DESCENT_I)
@@ -441,9 +439,8 @@ cpp_done1: ;
 			Assert(qtail >= 0);
 	}
 
-	Assert((start_seg >= 0) && (start_seg <= Highest_segment_index));
 	psegs->segnum = start_seg;
-	compute_segment_center(psegs->point,&Segments[start_seg]);
+	compute_segment_center(psegs->point, vcsegptr(start_seg));
 	psegs++;
 	l_num_points++;
 
@@ -562,31 +559,25 @@ int polish_path(const vobjptridx_t objp, point_seg *psegs, int num_points)
 //	Make sure that there are connections between all segments on path.
 //	Note that if path has been optimized, connections may not be direct, so this function is useless, or worse.
 //	Return true if valid, else return false.
-int validate_path(int, point_seg *psegs, int num_points)
+int validate_path(int, point_seg *psegs, uint_fast32_t num_points)
 {
 #if PATH_VALIDATION
-	int		i, curseg;
-
-	curseg = psegs->segnum;
-	if ((curseg < 0) || (curseg > Highest_segment_index)) {
+	auto curseg = psegs->segnum;
+	if (curseg > Highest_segment_index)
+	{
 		Int3();		//	Contact Mike: Debug trap for elusive, nasty bug.
 		return 0;
 	}
 
-if (num_points == 0)
-	return 1;
-
-	for (i=1; i<num_points; i++) {
-		int	sidenum;
-		auto nextseg = psegs[i].segnum;
-
+	range_for (const auto &ps, unchecked_partial_range(psegs, 1u, num_points))
+	{
+		auto nextseg = ps.segnum;
 		if (curseg != nextseg) {
-			for (sidenum=0; sidenum<MAX_SIDES_PER_SEGMENT; sidenum++)
-				if (Segments[curseg].children[sidenum] == nextseg)
-					break;
-
+			const auto &&csegp = vcsegptr(curseg);
+			const auto &children = csegp->children;
+			if (std::find(children.begin(), children.end(), nextseg) == children.end())
+			{
 			// Assert(sidenum != MAX_SIDES_PER_SEGMENT);	//	Hey, created path is not contiguous, why!?
-			if (sidenum == MAX_SIDES_PER_SEGMENT) {
 				Int3();
 				return 0;
 			}
@@ -607,10 +598,9 @@ void validate_all_paths(void)
 #if PATH_VALIDATION
 	range_for (const auto i, highest_valid(Objects))
 	{
-		if (Objects[i].type == OBJ_ROBOT) {
-			object		*objp = &Objects[i];
+		const auto &&objp = vobjptr(static_cast<objnum_t>(i));
+		if (objp->type == OBJ_ROBOT) {
 			ai_static	*aip = &objp->ctype.ai_info;
-
 			if (objp->control_type == CT_AI) {
 				if ((aip->hide_index != -1) && (aip->path_length > 0))
 					if (!validate_path(4, &Point_segs[aip->hide_index], aip->path_length)) {
@@ -679,8 +669,8 @@ void create_path_to_player(const vobjptridx_t objp, int max_length, int safety_f
 #if defined(DXX_BUILD_DESCENT_I)
 		aip->SUBMODE = AISM_GOHIDE;		//	This forces immediate movement.
 #endif
-		ailp->mode = AIM_FOLLOW_PATH;
-		ailp->player_awareness_type = 0;		//	If robot too aware of player, will set mode to chase
+		ailp->mode = ai_mode::AIM_FOLLOW_PATH;
+		ailp->player_awareness_type = player_awareness_type_t::PA_NONE;		//	If robot too aware of player, will set mode to chase
 	}
 
 	maybe_ai_path_garbage_collect();
@@ -719,7 +709,7 @@ void create_path_to_segment(const vobjptridx_t objp, segnum_t goalseg, int max_l
 
 		aip->PATH_DIR = 1;		//	Initialize to moving forward.
 		// -- UNUSED! aip->SUBMODE = AISM_GOHIDE;		//	This forces immediate movement.
-		ailp->player_awareness_type = 0;		//	If robot too aware of player, will set mode to chase
+		ailp->player_awareness_type = player_awareness_type_t::PA_NONE;		//	If robot too aware of player, will set mode to chase
 	}
 
 	maybe_ai_path_garbage_collect();
@@ -771,8 +761,8 @@ void create_path_to_station(const vobjptridx_t objp, int max_length)
 //		Assert(Point_segs_free_ptr - Point_segs + MAX_PATH_LENGTH*2 < MAX_POINT_SEGS);
 		aip->PATH_DIR = 1;		//	Initialize to moving forward.
 		// aip->SUBMODE = AISM_GOHIDE;		//	This forces immediate movement.
-		ailp->mode = AIM_FOLLOW_PATH;
-		ailp->player_awareness_type = 0;
+		ailp->mode = ai_mode::AIM_FOLLOW_PATH;
+		ailp->player_awareness_type = player_awareness_type_t::PA_NONE;
 	}
 
 
@@ -811,7 +801,7 @@ void create_n_segment_path(const vobjptridx_t objp, int path_length, segnum_t av
 #if defined(DXX_BUILD_DESCENT_I)
 	aip->SUBMODE = -1;		//	Don't know what this means.
 #endif
-	ailp->mode = AIM_FOLLOW_PATH;
+	ailp->mode = ai_mode::AIM_FOLLOW_PATH;
 
 #if defined(DXX_BUILD_DESCENT_II)
 	//	If this robot is visible (player_visibility is not available) and it's running away, move towards outside with
@@ -930,10 +920,10 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 
 	if ((aip->hide_index == -1) || (aip->path_length == 0))
 	{
-		if (ailp->mode == AIM_RUN_FROM_OBJECT) {
+		if (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT) {
 			create_n_segment_path(objp, 5, segment_none);
 			//--Int3_if((aip->path_length != 0));
-			ailp->mode = AIM_RUN_FROM_OBJECT;
+			ailp->mode = ai_mode::AIM_RUN_FROM_OBJECT;
 		} else {
 #if defined(DXX_BUILD_DESCENT_I)
 			create_path(objp);
@@ -956,9 +946,9 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 
 	if (aip->path_length < 2) {
 #if defined(DXX_BUILD_DESCENT_I)
-		if (ailp->mode == AIM_RUN_FROM_OBJECT)
+		if (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT)
 #elif defined(DXX_BUILD_DESCENT_II)
-		if ((aip->behavior == AIB_SNIPE) || (ailp->mode == AIM_RUN_FROM_OBJECT))
+		if ((aip->behavior == ai_behavior::AIB_SNIPE) || (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT))
 #endif
 		{
 			if (ConsoleObject->segnum == objp->segnum) {
@@ -969,25 +959,25 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 				//--Int3_if((aip->path_length != 0));
 			}
 #if defined(DXX_BUILD_DESCENT_II)
-			if (aip->behavior == AIB_SNIPE) {
+			if (aip->behavior == ai_behavior::AIB_SNIPE) {
 				if (robot_is_thief(robptr))
-					ailp->mode = AIM_THIEF_ATTACK;	//	It gets bashed in create_n_segment_path
+					ailp->mode = ai_mode::AIM_THIEF_ATTACK;	//	It gets bashed in create_n_segment_path
 				else
-					ailp->mode = AIM_SNIPE_FIRE;	//	It gets bashed in create_n_segment_path
+					ailp->mode = ai_mode::AIM_SNIPE_FIRE;	//	It gets bashed in create_n_segment_path
 			} else
 #endif
 			{
-				ailp->mode = AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
+				ailp->mode = ai_mode::AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
 			}
 		}
 #if defined(DXX_BUILD_DESCENT_I)
 		else {
-			ailp->mode = AIM_STILL;
+			ailp->mode = ai_mode::AIM_STILL;
 		}
 		return;
 #elif defined(DXX_BUILD_DESCENT_II)
 		else if (robot_is_companion(robptr) == 0) {
-			ailp->mode = AIM_STILL;
+			ailp->mode = ai_mode::AIM_STILL;
 			aip->path_length = 0;
 			return;
 		}
@@ -997,7 +987,7 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 #if defined(DXX_BUILD_DESCENT_I)
 	Assert((aip->PATH_DIR == -1) || (aip->PATH_DIR == 1));
 
-	if ((aip->SUBMODE == AISM_HIDING) && (aip->behavior == AIB_HIDE))
+	if ((aip->SUBMODE == AISM_HIDING) && (aip->behavior == ai_behavior::AIB_HIDE))
 		return;
 #endif
 
@@ -1005,8 +995,8 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 	auto dist_to_goal = vm_vec_dist_quick(goal_point, objp->pos);
 
 	//	If running from player, only run until can't be seen.
-	if (ailp->mode == AIM_RUN_FROM_OBJECT) {
-		if ((player_visibility == 0) && (ailp->player_awareness_type == 0)) {
+	if (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT) {
+		if ((player_visibility == 0) && (ailp->player_awareness_type == player_awareness_type_t::PA_NONE)) {
 			fix	vel_scale;
 
 			vel_scale = F1_0 - FrameTime/2;
@@ -1037,12 +1027,12 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 #if defined(DXX_BUILD_DESCENT_I)
 					Assert(aip->path_length != 0);
 #endif
-					ailp->mode = AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
+					ailp->mode = ai_mode::AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
 					break;
 				}
 			}
 			if (player_visibility) {
-				ailp->player_awareness_type = 1;
+				ailp->player_awareness_type = player_awareness_type_t::PA_NEARBY_ROBOT_FIRED;
 				ailp->player_awareness_time = F1_0;
 			}
 		}
@@ -1051,9 +1041,9 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 	if (aip->cur_path_index < 0) {
 		aip->cur_path_index = 0;
 	} else if (aip->cur_path_index >= aip->path_length) {
-		if (ailp->mode == AIM_RUN_FROM_OBJECT) {
+		if (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT) {
 			create_n_segment_path(objp, AVOID_SEG_LENGTH, ConsoleObject->segnum);
-			ailp->mode = AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
+			ailp->mode = ai_mode::AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
 #if defined(DXX_BUILD_DESCENT_II)
 			Assert(aip->path_length != 0);
 #endif
@@ -1093,11 +1083,11 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 						create_n_segment_path(objp, 16 + d_rand() * 16, segment_none);
 						aip->path_length = polish_path(objp, &Point_segs[aip->hide_index], aip->path_length);
 						Assert(aip->path_length != 0);
-						ailp->mode = AIM_WANDER;	//	Special buddy mode.
+						ailp->mode = ai_mode::AIM_WANDER;	//	Special buddy mode.
 						//--Int3_if(((aip->cur_path_index >= 0) && (aip->cur_path_index < aip->path_length)));
 						return;
 					} else {
-						ailp->mode = AIM_WANDER;	//	Special buddy mode.
+						ailp->mode = ai_mode::AIM_WANDER;	//	Special buddy mode.
 						vm_vec_zero(objp->mtype.phys_info.velocity);
 						vm_vec_zero(objp->mtype.phys_info.rotvel);
 						//!!Assert((aip->cur_path_index >= 0) && (aip->cur_path_index < aip->path_length));
@@ -1108,48 +1098,48 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 #endif
 
 #if defined(DXX_BUILD_DESCENT_I)
-			if (ailp->mode == AIM_HIDE) {
-				ailp->mode = AIM_STILL;
+			if (ailp->mode == ai_mode::AIM_HIDE) {
+				ailp->mode = ai_mode::AIM_STILL;
 				return;		// Stay here until bonked or hit by player.
 			}
 #elif defined(DXX_BUILD_DESCENT_II)
-			if (aip->behavior == AIB_FOLLOW) {
+			if (aip->behavior == ai_behavior::AIB_FOLLOW) {
 				create_n_segment_path(objp, 10, ConsoleObject->segnum);
 				//--Int3_if(((aip->cur_path_index >= 0) && (aip->cur_path_index < aip->path_length)));
 			}
 #endif
-			else if (aip->behavior == AIB_STATION) {
+			else if (aip->behavior == ai_behavior::AIB_STATION) {
 				create_path_to_station(objp, 15);
 				if ((aip->hide_segment != Point_segs[aip->hide_index+aip->path_length-1].segnum)
 #if defined(DXX_BUILD_DESCENT_II)
 					|| (aip->path_length == 0)
 #endif
 					) {
-					ailp->mode = AIM_STILL;
+					ailp->mode = ai_mode::AIM_STILL;
 				}
 				return;
-			} else if ((ailp->mode == AIM_FOLLOW_PATH)
+			} else if (ailp->mode == ai_mode::AIM_FOLLOW_PATH
 #if defined(DXX_BUILD_DESCENT_I)
-					   && (aip->behavior != AIB_FOLLOW_PATH)
+					   && (aip->behavior != ai_behavior::AIB_FOLLOW_PATH)
 #endif
 					   ) {
 				create_path_to_player(objp, 10, 1);
 #if defined(DXX_BUILD_DESCENT_II)
 				if (aip->hide_segment != Point_segs[aip->hide_index+aip->path_length-1].segnum) {
-					ailp->mode = AIM_STILL;
+					ailp->mode = ai_mode::AIM_STILL;
 					return;
 				}
 #endif
-			} else if (ailp->mode == AIM_RUN_FROM_OBJECT) {
+			} else if (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT) {
 				create_n_segment_path(objp, AVOID_SEG_LENGTH, ConsoleObject->segnum);
-				ailp->mode = AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
+				ailp->mode = ai_mode::AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
 #if defined(DXX_BUILD_DESCENT_II)
 				if (aip->path_length < 1) {
 					create_n_segment_path(objp, AVOID_SEG_LENGTH, ConsoleObject->segnum);
-					ailp->mode = AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
+					ailp->mode = ai_mode::AIM_RUN_FROM_OBJECT;	//	It gets bashed in create_n_segment_path
 					if (aip->path_length < 1) {
-						aip->behavior = AIB_NORMAL;
-						ailp->mode = AIM_STILL;
+						aip->behavior = ai_behavior::AIB_NORMAL;
+						ailp->mode = ai_mode::AIM_STILL;
 						return;
 					}
 				}
@@ -1220,7 +1210,8 @@ void ai_follow_path(const vobjptridx_t objp, int player_visibility, const vms_ve
 }
 
 struct obj_path {
-	short	path_start, objnum;
+	short	path_start;
+	objnum_t objnum;
 };
 
 static int path_index_compare(obj_path *i1, obj_path *i2)
@@ -1251,9 +1242,9 @@ void ai_path_set_orient_and_vel(const vobjptr_t objp, const vms_vector &goal_poi
 	//	If evading player, use highest difficulty level speed, plus something based on diff level
 	max_speed = robptr->max_speed[Difficulty_level];
 	ai_local		*ailp = &objp->ctype.ai_info.ail;
-	if ((ailp->mode == AIM_RUN_FROM_OBJECT)
+	if (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT
 #if defined(DXX_BUILD_DESCENT_II)
-		|| (objp->ctype.ai_info.behavior == AIB_SNIPE)
+		|| objp->ctype.ai_info.behavior == ai_behavior::AIB_SNIPE
 #endif
 		)
 		max_speed = max_speed*3/2;
@@ -1285,7 +1276,7 @@ void ai_path_set_orient_and_vel(const vobjptr_t objp, const vms_vector &goal_poi
 
 #if defined(DXX_BUILD_DESCENT_II)
 	//	If in snipe mode, can move fast even if not facing that direction.
-	if (objp->ctype.ai_info.behavior == AIB_SNIPE)
+	if (objp->ctype.ai_info.behavior == ai_behavior::AIB_SNIPE)
 		if (dot < F1_0/2)
 			dot = (dot + F1_0)/2;
 #endif
@@ -1294,13 +1285,13 @@ void ai_path_set_orient_and_vel(const vobjptr_t objp, const vms_vector &goal_poi
 	vm_vec_scale(norm_cur_vel, speed_scale);
 	objp->mtype.phys_info.velocity = norm_cur_vel;
 
-	if ((ailp->mode == AIM_RUN_FROM_OBJECT)
+	if (ailp->mode == ai_mode::AIM_RUN_FROM_OBJECT
 #if defined(DXX_BUILD_DESCENT_II)
-		|| (robot_is_companion(robptr) == 1) || (objp->ctype.ai_info.behavior == AIB_SNIPE)
+		|| robot_is_companion(robptr) == 1 || objp->ctype.ai_info.behavior == ai_behavior::AIB_SNIPE
 #endif
 		) {
 #if defined(DXX_BUILD_DESCENT_II)
-		if (ailp->mode == AIM_SNIPE_RETREAT_BACKWARDS) {
+		if (ailp->mode == ai_mode::AIM_SNIPE_RETREAT_BACKWARDS) {
 			if ((player_visibility) && (vec_to_player != NULL))
 				norm_vec_to_goal = *vec_to_player;
 			else
@@ -1336,17 +1327,15 @@ void ai_path_garbage_collect(void)
 	//	Create a list of objects which have paths of length 1 or more.
 	range_for (const auto objnum, highest_valid(Objects))
 	{
-		object	*objp = &Objects[objnum];
-
+		const auto &&objp = vcobjptr(static_cast<objnum_t>(objnum));
 		if ((objp->type == OBJ_ROBOT) && ((objp->control_type == CT_AI)
 #if defined(DXX_BUILD_DESCENT_II)
 			|| (objp->control_type == CT_MORPH)
 #endif
 										  )) {
-			ai_static	*aip = &objp->ctype.ai_info;
-
-			if (aip->path_length) {
-				object_list[num_path_objects].path_start = aip->hide_index;
+			const auto &aip = objp->ctype.ai_info;
+			if (aip.path_length) {
+				object_list[num_path_objects].path_start = aip.hide_index;
 				object_list[num_path_objects++].objnum = objnum;
 			}
 		}
@@ -1378,10 +1367,11 @@ void ai_path_garbage_collect(void)
 
 	range_for (const auto i, highest_valid(Objects))
 	{
-		ai_static	*aip = &Objects[i].ctype.ai_info;
+		const auto &&objp = vcobjptr(static_cast<objnum_t>(i));
+		const auto &aip = objp->ctype.ai_info;
 
-		if ((Objects[i].type == OBJ_ROBOT) && (Objects[i].control_type == CT_AI))
-			if ((aip->hide_index + aip->path_length > Point_segs_free_ptr - Point_segs) && (aip->path_length>0))
+		if (objp->type == OBJ_ROBOT && objp->control_type == CT_AI)
+			if ((aip.hide_index + aip.path_length > Point_segs_free_ptr - Point_segs) && (aip.path_length>0))
 				Int3();		//	Contact Mike: Debug trap for nasty, elusive bug.
 	}
 
@@ -1422,11 +1412,11 @@ void ai_reset_all_paths(void)
 {
 	range_for (const auto i, highest_valid(Objects))
 	{
-		auto objp = vobjptridx(i);
+		const auto &&objp = vobjptridx(i);
 		if (objp->type == OBJ_ROBOT && objp->control_type == CT_AI)
 		{
-			Objects[i].ctype.ai_info.hide_index = -1;
-			Objects[i].ctype.ai_info.path_length = 0;
+			objp->ctype.ai_info.hide_index = -1;
+			objp->ctype.ai_info.path_length = 0;
 		}
 	}
 
@@ -1442,16 +1432,16 @@ void attempt_to_resume_path(const vobjptridx_t objp)
 	ai_static *aip = &objp->ctype.ai_info;
 	int new_path_index;
 
-	if ((aip->behavior == AIB_STATION)
+	if (aip->behavior == ai_behavior::AIB_STATION
 #if defined(DXX_BUILD_DESCENT_II)
-		&& (Robot_info[get_robot_id(objp)].companion != 1)
+		&& Robot_info[get_robot_id(objp)].companion != 1
 #endif
 		)
 		if (d_rand() > 8192) {
 			ai_local		*ailp = &objp->ctype.ai_info.ail;
 
 			aip->hide_segment = objp->segnum;
-			ailp->mode = AIM_STILL;
+			ailp->mode = ai_mode::AIM_STILL;
 		}
 
 	new_path_index = aip->cur_path_index - aip->PATH_DIR;
@@ -1470,20 +1460,20 @@ void attempt_to_resume_path(const vobjptridx_t objp)
 //	----------------------------------------------------------------------------------------------------------
 
 #ifdef EDITOR
-int	Test_size = 1000;
 
 static void test_create_path_many(void) __attribute_used;
 static void test_create_path_many(void)
 {
-	point_seg	point_segs[200];
+	array<point_seg, 200> point_segs;
 	short			num_points;
 
 	int			i;
 
+	const unsigned Test_size = 1000;
 	for (i=0; i<Test_size; i++) {
-		Cursegp = &Segments[(d_rand() * (Highest_segment_index + 1)) / D_RAND_MAX];
-		Markedsegp = &Segments[(d_rand() * (Highest_segment_index + 1)) / D_RAND_MAX];
-		create_path_points(object_first, Cursegp-Segments, Markedsegp-Segments, point_segs, &num_points, -1, 0, 0, segment_none);
+		Cursegp = segptridx(static_cast<segnum_t>((d_rand() * (Highest_segment_index + 1)) / D_RAND_MAX));
+		Markedsegp = segptridx(static_cast<segnum_t>((d_rand() * (Highest_segment_index + 1)) / D_RAND_MAX));
+		create_path_points(vobjptridx(object_first), Cursegp, Markedsegp, point_segs.begin(), &num_points, -1, 0, 0, segment_none);
 	}
 
 }
@@ -1491,10 +1481,10 @@ static void test_create_path_many(void)
 static void test_create_path(void) __attribute_used;
 static void test_create_path(void)
 {
-	point_seg	point_segs[200];
+	array<point_seg, 200> point_segs;
 	short			num_points;
 
-	create_path_points(object_first, Cursegp-Segments, Markedsegp-Segments, point_segs, &num_points, -1, 0, 0, segment_none);
+	create_path_points(vobjptridx(object_first), Cursegp, Markedsegp, point_segs.begin(), &num_points, -1, 0, 0, segment_none);
 
 }
 
@@ -1508,11 +1498,15 @@ static void test_create_all_paths(void)
 
 	range_for (const auto start_seg, highest_valid(Segments))
 	{
-		if (Segments[start_seg].segnum != segment_none) {
+		const auto &&segp0 = vcsegptr(static_cast<segnum_t>(start_seg));
+		if (segp0->segnum != segment_none)
+		{
 			range_for (const auto end_seg, highest_valid(Segments, start_seg))
 			{
-				if (Segments[end_seg].segnum != segment_none) {
-					create_path_points(object_first, start_seg, end_seg, Point_segs_free_ptr, &resultant_length, -1, 0, 0, segment_none);
+				const auto &&segp1 = vcsegptr(static_cast<segnum_t>(end_seg));
+				if (segp1->segnum != segment_none)
+				{
+					create_path_points(vobjptridx(object_first), start_seg, end_seg, Point_segs_free_ptr, &resultant_length, -1, 0, 0, segment_none);
 				}
 			}
 		}
@@ -1547,7 +1541,7 @@ static void player_path_set_orient_and_vel(const vobjptr_t objp, const vms_vecto
 	dot = vm_vec_dot(norm_vec_to_goal, norm_fvec);
 #if defined(DXX_BUILD_DESCENT_II)
 	ai_local		*ailp = &objp->ctype.ai_info.ail;
-	if (ailp->mode == AIM_SNIPE_RETREAT_BACKWARDS) {
+	if (ailp->mode == ai_mode::AIM_SNIPE_RETREAT_BACKWARDS) {
 		dot = -dot;
 	}
 #endif

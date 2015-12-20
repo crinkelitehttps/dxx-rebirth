@@ -53,7 +53,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "multi.h"
 #include "multibot.h"
 #include "escort.h"
-#include "byteutil.h"
 #include "poison.h"
 
 #include "compiler-range_for.h"
@@ -63,7 +62,6 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 // The max number of fuel stations per mine.
 
-static const fix Fuelcen_refill_speed = i2f(1);
 static const fix Fuelcen_give_amount = i2f(25);
 static const fix Fuelcen_max_amount = i2f(100);
 
@@ -76,8 +74,6 @@ array<matcen_info, MAX_ROBOT_CENTERS> RobotCenters;
 
 array<FuelCenter, MAX_NUM_FUELCENS> Station;
 unsigned Num_fuelcenters;
-
-segment * PlayerSegment= NULL;
 
 #ifdef EDITOR
 const char	Special_names[MAX_CENTER_TYPES][11] = {
@@ -100,8 +96,8 @@ void fuelcen_reset()
 	DXX_MAKE_MEM_UNDEFINED(Station.begin(), Station.end());
 	DXX_MAKE_MEM_UNDEFINED(RobotCenters.begin(), RobotCenters.end());
 	Num_fuelcenters = 0;
-	for(unsigned i=0; i<sizeof(Segments)/sizeof(Segments[0]); i++ )
-		Segments[i].special = SEGMENT_IS_NOTHING;
+	range_for (auto &i, Segments)
+		i.special = SEGMENT_IS_NOTHING;
 
 	Num_robot_centers = 0;
 
@@ -112,10 +108,11 @@ static void reset_all_robot_centers() __attribute_used;
 static void reset_all_robot_centers()
 {
 	// Remove all materialization centers
-	for (int i=0; i<Num_segments; i++)
-		if (Segments[i].special == SEGMENT_IS_ROBOTMAKER) {
-			Segments[i].special = SEGMENT_IS_NOTHING;
-			Segments[i].matcen_num = -1;
+	range_for (auto &i, partial_range(Segments, Num_segments))
+		if (i.special == SEGMENT_IS_ROBOTMAKER)
+		{
+			i.special = SEGMENT_IS_NOTHING;
+			i.matcen_num = -1;
 		}
 }
 #endif
@@ -250,25 +247,25 @@ void trigger_matcen(const vsegptridx_t segnum)
 //------------------------------------------------------------
 // Takes away a segment's fuel center properties.
 //	Deletes the segment point entry in the FuelCenter list.
-void fuelcen_delete( const vsegptridx_t segp )
+void fuelcen_delete(const vsegptr_t segp)
 {
 Restart: ;
 	segp->special = 0;
 
 	for (uint_fast32_t i = 0; i < Num_fuelcenters; i++ )	{
 		FuelCenter &fi = Station[i];
-		if (fi.segnum == segp)	{
+		if (vsegptr(fi.segnum) == segp)
+		{
 
 			// If Robot maker is deleted, fix Segments and RobotCenters.
 			if (fi.Type == SEGMENT_IS_ROBOTMAKER) {
 				Assert(Num_robot_centers > 0);
+				const auto &&range = partial_range(RobotCenters, static_cast<unsigned>(segp->matcen_num), Num_robot_centers);
 				Num_robot_centers--;
 
-				for (uint_fast32_t j = segp->matcen_num; j < Num_robot_centers; j++)
-					RobotCenters[j] = RobotCenters[j+1];
-
-				for (uint_fast32_t j = 0; j < Num_fuelcenters; j++) {
-					FuelCenter &fj = Station[j];
+				std::move(std::next(range.begin()), range.end(), range.begin());
+				range_for (auto &fj, partial_range(Station, Num_fuelcenters))
+				{
 					if ( fj.Type == SEGMENT_IS_ROBOTMAKER )
 						if ( Segments[fj.segnum].matcen_num > segp->matcen_num )
 							Segments[fj.segnum].matcen_num--;
@@ -277,9 +274,9 @@ Restart: ;
 
 #if defined(DXX_BUILD_DESCENT_II)
 			//fix RobotCenters so they point to correct fuelcenter
-			for (uint_fast32_t j = 0; j < Num_robot_centers; j++ )
-				if (RobotCenters[j].fuelcen_num > i)		//this robotcenter's fuelcen is changing
-					RobotCenters[j].fuelcen_num--;
+			range_for (auto &j, partial_range(RobotCenters, Num_robot_centers))
+				if (j.fuelcen_num > i)		//this robotcenter's fuelcen is changing
+					j.fuelcen_num--;
 #endif
 			Assert(Num_fuelcenters > 0);
 			Num_fuelcenters--;
@@ -298,10 +295,9 @@ Restart: ;
 
 objptridx_t  create_morph_robot( const vsegptridx_t segp, const vms_vector &object_pos, int object_id)
 {
-	int		default_behavior;
 
-	Players[Player_num].num_robots_level++;
-	Players[Player_num].num_robots_total++;
+	get_local_player().num_robots_level++;
+	get_local_player().num_robots_total++;
 
 	auto obj = obj_create(OBJ_ROBOT, object_id, segp, object_pos,
 				&vmd_identity_matrix, Polygon_models[Robot_info[object_id].model_num].rad,
@@ -325,11 +321,11 @@ objptridx_t  create_morph_robot( const vsegptridx_t segp, const vms_vector &obje
 	obj->mtype.phys_info.flags |= (PF_LEVELLING);
 
 	obj->shields = Robot_info[get_robot_id(obj)].strength;
-	
+	ai_behavior default_behavior;
 #if defined(DXX_BUILD_DESCENT_I)
-	default_behavior = AIB_NORMAL;
+	default_behavior = ai_behavior::AIB_NORMAL;
 	if (object_id == 10)						//	This is a toaster guy!
-		default_behavior = AIB_RUN_FROM;
+		default_behavior = ai_behavior::AIB_RUN_FROM;
 #elif defined(DXX_BUILD_DESCENT_II)
 	default_behavior = Robot_info[get_robot_id(obj)].behavior;
 #endif
@@ -339,8 +335,8 @@ objptridx_t  create_morph_robot( const vsegptridx_t segp, const vms_vector &obje
 	create_n_segment_path(obj, 6, segment_none);		//	Create a 6 segment path from creation point.
 
 #if defined(DXX_BUILD_DESCENT_I)
-	if (default_behavior == AIB_RUN_FROM)
-		obj->ctype.ai_info.ail.mode = AIM_RUN_FROM_OBJECT;
+	if (default_behavior == ai_behavior::AIB_RUN_FROM)
+		obj->ctype.ai_info.ail.mode = ai_mode::AIM_RUN_FROM_OBJECT;
 #elif defined(DXX_BUILD_DESCENT_II)
 	obj->ctype.ai_info.ail.mode = ai_behavior_to_mode(default_behavior);
 #endif
@@ -375,7 +371,7 @@ static void robotmaker_proc( FuelCenter * robotcen )
 		return;
 	}
 
-	segment *segp = &Segments[robotcen->segnum];
+	const auto &&segp = vsegptr(robotcen->segnum);
 	matcen_num = segp->matcen_num;
 
 	if ( matcen_num == -1 ) {
@@ -393,7 +389,7 @@ static void robotmaker_proc( FuelCenter * robotcen )
 
 	// Wait until we have a free slot for this puppy...
    //	  <<<<<<<<<<<<<<<< Num robots in mine >>>>>>>>>>>>>>>>>>>>>>>>>>    <<<<<<<<<<<< Max robots in mine >>>>>>>>>>>>>>>
-	if ( (Players[Player_num].num_robots_level - Players[Player_num].num_kills_level) >= (Gamesave_num_org_robots + Num_extry_robots ) ) {
+	if ( (get_local_player().num_robots_level - get_local_player().num_kills_level) >= (Gamesave_num_org_robots + Num_extry_robots ) ) {
 		return;
 	}
 
@@ -422,9 +418,12 @@ static void robotmaker_proc( FuelCenter * robotcen )
 
 			//	Make sure this robotmaker hasn't put out its max without having any of them killed.
 			range_for (const auto i, highest_valid(Objects))
-				if (Objects[i].type == OBJ_ROBOT)
-					if ((Objects[i].matcen_creator^0x80) == my_station_num)
+			{
+				const auto &&objp = vcobjptr(static_cast<objnum_t>(i));
+				if (objp->type == OBJ_ROBOT)
+					if ((objp->matcen_creator ^ 0x80) == my_station_num)
 						count++;
+			}
 			if (count > Difficulty_level + 3) {
 				robotcen->Timer /= 2;
 				return;
@@ -433,7 +432,8 @@ static void robotmaker_proc( FuelCenter * robotcen )
 			//	Whack on any robot or player in the matcen segment.
 			count=0;
 			auto segnum = robotcen->segnum;
-			range_for (const auto objp, objects_in(Segments[segnum]))
+			const auto &&csegp = vsegptr(segnum);
+			range_for (const auto objp, objects_in(csegp))
 			{
 				count++;
 				if ( count > MAX_OBJECTS )	{
@@ -451,12 +451,12 @@ static void robotmaker_proc( FuelCenter * robotcen )
 				}
 			}
 
-			const auto cur_object_loc = compute_segment_center(&Segments[robotcen->segnum]);
+			const auto &&cur_object_loc = compute_segment_center(csegp);
 			// HACK!!! The 10 under here should be something equal to the 1/2 the size of the segment.
 			auto obj = object_create_explosion(robotcen->segnum, cur_object_loc, i2f(10), VCLIP_MORPHING_ROBOT );
 
 			if (obj != object_none)
-				extract_orient_from_segment(&obj->orient,&Segments[robotcen->segnum]);
+				extract_orient_from_segment(&obj->orient, vsegptr(robotcen->segnum));
 
 			if ( Vclip[VCLIP_MORPHING_ROBOT].sound_num > -1 )		{
 				digi_link_sound_to_pos( Vclip[VCLIP_MORPHING_ROBOT].sound_num, robotcen->segnum, 0, cur_object_loc, 0, F1_0 );
@@ -473,7 +473,7 @@ static void robotmaker_proc( FuelCenter * robotcen )
 			robotcen->Flag = 0;
 
 			robotcen->Timer = 0;
-			const auto cur_object_loc = compute_segment_center(&Segments[robotcen->segnum]);
+			const auto &&cur_object_loc = compute_segment_center(vcsegptr(robotcen->segnum));
 
 			// If this is the first materialization, set to valid robot.
 			{
@@ -500,7 +500,7 @@ static void robotmaker_proc( FuelCenter * robotcen )
 				else
 					type = legal_types[(d_rand() * num_types) / 32768];
 
-				const objptridx_t obj = create_morph_robot(&Segments[robotcen->segnum], cur_object_loc, type );
+				const auto &&obj = create_morph_robot(vsegptridx(robotcen->segnum), cur_object_loc, type );
 				if (obj != object_none) {
 					if (Game_mode & GM_MULTI)
 						multi_send_create_robot(robotcen-Station, obj, type);
@@ -528,21 +528,12 @@ static void robotmaker_proc( FuelCenter * robotcen )
 // Called once per frame, replenishes fuel supply.
 void fuelcen_update_all()
 {
-	fix AmountToreplenish;
-	AmountToreplenish = fixmul(FrameTime,Fuelcen_refill_speed);
-
-	for (uint_fast32_t i = 0; i < Num_fuelcenters; i++ )	{
-		if ( Station[i].Type == SEGMENT_IS_ROBOTMAKER )	{
+	range_for (auto &i, partial_range(Station, Num_fuelcenters))
+	{
+		if (i.Type == SEGMENT_IS_ROBOTMAKER)
+		{
 			if (! (Game_suspended & SUSP_ROBOTS))
-				robotmaker_proc( &Station[i] );
-		} else if ( (Station[i].MaxCapacity > 0) && (PlayerSegment!=&Segments[Station[i].segnum]) )	{
-			if ( Station[i].Capacity < Station[i].MaxCapacity )	{
- 				Station[i].Capacity += AmountToreplenish;
-				if ( Station[i].Capacity >= Station[i].MaxCapacity )		{
-					Station[i].Capacity = Station[i].MaxCapacity;
-					//gauge_message( "Fuel center is fully recharged!    " );
-				}
-			}
+				robotmaker_proc(&i);
 		}
 	}
 }
@@ -554,10 +545,9 @@ void fuelcen_update_all()
 #endif
 
 //-------------------------------------------------------------
-fix fuelcen_give_fuel(const vsegptr_t segp, fix MaxAmountCanTake )
+fix fuelcen_give_fuel(const vcsegptr_t segp, fix MaxAmountCanTake)
 {
 	static fix64 last_play_time = 0;
-	PlayerSegment = segp;
 
 	if (segp->special==SEGMENT_IS_FUELCEN)	{
 		fix amount;
@@ -597,9 +587,7 @@ fix fuelcen_give_fuel(const vsegptr_t segp, fix MaxAmountCanTake )
 		if (last_play_time + FUELCEN_SOUND_DELAY < GameTime64 || last_play_time > GameTime64)
 		{
 			last_play_time = GameTime64;
-			digi_play_sample( SOUND_REFUEL_STATION_GIVING_FUEL, F1_0/2 );
-			if (Game_mode & GM_MULTI)
-				multi_send_play_sound(SOUND_REFUEL_STATION_GIVING_FUEL, F1_0/2);
+			multi_digi_play_sample(SOUND_REFUEL_STATION_GIVING_FUEL, F1_0/2);
 		}
 
 		//HUD_init_message(HM_DEFAULT, "Fuelcen %d has %d/%d fuel", segp->value,f2i(Station[segp->value].Capacity),f2i(Station[segp->value].MaxCapacity) );
@@ -615,11 +603,10 @@ fix fuelcen_give_fuel(const vsegptr_t segp, fix MaxAmountCanTake )
 // DM/050904
 // Repair centers
 // use same values as fuel centers
-fix repaircen_give_shields(const vsegptr_t segp, fix MaxAmountCanTake )
+fix repaircen_give_shields(const vcsegptr_t segp, fix MaxAmountCanTake)
 {
 	static fix last_play_time=0;
 
-	PlayerSegment = segp;
 	if (segp->special==SEGMENT_IS_REPAIRCEN) {
 		fix amount;
 //             detect_escort_goal_accomplished(-4);    //      UGLY! Hack! -4 means went through fuelcen.
@@ -648,9 +635,7 @@ fix repaircen_give_shields(const vsegptr_t segp, fix MaxAmountCanTake )
 		if (last_play_time > GameTime64)
 			last_play_time = 0;
 		if (GameTime64 > last_play_time+FUELCEN_SOUND_DELAY) {
-			digi_play_sample( SOUND_REFUEL_STATION_GIVING_FUEL, F1_0/2 );
-			if (Game_mode & GM_MULTI)
-				multi_send_play_sound(SOUND_REFUEL_STATION_GIVING_FUEL, F1_0/2);
+			multi_digi_play_sample(SOUND_REFUEL_STATION_GIVING_FUEL, F1_0/2);
 			last_play_time = GameTime64;
 		}
 //HUD_init_message(HM_DEFAULT, "Fuelcen %d has %d/%d fuel", segp->value,f2i(Station[segp->value].Capacity),f2i(Station[segp->value].MaxCapacity) );
@@ -677,6 +662,9 @@ void disable_matcens(void)
 //	Give them all the right number of lives.
 void init_all_matcens(void)
 {
+#ifndef NDEBUG
+	const auto &&robot_range = partial_range(RobotCenters, Num_robot_centers);
+#endif
 	for (uint_fast32_t i = 0; i < Num_fuelcenters; i++)
 		if (Station[i].Type == SEGMENT_IS_ROBOTMAKER) {
 			Station[i].Lives = 3;
@@ -685,12 +673,9 @@ void init_all_matcens(void)
 #ifndef NDEBUG
 {
 			//	Make sure this fuelcen is pointed at by a matcen.
-			uint_fast32_t j;
-			for (j=0; j<Num_robot_centers; j++) {
-				if (RobotCenters[j].fuelcen_num == i)
-					break;
-			}
-			Assert(j != Num_robot_centers);
+			assert(std::find_if(robot_range.begin(), robot_range.end(), [i](const matcen_info &mi) {
+				return mi.fuelcen_num == i;
+			}) != robot_range.end());
 }
 #endif
 
@@ -698,8 +683,9 @@ void init_all_matcens(void)
 
 #ifndef NDEBUG
 	//	Make sure all matcens point at a fuelcen
-	for (uint_fast32_t i = 0; i < Num_robot_centers; i++) {
-		auto	fuelcen_num = RobotCenters[i].fuelcen_num;
+	range_for (auto &i, robot_range)
+	{
+		auto	fuelcen_num = i.fuelcen_num;
 		Assert(fuelcen_num < Num_fuelcenters);
 		Assert(Station[fuelcen_num].Type == SEGMENT_IS_ROBOTMAKER);
 	}
@@ -754,40 +740,47 @@ void fuelcen_check_for_goal(const vsegptr_t segp)
 {
 	Assert (game_mode_capture_flag());
 
-	if (segp->special==SEGMENT_IS_GOAL_BLUE )	{
-
-			if ((get_team(Player_num)==TEAM_BLUE) && (Players[Player_num].flags & PLAYER_FLAGS_FLAG))
-			 {
+	unsigned check_team;
+	powerup_type_t powerup_to_drop;
+	switch(segp->special)
+	{
+		case SEGMENT_IS_GOAL_BLUE:
+			check_team = TEAM_BLUE;
+			powerup_to_drop = POW_FLAG_RED;
+			break;
+		case SEGMENT_IS_GOAL_RED:
+			check_team = TEAM_RED;
+			powerup_to_drop = POW_FLAG_BLUE;
+			break;
+		default:
+			return;
+	}
+	if (get_team(Player_num) != check_team)
+		return;
+	auto &plrobj = get_local_plrobj();
+	auto &player_info = plrobj.ctype.player_info;
+	if (player_info.powerup_flags & PLAYER_FLAGS_FLAG)
+	{
+		player_info.powerup_flags &= ~PLAYER_FLAGS_FLAG;
 				multi_send_capture_bonus (Player_num);
-				Players[Player_num].flags &=(~(PLAYER_FLAGS_FLAG));
-				maybe_drop_net_powerup (POW_FLAG_RED);
-			 }
-	  	 }
-	if ( segp->special==SEGMENT_IS_GOAL_RED) {
-
-			if ((get_team(Player_num)==TEAM_RED) && (Players[Player_num].flags & PLAYER_FLAGS_FLAG))
-			 {		
-				multi_send_capture_bonus (Player_num);
-				Players[Player_num].flags &=(~(PLAYER_FLAGS_FLAG));
-				maybe_drop_net_powerup (POW_FLAG_BLUE);
-			 }
-	  	 }
-  }
+		maybe_drop_net_powerup(powerup_to_drop);
+	}
+}
 
 void fuelcen_check_for_hoard_goal(const vsegptr_t segp)
 {
 	Assert (game_mode_hoard());
 
-   if (Player_is_dead)
+   if (Player_dead_state != player_dead_state::no)
 		return;
 
 	if (segp->special==SEGMENT_IS_GOAL_BLUE || segp->special==SEGMENT_IS_GOAL_RED  )	
 	{
-		if (Players[Player_num].secondary_ammo[PROXIMITY_INDEX])
+		if (auto &proximity = get_local_player_secondary_ammo()[PROXIMITY_INDEX])
 		{
 				multi_send_orb_bonus (Player_num);
-				Players[Player_num].flags &=(~(PLAYER_FLAGS_FLAG));
-				Players[Player_num].secondary_ammo[PROXIMITY_INDEX]=0;
+				get_local_player_flags() &=(~(PLAYER_FLAGS_FLAG));
+				proximity = 0;
       }
 	}
 

@@ -129,9 +129,10 @@ static void draw_cell(int i,int j,g3s_point *p0,g3s_point *p1,g3s_point *p2,g3s_
 		mine_tiles_drawn |= 8;
 
 	if (mine_tiles_drawn == 0xf) {
-		render_mine(exit_segnum, 0);
 		//draw_exit_model();
 		mine_tiles_drawn=-1;
+		window_rendered_data window;
+		render_mine(exit_segnum, 0, window);
 		//if (ext_expl_playing)
 		//	draw_fireball(&external_explosion);
 	}
@@ -163,8 +164,6 @@ vms_vector &terrain_y_cache::operator()(uint_fast32_t h)
 	return dyp;
 }
 
-static int im=1;
-
 void render_terrain(const vms_vector &org_point,int org_2dx,int org_2dy)
 {
 	vms_vector delta_i,delta_j;		//delta_y;
@@ -185,7 +184,9 @@ void render_terrain(const vms_vector &org_point,int org_2dx,int org_2dy)
 	terrain_y_cache get_dy_vec;
 
 	//Lighting_on = 0;
-	Interpolation_method = im;
+#ifndef OGL
+	Interpolation_method = 1;
+#endif
 
 	{
 	const auto tv = vm_vec_copy_scale(surface_orient.rvec,GRID_SCALE);

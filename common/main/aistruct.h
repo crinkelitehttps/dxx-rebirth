@@ -26,13 +26,12 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _AISTRUCT_H
-#define _AISTRUCT_H
+#pragma once
 
 #include <physfs.h>
-#include "polyobj.h"
 
 #ifdef __cplusplus
+#include "polyobj.h"
 #include "pack.h"
 #include "objnum.h"
 #include "segnum.h"
@@ -41,8 +40,11 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #define MAX_SEGMENTS_PER_PATH       20
 
-enum player_awareness_type_t
+namespace dcx {
+
+enum class player_awareness_type_t : uint8_t
 {
+	PA_NONE,
 	PA_NEARBY_ROBOT_FIRED		= 1,  // Level of robot awareness after nearby robot fires a weapon
 	PA_WEAPON_WALL_COLLISION	= 2,  // Level of robot awareness after player weapon hits nearby wall
 //	PA_PLAYER_VISIBLE			= 2,  // Level of robot awareness if robot is looking towards player, and player not hidden
@@ -50,8 +52,7 @@ enum player_awareness_type_t
 	PA_WEAPON_ROBOT_COLLISION	= 4,  // Level of robot awareness after player weapon hits nearby robot
 };
 
-//#define PAE_WEAPON_HIT_WALL         1   // weapon hit wall, create player awareness
-//#define PAE_WEAPON_HIT_ROBOT        2   // weapon hit wall, create player awareness
+}
 
 // Constants indicating currently moving forward or backward through
 // path.  Note that you can add aip->direction to aip_path_index to
@@ -59,19 +60,25 @@ enum player_awareness_type_t
 #define AI_DIR_FORWARD  1
 #define AI_DIR_BACKWARD (-AI_DIR_FORWARD)
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+
+enum class ai_behavior : uint8_t
+{
 // Behaviors
-#define AIB_STILL                       0x80
-#define AIB_NORMAL                      0x81
-#define AIB_RUN_FROM                    0x83
-#define AIB_STATION                     0x85
+	AIB_STILL = 0x80,
+	AIB_NORMAL = 0x81,
+	AIB_RUN_FROM = 0x83,
+	AIB_STATION = 0x85,
 #if defined(DXX_BUILD_DESCENT_I)
-#define	AIB_HIDE							0x82
-#define	AIB_FOLLOW_PATH				0x84
+	AIB_HIDE = 0x82,
+	AIB_FOLLOW_PATH = 0x84,
 #elif defined(DXX_BUILD_DESCENT_II)
-#define AIB_BEHIND                      0x82
-#define AIB_SNIPE                       0x84
-#define AIB_FOLLOW                      0x86
+	AIB_BEHIND = 0x82,
+	AIB_SNIPE = 0x84,
+	AIB_FOLLOW = 0x86,
 #endif
+};
 
 #define MIN_BEHAVIOR    0x80
 #if defined(DXX_BUILD_DESCENT_I)
@@ -80,30 +87,36 @@ enum player_awareness_type_t
 #define MAX_BEHAVIOR    0x86
 #endif
 
+enum class ai_mode : uint8_t
+{
 //  Modes
-#define AIM_STILL                   0
-#define AIM_WANDER                  1
-#define AIM_FOLLOW_PATH             2
-#define AIM_CHASE_OBJECT            3
-#define AIM_RUN_FROM_OBJECT         4
-#define AIM_FOLLOW_PATH_2           6
-#define AIM_OPEN_DOOR               7
+	AIM_STILL = 0,
+	AIM_WANDER = 1,
+	AIM_FOLLOW_PATH = 2,
+	AIM_CHASE_OBJECT = 3,
+	AIM_RUN_FROM_OBJECT = 4,
+	AIM_FOLLOW_PATH_2 = 6,
+	AIM_OPEN_DOOR = 7,
 #if defined(DXX_BUILD_DESCENT_I)
-#define	AIM_HIDE							5
+	AIM_HIDE = 5,
 #elif defined(DXX_BUILD_DESCENT_II)
-#define AIM_BEHIND                  5
-#define AIM_GOTO_PLAYER             8   //  Only for escort behavior
-#define AIM_GOTO_OBJECT             9   //  Only for escort behavior
+	AIM_BEHIND = 5,
+	AIM_GOTO_PLAYER = 8,   //  Only for escort behavior
+	AIM_GOTO_OBJECT = 9,   //  Only for escort behavior
 
-#define AIM_SNIPE_ATTACK            10
-#define AIM_SNIPE_FIRE              11
-#define AIM_SNIPE_RETREAT           12
-#define AIM_SNIPE_RETREAT_BACKWARDS 13
-#define AIM_SNIPE_WAIT              14
+	AIM_SNIPE_ATTACK = 10,
+	AIM_SNIPE_FIRE = 11,
+	AIM_SNIPE_RETREAT = 12,
+	AIM_SNIPE_RETREAT_BACKWARDS = 13,
+	AIM_SNIPE_WAIT = 14,
 
-#define AIM_THIEF_ATTACK            15
-#define AIM_THIEF_RETREAT           16
-#define AIM_THIEF_WAIT              17
+	AIM_THIEF_ATTACK = 15,
+	AIM_THIEF_RETREAT = 16,
+	AIM_THIEF_WAIT = 17,
+#endif
+};
+
+}
 #endif
 
 #define AISM_GOHIDE                 0
@@ -168,28 +181,19 @@ enum player_awareness_type_t
 
 // This is the stuff that is permanent for an AI object.
 #if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
+
 // Rather temporal AI stuff.
 struct ai_local : public prohibit_void_ptr<ai_local>
 {
 // These used to be bytes, changed to ints so I could set watchpoints on them.
-#if defined(DXX_BUILD_DESCENT_I)
-	sbyte      player_awareness_type;           // type of awareness of player
-	sbyte      retry_count;                     // number of retries in physics last time this object got moved.
-	sbyte      consecutive_retries;             // number of retries in consecutive frames (ie, without a retry_count of 0)
-	sbyte      mode;                            // current mode within behavior
-	sbyte      previous_visibility;             // Visibility of player last time we checked.
-	sbyte      rapidfire_count;                 // number of shots fired rapidly
+	player_awareness_type_t      player_awareness_type;           // type of awareness of player
+	uint8_t retry_count;                     // number of retries in physics last time this object got moved.
+	uint8_t consecutive_retries;             // number of retries in consecutive frames (ie, without a retry_count of 0)
+	uint8_t previous_visibility;             // Visibility of player last time we checked.
+	uint8_t rapidfire_count;                 // number of shots fired rapidly
+	ai_mode mode;                            // current mode within behavior
 	segnum_t      goal_segment;                    // goal segment for current path
-	fix        last_see_time, last_attack_time; // For sound effects, time at which player last seen, attacked
-#elif defined(DXX_BUILD_DESCENT_II)
-	int        player_awareness_type;         // type of awareness of player
-	int        retry_count;                   // number of retries in physics last time this object got moved.
-	int        consecutive_retries;           // number of retries in consecutive frames (ie, without a retry_count of 0)
-	int        mode;                          // current mode within behavior
-	int        previous_visibility;           // Visibility of player last time we checked.
-	int        rapidfire_count;               // number of shots fired rapidly
-	segnum_t        goal_segment;                  // goal segment for current path
-#endif
 	fix        next_action_time;              // time in seconds until something happens, mode dependent
 	fix        next_fire;                     // time in seconds until can fire again
 #if defined(DXX_BUILD_DESCENT_II)
@@ -200,31 +204,28 @@ struct ai_local : public prohibit_void_ptr<ai_local>
 	fix64      time_player_seen;              // absolute time in seconds at which player was last seen, might cause to go into follow_path mode
 	fix64      time_player_sound_attacked;    // absolute time in seconds at which player was last seen with visibility of 2.
 	fix64      next_misc_sound_time;          // absolute time in seconds at which this robot last made an angry or lurking sound.
-	vms_angvec goal_angles[MAX_SUBMODELS];    // angles for each subobject
-	vms_angvec delta_angles[MAX_SUBMODELS];   // angles for each subobject
-	sbyte      goal_state[MAX_SUBMODELS];     // Goal state for this sub-object
-	sbyte      achieved_state[MAX_SUBMODELS]; // Last achieved state
+	array<vms_angvec, MAX_SUBMODELS> goal_angles;    // angles for each subobject
+	array<vms_angvec, MAX_SUBMODELS> delta_angles;   // angles for each subobject
+	array<sbyte, MAX_SUBMODELS>      goal_state;     // Goal state for this sub-object
+	array<sbyte, MAX_SUBMODELS>      achieved_state; // Last achieved state
 };
 
 struct ai_static : public prohibit_void_ptr<ai_static>
 {
-	ubyte   behavior;               //
-	sbyte   flags[MAX_AI_FLAGS];    // various flags, meaning defined by constants
+	ai_behavior behavior;               //
+	array<sbyte, MAX_AI_FLAGS>   flags;    // various flags, meaning defined by constants
 	segnum_t   hide_segment;           // Segment to go to for hiding.
 	short   hide_index;             // Index in Path_seg_points
 	short   path_length;            // Length of hide path.
 #if defined(DXX_BUILD_DESCENT_I)
 	short   cur_path_index;         // Current index in path.
-	segnum_t   follow_path_start_seg;  // Start segment for robot which follows path.
-	segnum_t   follow_path_end_seg;    // End segment for robot which follows path.
-	int     danger_laser_signature;
 #elif defined(DXX_BUILD_DESCENT_II)
 	sbyte   cur_path_index;         // Current index in path.
 	sbyte   dying_sound_playing;    // !0 if this robot is playing its dying sound.
 #endif
 	objnum_t   danger_laser_num;
+	object_signature_t     danger_laser_signature;
 #if defined(DXX_BUILD_DESCENT_II)
-	int     danger_laser_signature;
 	fix64   dying_start_time;       // Time at which this robot started dying.
 #endif
 	ai_local ail;
@@ -309,7 +310,10 @@ struct ai_cloak_info_rw
 #endif
 	vms_vector  last_position;
 };
+}
 #endif
+
+namespace dcx {
 
 struct point_seg : prohibit_void_ptr<point_seg> {
 	segnum_t         segnum;
@@ -323,6 +327,8 @@ struct seg_seg
 
 static const unsigned MAX_POINT_SEGS = 2500;
 
+}
+
 // These are the information for a robot describing the location of
 // the player last time he wasn't cloaked, and the time at which he
 // was uncloaked.  We should store this for each robot, but that's
@@ -330,8 +336,10 @@ static const unsigned MAX_POINT_SEGS = 2500;
 //extern fix        Last_uncloaked_time;
 //extern vms_vector Last_uncloaked_position;
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
+namespace dsx {
 extern void ai_do_cloak_stuff(void);
-
+}
 #endif
 
-#endif /* _AISTRUCT_H */
+#endif

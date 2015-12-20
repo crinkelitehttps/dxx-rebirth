@@ -10,11 +10,11 @@
  *
  */
 
-
+#include <cstdlib>
 #if !defined(macintosh) && !defined(_MSC_VER)
 #include <sys/param.h>
 #endif
-#if defined(__MACH__) && defined(__APPLE__)
+#if defined(__APPLE__) && defined(__MACH__)
 #include <sys/mount.h>
 #include <unistd.h>	// for chdir hack
 #include <HIServices/Processes.h>
@@ -25,14 +25,17 @@
 #include "console.h"
 #include "strutil.h"
 #include "ignorecase.h"
+#include "physfs_list.h"
 
+#include "compiler-range_for.h"
 #include "poison.h"
 
-const array<file_extension_t, 1> archive_exts{"dxa"};
+namespace dcx {
+
+const array<file_extension_t, 1> archive_exts{{"dxa"}};
 
 char *PHYSFSX_fgets_t::get(char *const buf, std::size_t n, PHYSFS_file *const fp)
 {
-	PHYSFS_sint64 t = PHYSFS_tell(fp);
 	PHYSFS_sint64 r = PHYSFS_read(fp, buf, sizeof(*buf), n - 1);
 	if (r <= 0)
 		return DXX_POISON_MEMORY(buf, buf + n, 0xcc), nullptr;
@@ -40,7 +43,8 @@ char *PHYSFSX_fgets_t::get(char *const buf, std::size_t n, PHYSFS_file *const fp
 	const auto cleanup = [&]{
 		return *p = 0, DXX_POISON_MEMORY(p + 1, buf + n, 0xcc), p;
 	};
-	for (char *e = buf + r;;)
+	char *const e = &buf[r];
+	for (;;)
 	{
 		if (p == e)
 		{
@@ -62,24 +66,28 @@ char *PHYSFSX_fgets_t::get(char *const buf, std::size_t n, PHYSFS_file *const fp
 		}
 		++p;
 	}
-	PHYSFS_seek(fp, t + (p - buf) + 1);
+	PHYSFS_seek(fp, PHYSFS_tell(fp) + p - e + 1);
 	return cleanup();
 }
 
-int PHYSFSX_checkMatchingExtension(const char *filename, const file_extension_t *const exts, const uint_fast32_t count)
+int PHYSFSX_checkMatchingExtension(const char *filename, const partial_range_t<const file_extension_t *> range)
 {
 	const char *ext = strrchr(filename, '.');
 	if (!ext)
 		return 0;
 	++ext;
-	const auto e = exts + count;
-	for (auto k = exts; k != e; ++k)	// see if the file is of a type we want
+	// see if the file is of a type we want
+	range_for (auto &k, range)
 	{
-		if (!d_stricmp(ext, *k))
+		if (!d_stricmp(ext, k))
 			return 1;
 	}
 	return 0;
 }
+
+}
+
+namespace dsx {
 
 // Initialise PhysicsFS, set up basic search paths and add arguments from .ini file.
 // The .ini file can be in either the user directory or the same directory as the program.
@@ -88,9 +96,6 @@ bool PHYSFSX_init(int argc, char *argv[])
 {
 #if defined(__unix__) || defined(__APPLE__) || defined(__MACH__)
 	char fullPath[PATH_MAX + 5];
-#endif
-#if defined(__unix__)
-	const char *path = NULL;
 #endif
 #ifdef macintosh	// Mac OS 9
 	char base_dir[PATH_MAX];
@@ -121,17 +126,25 @@ bool PHYSFSX_init(int argc, char *argv[])
 	chdir(base_dir);	// make sure relative hogdir paths work
 #endif
 	
+	const char *writedir;
 #if defined(__unix__)
 #if defined(DXX_BUILD_DESCENT_I)
 #define DESCENT_PATH_NUMBER	"1"
 #elif defined(DXX_BUILD_DESCENT_II)
 #define DESCENT_PATH_NUMBER	"2"
 #endif
+	const auto &home_environ_var = "D" DESCENT_PATH_NUMBER "X_REBIRTH_HOME";
+	const char *path = getenv(home_environ_var);
+	if (!path)
+	{
+		path = getenv(&home_environ_var[4]);
+		if (!path)
 # if !(defined(__APPLE__) && defined(__MACH__))
 	path = "~/.d" DESCENT_PATH_NUMBER "x-rebirth/";
 # else
 	path = "~/Library/Preferences/D" DESCENT_PATH_NUMBER "X Rebirth/";
 # endif
+	}
 	
 	if (path[0] == '~') // yes, this tilde can be put before non-unix paths.
 	{
@@ -147,19 +160,20 @@ bool PHYSFSX_init(int argc, char *argv[])
 		strncpy(fullPath, path, PATH_MAX + 5);
 	
 	PHYSFS_setWriteDir(fullPath);
-	if (!PHYSFS_getWriteDir())
+	if (!(writedir = PHYSFS_getWriteDir()))
 	{                                               // need to make it
 		char *p;
 		char ancestor[PATH_MAX + 5];    // the directory which actually exists
 		char child[PATH_MAX + 5];               // the directory relative to the above we're trying to make
 		
 		strcpy(ancestor, fullPath);
-		while (!PHYSFS_getWriteDir() && ((p = strrchr(ancestor, *PHYSFS_getDirSeparator()))))
+		const auto separator = *PHYSFS_getDirSeparator();
+		while (!PHYSFS_getWriteDir() && (p = strrchr(ancestor, separator)))
 		{
 			if (p[1] == 0)
 			{                                       // separator at the end (intended here, for safety)
 				*p = 0;                 // kill this separator
-				if (!((p = strrchr(ancestor, *PHYSFS_getDirSeparator()))))
+				if (!(p = strrchr(ancestor, separator)))
 					break;          // give up, this is (usually) the root directory
 			}
 			
@@ -168,12 +182,13 @@ bool PHYSFSX_init(int argc, char *argv[])
 		}
 		
 		strcpy(child, fullPath + strlen(ancestor));
-		for (p = child; (p = strchr(p, *PHYSFS_getDirSeparator())); p++)
-			*p = '/';
+		if (separator != '/')
+			for (p = child; (p = strchr(p, separator)); p++)
+				*p = '/';
 		PHYSFS_mkdir(child);
 		PHYSFS_setWriteDir(fullPath);
+		writedir = PHYSFS_getWriteDir();
 	}
-	const char *writedir = PHYSFS_getWriteDir();
 	con_printf(CON_DEBUG, "PHYSFS: append write directory \"%s\" to search path", writedir);
 	PHYSFS_addToSearchPath(writedir, 1);
 #endif
@@ -186,20 +201,19 @@ bool PHYSFSX_init(int argc, char *argv[])
 	if (!PHYSFS_getWriteDir())
 	{
 		PHYSFS_setWriteDir(base_dir);
-		if (!PHYSFS_getWriteDir())
+		if (!(writedir = PHYSFS_getWriteDir()))
 			Error("can't set write dir: %s\n", PHYSFS_getLastError());
-		else
-			PHYSFS_addToSearchPath(PHYSFS_getWriteDir(), 0);
+		PHYSFS_addToSearchPath(writedir, 0);
 	}
 	
 	//tell PHYSFS where hogdir is
-	if (GameArg.SysHogDir)
+	if (!GameArg.SysHogDir.empty())
 	{
-		con_printf(CON_DEBUG, "PHYSFS: append argument hog directory \"%s\" to search path", GameArg.SysHogDir);
-		PHYSFS_addToSearchPath(GameArg.SysHogDir,1);
+		con_printf(CON_DEBUG, "PHYSFS: append argument hog directory \"%s\" to search path", GameArg.SysHogDir.c_str());
+		PHYSFS_addToSearchPath(GameArg.SysHogDir.c_str(),1);
 	}
 #if defined(__unix__)
-	else if (!GameArg.SysNoHogDir)
+	else if (!CGameArg.SysNoHogDir)
 	{
 		con_printf(CON_DEBUG, "PHYSFS: append sharepath directory \"" SHAREPATH "\" to search path");
 		PHYSFS_addToSearchPath(SHAREPATH, 1);
@@ -240,6 +254,10 @@ bool PHYSFSX_init(int argc, char *argv[])
 #endif
 	return true;
 }
+
+}
+
+namespace dcx {
 
 // Add a searchpath, but that searchpath is relative to an existing searchpath
 // It will add the first one it finds and return 1, if it doesn't find any it returns 0
@@ -284,37 +302,37 @@ int PHYSFSX_fsize(const char *hogname)
 
 void PHYSFSX_listSearchPathContent()
 {
-	char **i, **list;
-
 	con_printf(CON_DEBUG, "PHYSFS: Listing contents of Search Path.");
-	list = PHYSFS_getSearchPath();
-	for (i = list; *i != NULL; i++)
-		con_printf(CON_DEBUG, "PHYSFS: [%s] is in the Search Path.", *i);
-	PHYSFS_freeList(list);
-
-	list = PHYSFS_enumerateFiles("");
-	for (i = list; *i != NULL; i++)
-		con_printf(CON_DEBUG, "PHYSFS: * We've got [%s].", *i);
-	PHYSFS_freeList(list);
+	PHYSFSX_uncounted_list list{PHYSFS_getSearchPath()};
+	range_for (const auto i, list)
+		con_printf(CON_DEBUG, "PHYSFS: [%s] is in the Search Path.", i);
+	list.reset();
+	list.reset(PHYSFS_enumerateFiles(""));
+	range_for (const auto i, list)
+		con_printf(CON_DEBUG, "PHYSFS: * We've got [%s].", i);
 }
+
+}
+
+namespace dsx {
 
 // checks which archives are supported by PhysFS. Return 0 if some essential (HOG) is not supported
 int PHYSFSX_checkSupportedArchiveTypes()
 {
-	const PHYSFS_ArchiveInfo **i;
 	int hog_sup = 0;
 #ifdef DXX_BUILD_DESCENT_II
 	int mvl_sup = 0;
 #endif
 
 	con_printf(CON_DEBUG, "PHYSFS: Checking supported archive types.");
-	for (i = PHYSFS_supportedArchiveTypes(); *i != NULL; i++)
+	range_for (const auto i, make_null_sentinel_array(PHYSFS_supportedArchiveTypes()))
 	{
-		con_printf(CON_DEBUG, "PHYSFS: Supported archive: [%s], which is [%s].", (*i)->extension, (*i)->description);
-		if (!d_stricmp((*i)->extension, "HOG"))
+		const auto iextension = i->extension;
+		con_printf(CON_DEBUG, "PHYSFS: Supported archive: [%s], which is [%s].", iextension, i->description);
+		if (!d_stricmp(iextension, "HOG"))
 			hog_sup = 1;
 #ifdef DXX_BUILD_DESCENT_II
-		if (!d_stricmp((*i)->extension, "MVL"))
+		else if (!d_stricmp(iextension, "MVL"))
 			mvl_sup = 1;
 #endif
 	}
@@ -329,47 +347,76 @@ int PHYSFSX_checkSupportedArchiveTypes()
 	return hog_sup;
 }
 
-int PHYSFSX_getRealPath(const char *stdPath, char *realPath)
+}
+
+namespace dcx {
+
+int PHYSFSX_getRealPath(const char *stdPath, char *realPath, const std::size_t outSize)
 {
+	DXX_POISON_MEMORY(realPath, outSize, 0xdd);
 	const char *realDir = PHYSFS_getRealDir(stdPath);
-	const char *sep = PHYSFS_getDirSeparator();
-	char *p;
-	
 	if (!realDir)
 	{
 		realDir = PHYSFS_getWriteDir();
 		if (!realDir)
 			return 0;
 	}
-	
-	strncpy(realPath, realDir, PATH_MAX - 1);
-	if (strlen(realPath) >= strlen(sep))
+	const auto realDirSize = strlen(realDir);
+	if (realDirSize >= outSize)
+		return 0;
+	auto mountpoint = PHYSFS_getMountPoint(realDir);
+	if (!mountpoint)
+		return 0;
+	std::copy_n(realDir, realDirSize + 1, realPath);
+#ifdef _unix__
+	auto &sep = "/";
+	assert(!strcmp(PHYSFS_getDirSeparator(), sep));
+#else
+	const auto sep = PHYSFS_getDirSeparator();
+#endif
+	const auto sepSize = strlen(sep);
+	auto realPathUsed = realDirSize;
+	if (realDirSize >= sepSize)
 	{
-		p = realPath + strlen(realPath) - strlen(sep);
+		const auto p = realPath + realDirSize - sepSize;
 		if (strcmp(p, sep)) // no sep at end of realPath
-			strncat(realPath, sep, PATH_MAX - 1 - strlen(realPath));
-	}
-	
-	if (strlen(stdPath) >= 1)
-		if (*stdPath == '/')
-			stdPath++;
-	
-	while (*stdPath)
-	{
-		if (*stdPath == '/')
-			strncat(realPath, sep, PATH_MAX - 1 - strlen(realPath));
-		else
 		{
-			if (strlen(realPath) < PATH_MAX - 2)
-			{
-				p = realPath + strlen(realPath);
-				p[0] = *stdPath;
-				p[1] = '\0';
-			}
+			realPathUsed += sepSize;
+			std::copy_n(sep, sepSize, &realPath[realDirSize]);
 		}
-		stdPath++;
 	}
-	
+	if (*mountpoint == '/')
+		++mountpoint;
+	if (*stdPath == '/')
+		++stdPath;
+	const auto ml = strlen(mountpoint);
+	if (!strncmp(mountpoint, stdPath, ml))
+		stdPath += ml;
+	else
+	{
+		/* Virtual path is not under the virtual mount point that
+		 * provides the path.
+		 */
+		assert(false);
+	}
+	const auto stdPathLen = strlen(stdPath) + 1;
+	if (realPathUsed + stdPathLen >= outSize)
+		return 0;
+#ifdef __unix__
+	/* Separator is "/" and physfs internal separator is "/".  Copy
+	 * through.
+	 */
+	std::copy_n(stdPath, stdPathLen, &realPath[realPathUsed]);
+#else
+	/* Separator might be / on non-unix, but the fallback path works
+	 * regardless of whether separator is "/".
+	 */
+	const auto csep = *sep;
+	const auto a = [csep](char c) {
+		return c == '/' ? csep : c;
+	};
+	std::transform(stdPath, &stdPath[stdPathLen], &realPath[realPathUsed], a);
+#endif
 	return 1;
 }
 
@@ -377,18 +424,15 @@ int PHYSFSX_getRealPath(const char *stdPath, char *realPath)
 int PHYSFSX_isNewPath(const char *path)
 {
 	int is_new_path = 1;
-	char **i, **list;
-	
-	list = PHYSFS_getSearchPath();
-	for (i = list; *i != NULL; i++)
+	PHYSFSX_uncounted_list list{PHYSFS_getSearchPath()};
+	range_for (const auto i, list)
 	{
-		if (!strcmp(path, *i))
+		if (!strcmp(path, i))
 		{
 			is_new_path = 0;
+			break;
 		}
 	}
-	PHYSFS_freeList(list);
-	
 	return is_new_path;
 }
 
@@ -402,18 +446,18 @@ int PHYSFSX_rename(const char *oldpath, const char *newpath)
 }
 
 template <typename F>
-static inline PHYSFS_list_t PHYSFSX_findPredicateFiles(const char *path, F f)
+static inline PHYSFSX_uncounted_list PHYSFSX_findPredicateFiles(const char *path, F f)
 {
-	PHYSFS_list_t list{PHYSFS_enumerateFiles(path)};
+	PHYSFSX_uncounted_list list{PHYSFS_enumerateFiles(path)};
 	if (!list)
 		return nullptr;	// out of memory: not so good
 	char **j = list.get();
-	for (auto i = j; *i; ++i)
+	range_for (const auto i, list)
 	{
-		if (f(*i))
-			*j++ = *i;
+		if (f(i))
+			*j++ = i;
 		else
-			free(*i);
+			free(i);
 	}
 	*j = NULL;
 	char **r = reinterpret_cast<char **>(realloc(list.get(), (j - list.get() + 1)*sizeof(char *)));	// save a bit of memory (or a lot?)
@@ -427,7 +471,7 @@ static inline PHYSFS_list_t PHYSFSX_findPredicateFiles(const char *path, F f)
 
 // Find files at path that have an extension listed in exts
 // The extension list exts must be NULL-terminated, with each ext beginning with a '.'
-PHYSFS_list_t PHYSFSX_findFiles(const char *path, const file_extension_t *exts, uint_fast32_t count)
+PHYSFSX_uncounted_list PHYSFSX_findFiles(const char *path, const file_extension_t *exts, uint_fast32_t count)
 {
 	const auto predicate = [&](const char *i) {
 		return PHYSFSX_checkMatchingExtension(i, exts, count);
@@ -437,7 +481,7 @@ PHYSFS_list_t PHYSFSX_findFiles(const char *path, const file_extension_t *exts, 
 
 // Same function as above but takes a real directory as second argument, only adding files originating from this directory.
 // This can be used to further seperate files in search path but it must be made sure realpath is properly formatted.
-PHYSFS_list_t PHYSFSX_findabsoluteFiles(const char *path, const char *realpath, const file_extension_t *exts, uint_fast32_t count)
+PHYSFSX_uncounted_list PHYSFSX_findabsoluteFiles(const char *path, const char *realpath, const file_extension_t *exts, uint_fast32_t count)
 {
 	const auto predicate = [&](const char *i) {
 		return PHYSFSX_checkMatchingExtension(i, exts, count) && (!strcmp(PHYSFS_getRealDir(i), realpath));
@@ -445,34 +489,11 @@ PHYSFS_list_t PHYSFSX_findabsoluteFiles(const char *path, const char *realpath, 
 	return PHYSFSX_findPredicateFiles(path, predicate);
 }
 
-#if 0
-// returns -1 if error
-// Gets bytes free in current write dir
-PHYSFS_sint64 PHYSFSX_getFreeDiskSpace()
-{
-#if defined(__linux__) || (defined(__MACH__) && defined(__APPLE__))
-	struct statfs sfs;
-	
-	if (!statfs(PHYSFS_getWriteDir(), &sfs))
-		return (PHYSFS_sint64)(sfs.f_bavail * sfs.f_bsize);
-	
-	return -1;
-#else
-	return 0x7FFFFFFF;
-#endif
-}
-#endif
-
-int PHYSFSX_exists(const char *filename, int ignorecase)
+int PHYSFSX_exists_ignorecase(const char *filename)
 {
 	char filename2[PATH_MAX];
-
-	if (!ignorecase)
-		return PHYSFS_exists(filename);
-
 	snprintf(filename2, sizeof(filename2), "%s", filename);
 	PHYSFSEXT_locateCorrectCase(filename2);
-
 	return PHYSFS_exists(filename2);
 }
 
@@ -527,10 +548,10 @@ void PHYSFSX_addArchiveContent()
 	// find files in Searchpath ...
 	auto list = PHYSFSX_findFiles("", archive_exts);
 	// if found, add them...
-	for (int i = 0; list[i] != NULL; i++)
+	range_for (const auto i, list)
 	{
 		char realfile[PATH_MAX];
-		PHYSFSX_getRealPath(list[i],realfile);
+		PHYSFSX_getRealPath(i,realfile);
 		if (PHYSFS_addToSearchPath(realfile, 0))
 		{
 			con_printf(CON_DEBUG, "PHYSFS: Added %s to Search Path",realfile);
@@ -542,14 +563,14 @@ void PHYSFSX_addArchiveContent()
 	// find files in DEMO_DIR ...
 	list = PHYSFSX_findFiles(DEMO_DIR, archive_exts);
 	// if found, add them...
-	for (int i = 0; list[i] != NULL; i++)
+	range_for (const auto i, list)
 	{
 		char demofile[PATH_MAX], realfile[PATH_MAX];
-		snprintf(demofile, sizeof(demofile), "%s%s", DEMO_DIR, list[i]);
+		snprintf(demofile, sizeof(demofile), DEMO_DIR "%s", i);
 		PHYSFSX_getRealPath(demofile,realfile);
 		if (PHYSFS_mount(realfile, DEMO_DIR, 0))
 		{
-			con_printf(CON_DEBUG, "PHYSFS: Added %s to %s",realfile, DEMO_DIR);
+			con_printf(CON_DEBUG, "PHYSFS: Added %s to " DEMO_DIR, realfile);
 			content_updated = 1;
 		}
 	}
@@ -569,21 +590,23 @@ void PHYSFSX_removeArchiveContent()
 	// find files in Searchpath ...
 	auto list = PHYSFSX_findFiles("", archive_exts);
 	// if found, remove them...
-	for (int i = 0; list[i] != NULL; i++)
+	range_for (const auto i, list)
 	{
 		char realfile[PATH_MAX];
-		PHYSFSX_getRealPath(list[i],realfile);
+		PHYSFSX_getRealPath(i, realfile);
 		PHYSFS_removeFromSearchPath(realfile);
 	}
 	list.reset();
 	// find files in DEMO_DIR ...
 	list = PHYSFSX_findFiles(DEMO_DIR, archive_exts);
 	// if found, remove them...
-	for (int i = 0; list[i] != NULL; i++)
+	range_for (const auto i, list)
 	{
 		char demofile[PATH_MAX], realfile[PATH_MAX];
-		snprintf(demofile, sizeof(demofile), "%s%s", DEMO_DIR, list[i]);
+		snprintf(demofile, sizeof(demofile), DEMO_DIR "%s", i);
 		PHYSFSX_getRealPath(demofile,realfile);
 		PHYSFS_removeFromSearchPath(realfile);
 	}
+}
+
 }

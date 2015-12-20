@@ -31,6 +31,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "gr.h"				// For canves, font stuff
 #include "ui.h"				// For UI_GADGET stuff
 #include "object.h"			// For robot_bms
+#include "event.h"
 #include "dxxerror.h"
 #include "objpage.h"
 #include "bm.h"
@@ -48,7 +49,7 @@ static int ObjectPage = 0;
 
 #include "vecmat.h"
 #include "3d.h"
-#include "polyobj.h"
+#include "robot.h"
 #include "texmap.h"
 
 #include "hostage.h"
@@ -101,7 +102,7 @@ void draw_object_picture(int id, vms_angvec *orient_angles, int type)
 
 }
 
-static void redraw_current_object()
+static int redraw_current_object()
 {
 	grs_canvas * cc;
 
@@ -109,6 +110,7 @@ static void redraw_current_object()
 	gr_set_current_canvas(ObjCurrent->canvas);
 	draw_object_picture(Cur_object_id, &objpage_view_orient, Cur_object_type);
 	gr_set_current_canvas(cc);
+	return 1;
 }
 
 static void gr_label_box( int i)
@@ -246,7 +248,7 @@ int objpage_goto_next_object()
 
 		case OBJ_POWERUP:
 			Cur_object_type = OBJ_CNTRLCEN;
-			Num_object_subtypes = get_num_reactor_models();
+			Num_object_subtypes = Num_reactors;
 			break;
 
 		case OBJ_CNTRLCEN:
@@ -269,60 +271,30 @@ int objpage_goto_next_object()
 
 #define DELTA_ANG 0x800
 
-static int objpage_increase_pitch()
+template <fixang vms_angvec::*a, fixang v>
+static int objpage_change_angle()
 {
-	objpage_view_orient.p += DELTA_ANG;
-	redraw_current_object();
-	return 1;
+	objpage_view_orient.*a += v;
+	return redraw_current_object();
 }
 
-static int objpage_decrease_pitch()
-{
-	objpage_view_orient.p -= DELTA_ANG;
-	redraw_current_object();
-	return 1;
-}
-
-static int objpage_increase_heading()
-{
-	objpage_view_orient.h += DELTA_ANG;
-	redraw_current_object();
-	return 1;
-}
-
-static int objpage_decrease_heading()
-{
-	objpage_view_orient.h -= DELTA_ANG;
-	redraw_current_object();
-	return 1;
-}
-
-static int objpage_increase_bank()
-{
-	objpage_view_orient.b += DELTA_ANG;
-	redraw_current_object();
-	return 1;
-}
-
-static int objpage_decrease_bank()
-{
-	objpage_view_orient.b -= DELTA_ANG;
-	redraw_current_object();
-	return 1;
-}
+#define objpage_increase_pitch objpage_change_angle<&vms_angvec::p, DELTA_ANG>
+#define objpage_decrease_pitch objpage_change_angle<&vms_angvec::p, -DELTA_ANG>
+#define objpage_increase_heading objpage_change_angle<&vms_angvec::h, DELTA_ANG>
+#define objpage_decrease_heading objpage_change_angle<&vms_angvec::h, -DELTA_ANG>
+#define objpage_increase_bank objpage_change_angle<&vms_angvec::b, DELTA_ANG>
+#define objpage_decrease_bank objpage_change_angle<&vms_angvec::b, -DELTA_ANG>
 
 static int objpage_increase_z()
 {
 	objpage_view_dist -= 0x8000;
-	redraw_current_object();
-	return 1;
+	return redraw_current_object();
 }
 
 static int objpage_decrease_z()
 {
 	objpage_view_dist += 0x8000;
-	redraw_current_object();
-	return 1;
+	return redraw_current_object();
 }
 
 static int objpage_reset_orient()
@@ -331,8 +303,7 @@ static int objpage_reset_orient()
 	objpage_view_orient.b = 0;
 	objpage_view_orient.h = -0x8000;
 	//objpage_view_dist = DEFAULT_VIEW_DIST;
-	redraw_current_object();
-	return 1;
+	return redraw_current_object();
 }
 
 

@@ -25,6 +25,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 
 #pragma once
 
+#include <cstddef>
 #include <stdio.h>
 #include "dxxsconf.h"
 #include <assert.h>
@@ -38,16 +39,35 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #define __noreturn
 #endif
 
+namespace dcx {
+
 int error_init(void (*func)(const char *));    //init error system, returns 0=ok
 void Warning_puts(const char *str) __attribute_nonnull();
 void Warning(const char *fmt,...) __attribute_format_printf(1, 2);				//print out warning message to user
 #define Warning(F,...)	dxx_call_printf_checked(Warning,Warning_puts,(),(F),##__VA_ARGS__)
 void set_warn_func(void (*f)(const char *s));//specifies the function to call with warning messages
 void clear_warn_func();//say this function no longer valid
-void Error_puts(const char *func, unsigned line, const char *str) __noreturn __attribute_nonnull();
-#define Error_puts(F)	Error_puts(__func__, __LINE__,F)
-void Error(const char *func, unsigned line, const char *fmt,...) __noreturn __attribute_format_printf(3, 4);				//exit with error code=1, print message
-#define Error(F,...)	dxx_call_printf_checked(Error,(Error_puts),(__func__, __LINE__),(F),##__VA_ARGS__)
+__noreturn
+__attribute_nonnull()
+void Error_puts(const char *file, unsigned line, const char *func, const char *str);
+#define Error_puts(F)	Error_puts(__FILE__, __LINE__, __func__, F)
+__noreturn
+__attribute_format_printf(4, 5)
+__attribute_nonnull()
+void Error(const char *file, unsigned line, const char *func, const char *fmt,...);				//exit with error code=1, print message
+#define Error(F,...)	dxx_call_printf_checked(Error,(Error_puts),(__FILE__, __LINE__, __func__),(F),##__VA_ARGS__)
+
+__noreturn
+void UserError_puts(const char *str, std::size_t);
+
+template <std::size_t len>
+__noreturn
+static inline void UserError_puts(const char (&str)[len])
+{
+	UserError_puts(str, len - 1);
+}
+void UserError(const char *fmt, ...) __noreturn __attribute_format_printf(1, 2);
+#define UserError(F,...)	dxx_call_printf_checked(UserError,(UserError_puts),(),(F),##__VA_ARGS__)
 #define Assert assert
 
 /* Compatibility with x86-specific name */
@@ -95,6 +115,8 @@ static inline void d_debugbreak()
 #ifdef DXX_DEBUGBREAK_TRAP
 	DXX_DEBUGBREAK_TRAP();
 #endif
+
+}
 
 }
 

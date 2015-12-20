@@ -24,19 +24,18 @@
 
 #include "dxxsconf.h"
 #include "compiler-make_unique.h"
+#include "compiler-range_for.h"
+#include "partial_range.h"
 
-#ifdef WORDS_BIGENDIAN
-#define MIDIINT(x) (x)
-#define MIDISHORT(x) (x)
-#else
-#define MIDIINT(x) SWAPINT(x)
-#define MIDISHORT(x) SWAPSHORT(x)
-#endif
+namespace dcx {
+
+#define MIDIINT(x)	(words_bigendian ? (x) : (SWAPINT(x)))
+#define MIDISHORT(x)	(words_bigendian ? (x) : (SWAPSHORT(x)))
 
 #ifdef _WIN32
-int midi_volume;
-int channel_volume[16];
-void hmp_stop(hmp_file *hmp);
+static int midi_volume;
+static int channel_volume[16];
+static void hmp_stop(hmp_file *hmp);
 #endif
 
 // READ/OPEN/CLOSE HMP
@@ -50,13 +49,13 @@ hmp_file::~hmp_file()
 
 std::unique_ptr<hmp_file> hmp_open(const char *filename) {
 	int data, num_tracks, tempo;
-	char buf[256];
 	auto fp = PHYSFSX_openReadBuffered(filename);
 
 	if (!fp)
 		return NULL;
 
 	std::unique_ptr<hmp_file> hmp(new hmp_file{});
+	char buf[8];
 	if ((PHYSFS_read(fp, buf, 1, 8) != 8) || (memcmp(buf, "HMIMIDIP", 8)))
 	{
 		return NULL;
@@ -178,15 +177,17 @@ static int get_var_num(unsigned char *data, int datalen,
 }
 
 static int get_event(hmp_file *hmp, event *ev) {
-	static const int cmdlen[7]={3,3,3,3,2,2,3};
+	static const array<int, 7> cmdlen{{3,3,3,3,2,2,3}};
 	unsigned long got;
 	unsigned long mindelta, delta;
-	int i, ev_num;
+	int ev_num;
 	hmp_track *trk, *fndtrk;
 
 	mindelta = INT_MAX;
 	fndtrk = NULL;
-	for (trk = hmp->trks, i = hmp->num_trks; (i--) > 0; trk++) {
+	range_for (auto &rtrk, partial_range(hmp->trks, static_cast<unsigned>(hmp->num_trks)))
+	{
+		const auto trk = &rtrk;
 		if (!trk->left || (hmp->loop_start && hmp->looping && !trk->loop_set))
 			continue;
 		if (!(got = get_var_num_hmi(trk->cur, trk->left, &delta)))
@@ -353,7 +354,7 @@ static void reset_tracks(struct hmp_file *hmp)
 	hmp->cur_time = 0;
 }
 
-static void _stdcall midi_callback(HMIDISTRM hms, UINT uMsg, DWORD dwUser, DWORD_PTR dw1, DWORD dw2)
+static void _stdcall midi_callback(HMIDISTRM, UINT uMsg, DWORD, DWORD_PTR dw1, DWORD)
 {
 	MIDIHDR *mhdr;
 	hmp_file *hmp;
@@ -712,4 +713,6 @@ void hmp2mid(const char *hmp_name, std::vector<uint8_t> &midbuf)
 		be_bytebuffer_t bbmi(&midbuf[midtrklenpos]);
 		serial::process_buffer(bbmi, static_cast<int32_t>(size_after - size_before));
 	}
+}
+
 }

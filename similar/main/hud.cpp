@@ -38,6 +38,8 @@
 #include "playsave.h"
 #include "countarray.h"
 
+namespace {
+
 struct hudmsg
 {
 	fix time;
@@ -49,6 +51,8 @@ struct hudmsg
 		message.copy_if(m);
 	}
 };
+
+}
 
 struct hudmsg_array_t : public count_array_t<hudmsg, HUD_MAX_NUM_STOR> {};
 static hudmsg_array_t HUD_messages;
@@ -93,10 +97,14 @@ void HUD_render_message_frame()
 		gr_set_curfont( GAME_FONT );
 		y = FSPACY(1);
 
+		const auto &&line_spacing = LINE_SPACING;
 #if defined(DXX_BUILD_DESCENT_II)
-		if (Guided_missile[Player_num] && Guided_missile[Player_num]->type==OBJ_WEAPON && Guided_missile[Player_num]->id==GUIDEDMISS_ID &&
-		Guided_missile[Player_num]->signature==Guided_missile_sig[Player_num] && PlayerCfg.GuidedInBigWindow)
-			y+=LINE_SPACING;
+		if (PlayerCfg.GuidedInBigWindow &&
+			Guided_missile[Player_num] &&
+			Guided_missile[Player_num]->type == OBJ_WEAPON &&
+			get_weapon_id(*Guided_missile[Player_num]) == weapon_id_type::GUIDEDMISS_ID &&
+			Guided_missile[Player_num]->signature == Guided_missile_sig[Player_num])
+			y += line_spacing;
 #endif
 
 		hudmsg_array_t::iterator i, e = HUD_messages.end();
@@ -110,7 +118,7 @@ void HUD_render_message_frame()
 			gr_set_fontcolor( HUD_color, -1);
 
 			gr_string(0x8000,y, &i->message[0] );
-			y += LINE_SPACING;
+			y += line_spacing;
 		}
 	}
 
@@ -233,10 +241,10 @@ int HUD_init_message_literal(int class_flag, const char *str)
 void player_dead_message(void)
 {
 	if (Player_exploded) {
-		if ( Players[Player_num].lives < 2 )    {
-			int x, y, w, h, aw;
+		if ( get_local_player().lives < 2 )    {
+			int x, y, w, h;
 			gr_set_curfont( HUGE_FONT );
-			gr_get_string_size( TXT_GAME_OVER, &w, &h, &aw );
+			gr_get_string_size(TXT_GAME_OVER, &w, &h, nullptr);
 			w += 20;
 			h += 8;
 			x = (grd_curcanv->cv_bitmap.bm_w - w ) / 2;
@@ -254,6 +262,6 @@ void player_dead_message(void)
 		if (HUD_color == -1)
 			HUD_color = BM_XRGB(0,28,0);
 		gr_set_fontcolor( HUD_color, -1);
-		gr_string(0x8000, GHEIGHT-LINE_SPACING, TXT_PRESS_ANY_KEY);
+		gr_string(0x8000, GHEIGHT - LINE_SPACING, PlayerCfg.RespawnMode == RespawnPress::Any ? TXT_PRESS_ANY_KEY : "Press fire key or button to continue...");
 	}
 }

@@ -38,7 +38,10 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "palette.h"
 
 #include "dxxsconf.h"
+#include "compiler-array.h"
 #include "compiler-range_for.h"
+
+namespace dcx {
 
 #define SQUARE(x) ((x)*(x))
 
@@ -51,7 +54,7 @@ struct color_record {
 	color_t color_num;
 };
 
-color_record Computed_colors[MAX_COMPUTED_COLORS];
+static array<color_record, MAX_COMPUTED_COLORS> Computed_colors;
 
 palette_array_t gr_palette;
 palette_array_t gr_current_pal;
@@ -59,6 +62,10 @@ gft_array1 gr_fade_table;
 
 ubyte gr_palette_gamma = 0;
 int gr_palette_gamma_param = 0;
+
+}
+
+namespace dsx {
 
 void copy_bound_palette(palette_array_t &d, const palette_array_t &s)
 {
@@ -173,6 +180,10 @@ void gr_use_palette_table(const char * filename )
 #endif
 }
 
+}
+
+namespace dcx {
+
 //	Add a computed color (by gr_find_closest_color) to list of computed colors in Computed_colors.
 //	If list wasn't full already, increment Num_computed_colors.
 //	If was full, replace a random one.
@@ -210,15 +221,17 @@ color_t gr_find_closest_color( int r, int g, int b )
 
 	//	If we've already computed this color, return it!
 	for (unsigned i=0; i<Num_computed_colors; i++)
-		if (r == Computed_colors[i].r)
-			if (g == Computed_colors[i].g)
-				if (b == Computed_colors[i].b) {
+	{
+		auto &c = Computed_colors[i];
+		if (r == c.r && g == c.g && b == c.b)
+		{
+			const auto color_num = c.color_num;
 					if (i > 4) {
-						std::swap(Computed_colors[i-1], Computed_colors[i]);
-						return Computed_colors[i-1].color_num;
+						std::swap(Computed_colors[i-1], c);
 					}
-					return Computed_colors[i].color_num;
+					return color_num;
 				}
+	}
 
 //	r &= 63;
 //	g &= 63;
@@ -283,40 +296,4 @@ color_t gr_find_closest_color_current( int r, int g, int b )
 	return best_index;
 }
 
-void gr_make_cthru_table(ubyte * table, ubyte r, ubyte g, ubyte b )
-{
-	int i;
-	ubyte r1, g1, b1;
-
-	for (i=0; i < 256; i++ )	{
-		r1 = gr_palette[i].r + r;
-		if ( r1 > 63 ) r1 = 63;
-		g1 = gr_palette[i].g + g;
-		if ( g1 > 63 ) g1 = 63;
-		b1 = gr_palette[i].b + b;
-		if ( b1 > 63 ) b1 = 63;
-		table[i] = gr_find_closest_color( r1, g1, b1 );
-	}
 }
-
-#if defined(DXX_BUILD_DESCENT_II)
-void gr_make_blend_table(ubyte *blend_table, ubyte r, ubyte g, ubyte b)
-{
-	int i, j;
-	float alpha;
-	ubyte r1, g1, b1;
-
-	for (j = 0; j < GR_FADE_LEVELS; j++)
-	{
-		alpha = 1.0 - (float)j / ((float)GR_FADE_LEVELS - 1);
-		for (i = 0; i < 255; i++)
-		{
-			r1 = (ubyte)((1.0 - alpha) * (float)gr_palette[i].r + (alpha * (float)r));
-			g1 = (ubyte)((1.0 - alpha) * (float)gr_palette[i].g + (alpha * (float)g));
-			b1 = (ubyte)((1.0 - alpha) * (float)gr_palette[i].b + (alpha * (float)b));
-			blend_table[i + j * 256] = gr_find_closest_color(r1, g1, b1);
-		}
-		blend_table[i + j * 256] = 255; // leave white alone
-	}
-}
-#endif

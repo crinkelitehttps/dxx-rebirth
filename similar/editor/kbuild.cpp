@@ -41,7 +41,7 @@ int CreateBridge()
 		mine_changed = 1;
     	autosave_mine(mine_filename);
     	diagnostic_message("Bridge segment formed.");
-    	strcpy(undo_status[Autosave_count], "Bridge segment UNDONE.");
+		undo_status[Autosave_count] = "Bridge segment UNDONE.";
     	warn_if_concave_segments();
 	}
     return 1;
@@ -60,7 +60,7 @@ int FormJoint()
             mine_changed = 1;
             autosave_mine(mine_filename);
             diagnostic_message("Joint formed.");
-            strcpy(undo_status[Autosave_count], "Joint undone.");
+			undo_status[Autosave_count] = "Joint undone.";
     			warn_if_concave_segments();
         }
 	}
@@ -82,7 +82,7 @@ int CreateAdjacentJoint()
 			mine_changed = 1;
          autosave_mine(mine_filename);
          diagnostic_message("Joint segment formed.");
-         strcpy(undo_status[Autosave_count], "Joint segment undone.");
+			undo_status[Autosave_count] = "Joint segment undone.";
     		warn_if_concave_segments();
 		} else
 			editor_status("Attempted to form joint through connected side -- joint segment not formed (you bozo).");
@@ -108,7 +108,7 @@ int CreateSloppyAdjacentJoint()
 				mine_changed = 1;
 	         autosave_mine(mine_filename);
 	         diagnostic_message("Sloppy Joint segment formed.");
-	         strcpy(undo_status[Autosave_count], "Sloppy Joint segment undone.");
+				undo_status[Autosave_count] = "Sloppy Joint segment undone.";
 	    		warn_if_concave_segments();
 				}
 			else editor_status("Couldn't form sloppy joint.\n");
@@ -149,7 +149,7 @@ int CreateSloppyAdjacentJointsGroup()
 		mine_changed = 1;
 		autosave_mine(mine_filename);
 		diagnostic_message("Sloppy Joint segment formed.");
-		strcpy(undo_status[Autosave_count], "Sloppy Joint segment undone.");
+		undo_status[Autosave_count] = "Sloppy Joint segment undone.";
 		warn_if_concave_segments();
 	}
 
@@ -174,7 +174,7 @@ int CreateAdjacentJointsSegment()
 					mine_changed = 1;
 	            autosave_mine(mine_filename);
 	            diagnostic_message("Adjacent Joint segment formed.");
-	            strcpy(undo_status[Autosave_count], "Adjacent Joint segment UNDONE.");
+				undo_status[Autosave_count] = "Adjacent Joint segment UNDONE.";
 	    			warn_if_concave_segments();
 					}
 	}
@@ -190,19 +190,22 @@ int CreateAdjacentJointsAll()
 	med_combine_duplicate_vertices(Vertex_active);
 
 	range_for (const auto seg, highest_valid(Segments))
+	{
+		const auto &&segp = vsegptridx(static_cast<segnum_t>(seg));
 		for (int s=0; s<MAX_SIDES_PER_SEGMENT; s++)
 		{
 			segptridx_t adj_sp = segment_none;
-			if (med_find_adjacent_segment_side(&Segments[seg], s, adj_sp, &adj_side))
-				if (Segments[seg].children[s] != adj_sp)
-						med_form_joint(&Segments[seg],s,adj_sp,adj_side);
+			if (med_find_adjacent_segment_side(segp, s, adj_sp, &adj_side))
+				if (segp->children[s] != adj_sp)
+						med_form_joint(segp,s,adj_sp,adj_side);
 		}
+	}
 
 	Update_flags |= UF_WORLD_CHANGED;
 	mine_changed = 1;
    autosave_mine(mine_filename);
    diagnostic_message("All Adjacent Joint segments formed.");
-   strcpy(undo_status[Autosave_count], "All Adjacent Joint segments UNDONE.");
+	undo_status[Autosave_count] = "All Adjacent Joint segments UNDONE.";
  	warn_if_concave_segments();
    return 1;
 }

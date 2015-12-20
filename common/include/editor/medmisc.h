@@ -23,13 +23,11 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-#ifndef _MEDMISC_H
-#define _MEDMISC_H
+#pragma once
 
 #ifdef __cplusplus
-
-struct vms_matrix;
-struct vsegptr_t;
+#include "fwd-segment.h"
+#include "fwd-vecmat.h"
 
 void GetMouseRotation( int idx, int idy, vms_matrix * RotMat );
 extern int Gameview_lockstep;                         //In medmisc.c
@@ -43,8 +41,8 @@ int IncreaseDrawDepth(void);
 int DecreaseDrawDepth(void);
 int ToggleCoordAxes();
 extern int    Big_depth;
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 void set_view_target_from_segment(vsegptr_t sp);
-
 #endif
 
 #endif

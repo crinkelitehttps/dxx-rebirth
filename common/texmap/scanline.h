@@ -23,33 +23,31 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
-
-
-#ifndef _SCANLINE_H
-#define _SCANLINE_H
+#pragma once
 
 #ifdef __cplusplus
+#include <string>
 
-extern void c_tmap_scanline_per();
-extern void c_tmap_scanline_per_nolight();
+namespace dcx {
 extern void c_tmap_scanline_lin();
 extern void c_tmap_scanline_lin_nolight();
 extern void c_tmap_scanline_flat();
 extern void c_tmap_scanline_shaded();
 
-//typedef struct _tmap_scanline_funcs {
-extern void (*cur_tmap_scanline_per)(void);
-extern void (*cur_tmap_scanline_per_nolight)(void);
-extern void (*cur_tmap_scanline_lin)(void);
-extern void (*cur_tmap_scanline_lin_nolight)(void);
-extern void (*cur_tmap_scanline_flat)(void);
-extern void (*cur_tmap_scanline_shaded)(void);
-//} tmap_scanline_funcs;
+struct tmap_scanline_function_table
+{
+	using per = void ();
+	per *sl_per;
+};
 
-//extern tmap_scanline_funcs tmap_funcs;
-void select_tmap(const char *type);
+#define cur_tmap_scanline_per (tmap_scanline_functions.sl_per)
+#define cur_tmap_scanline_lin (c_tmap_scanline_lin)
+#define cur_tmap_scanline_lin_nolight (c_tmap_scanline_lin_nolight)
+#define cur_tmap_scanline_shaded (c_tmap_scanline_shaded)
+#define cur_tmap_scanline_flat (c_tmap_scanline_flat)
+
+extern tmap_scanline_function_table tmap_scanline_functions;
+void select_tmap(const std::string &type);
+}
 
 #endif
-
-#endif
-

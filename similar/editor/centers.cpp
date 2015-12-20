@@ -31,6 +31,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "fuelcen.h"
 #include "screens.h"
 #include "inferno.h"
+#include "event.h"
 #include "segment.h"
 #include "editor.h"
 #include "editor/esegment.h"
@@ -40,7 +41,7 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "dxxerror.h"
 #include "kdefs.h"
 #include	"object.h"
-#include "polyobj.h"
+#include "robot.h"
 #include "game.h"
 #include "powerup.h"
 #include "ai.h"
@@ -63,6 +64,8 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 //-------------------------------------------------------------------------
 static UI_DIALOG 				*MainWindow = NULL;
 
+namespace {
+
 struct centers_dialog
 {
 	std::unique_ptr<UI_GADGET_BUTTON> quitButton;
@@ -70,6 +73,8 @@ struct centers_dialog
 	array<std::unique_ptr<UI_GADGET_CHECKBOX>, MAX_ROBOT_TYPES> robotMatFlag;
 	int old_seg_num;
 };
+
+}
 
 static int centers_dialog_handler(UI_DIALOG *dlg,const d_event &event, centers_dialog *c);
 
@@ -170,7 +175,7 @@ int centers_dialog_handler(UI_DIALOG *dlg,const d_event &event, centers_dialog *
 	// If we change centers, we need to reset the ui code for all
 	// of the checkboxes that control the center flags.  
 	//------------------------------------------------------------
-	if (c->old_seg_num != Cursegp-Segments)
+	if (c->old_seg_num != Cursegp)
 	{
 		range_for (auto &i, c->centerFlag)
 			ui_radio_set_value(i.get(), 0);
@@ -225,7 +230,7 @@ int centers_dialog_handler(UI_DIALOG *dlg,const d_event &event, centers_dialog *
 //		int	i;
 //		char	temp_text[CENTER_STRING_LENGTH];
 	
-		ui_dprintf_at( dlg, 12, 6, "Seg: %3ld", (long)(Cursegp-Segments) );
+		ui_dprintf_at(dlg, 12, 6, "Seg: %3hu", static_cast<segnum_t>(Cursegp));
 
 //		for (i=0; i<CENTER_STRING_LENGTH; i++)
 //			temp_text[i] = ' ';
@@ -236,7 +241,7 @@ int centers_dialog_handler(UI_DIALOG *dlg,const d_event &event, centers_dialog *
 //		ui_dprintf_at( dlg, 12, 23, " Type: %s", temp_text );
 	}
 
-	if (c->old_seg_num != Cursegp-Segments)
+	if (c->old_seg_num != Cursegp)
 		Update_flags |= UF_WORLD_CHANGED;
 	if (GADGET_PRESSED(c->quitButton.get()) || keypress==KEY_ESC)
 	{
@@ -244,7 +249,7 @@ int centers_dialog_handler(UI_DIALOG *dlg,const d_event &event, centers_dialog *
 		return 1;
 	}		
 
-	c->old_seg_num = Cursegp-Segments;
+	c->old_seg_num = Cursegp;
 	
 	return rval;
 }

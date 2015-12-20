@@ -26,13 +26,15 @@ COPYRIGHT 1993-1998 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #pragma once
 
 #include "switch.h"
-#include "fwdvalptridx.h"
+#include "fwd-segment.h"
 
 #ifdef __cplusplus
 
 extern int bind_wall_to_trigger();
 
+#if defined(DXX_BUILD_DESCENT_I) || defined(DXX_BUILD_DESCENT_II)
 int remove_trigger(vsegptr_t seg, short side);
+#endif
 
 extern int remove_trigger_num(int trigger_num);
 
