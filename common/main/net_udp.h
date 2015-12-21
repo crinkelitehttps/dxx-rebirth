@@ -45,7 +45,7 @@ void net_udp_send_netgame_update();
 const uint16_t UDP_PORT_DEFAULT = 42424;
 #define UDP_MANUAL_ADDR_DEFAULT "localhost"
 #ifdef USE_TRACKER
-#define TRACKER_HOST_DEFAULT "dxxtracker.reenigne.net"
+#define TRACKER_HOST_DEFAULT "tracker.dxx-rebirth.com"
 #endif
 #if defined(DXX_BUILD_DESCENT_I)
 #define UDP_REQ_ID "D1XR" // ID string for a request packet
