@@ -1,8 +1,8 @@
 #ifndef CURL_UTIL_H
 #define CURL_UTIL_H
 
-#include "json/value.h"
 #include <curl/curl.h>
+#include <jsoncpp/json/value.h>
 
 // Boom, interaction; callbacks from cURL requests (data, length)
 typedef void (*dxx_http_callback)(Json::Value&);

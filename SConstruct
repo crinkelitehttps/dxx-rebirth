@@ -2991,7 +2991,7 @@ class DXXCommon(LazyObjectConstructor):
 		# Tracker support?
 		if( self.user_settings.use_tracker == 1 ):
 			env.Append( CPPDEFINES = [ 'USE_TRACKER' ] )
-			env.Append( LIBS = [ 'curl' ] )
+			env.Append( LIBS = [ 'curl', 'jsoncpp' ] )
 
 		# Tracker support?  (Relies on UDP)
 		if user_settings.use_tracker:
@@ -3062,9 +3062,6 @@ class DXXArchive(DXXCommon):
 'misc/hmp.cpp',
 'misc/ignorecase.cpp',
 'misc/strutil.cpp',
-'misc/json/json_reader.cpp',
-'misc/json/json_value.cpp',
-'misc/json/json_writer.cpp',
 'texmap/ntmap.cpp',
 'texmap/scanline.cpp'
 ]

@@ -1,9 +1,9 @@
 #include "curlutil.h"
-#include "json/reader.h"
-#include "json/writer.h"
 
 #include <cstring>
 #include <vector>
+#include <jsoncpp/json/reader.h>
+#include <jsoncpp/json/writer.h>
 
 // Some static stuff, because I'm not sure where we should store it :V
 static CURLM *g_pCurl = NULL;
