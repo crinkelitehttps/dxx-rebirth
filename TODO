@@ -1,0 +1,15 @@
+read from a ltr_pipe fifo
+
+create a vms_vector to hold the information from ltr_pipe
+
+multiply the created vms_vector but the Viewer = viewer->pos matrix/vector to produce the head tracking effect
+
+add a 3d model to the game data and attach it to the position of the viewer 
+
+interesting files
+
+controls.cpp 
+fwd_object.h //seems to be a colection of typedefs that define feature flags of objects
+
+maths.h defines a fix64, fix and finxang
+

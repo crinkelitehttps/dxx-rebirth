@@ -25,6 +25,9 @@
 #define DESCENT_PIG_SIZE 0x3CA96D
 #define DESCENT_PIG_OFFSET 0x7F6729
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <string>

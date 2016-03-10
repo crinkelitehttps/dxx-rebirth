@@ -3039,6 +3039,7 @@ class DXXArchive(DXXCommon):
 	srcdir = 'common'
 	target = 'dxx-common'
 	__objects_common = DXXCommon.create_lazy_object_property([os.path.join(srcdir, f) for f in [
+'main/getht.cpp',
 '2d/2dsline.cpp',
 '2d/bitblt.cpp',
 '2d/bitmap.cpp',
@@ -3106,7 +3107,8 @@ class DXXArchive(DXXCommon):
 'ui/scroll.cpp',
 'ui/ui.cpp',
 'ui/uidraw.cpp',
-'ui/userbox.cpp'
+'ui/userbox.cpp',
+
 ]
 ])
 	# for non-ogl

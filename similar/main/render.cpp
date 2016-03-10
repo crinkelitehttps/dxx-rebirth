@@ -23,11 +23,13 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
  *
  */
 
+#include "getht.h"
 #include <algorithm>
 #include <bitset>
 #include <limits>
 #include <cstdlib>
 #include <stdio.h>
+#include <iostream>
 #include <string.h>
 #include <math.h>
 #include "render_state.h"
@@ -75,6 +77,7 @@ COPYRIGHT 1993-1999 PARALLAX SOFTWARE CORPORATION.  ALL RIGHTS RESERVED.
 #include "editor/editor.h"
 #include "editor/esegment.h"
 #endif
+
 
 using std::min;
 using std::max;
@@ -132,7 +135,7 @@ static const int _search_mode = 0;
 #ifdef NDEBUG		//if no debug code, set these vars to constants
 #else
 
-int Outline_mode=0;
+int Outline_mode=1;
 
 int toggle_outline_mode(void)
 {
@@ -1205,7 +1208,7 @@ void render_frame(fix eye_offset, window_rendered_data &window)
 	start_lighting_frame(vobjptr(Viewer));		//this is for ugly light-smoothing hack
   
 	g3_start_frame();
-
+//NOTE
 	Viewer_eye = Viewer->pos;
 
 //	if (Viewer->type == OBJ_PLAYER && (PlayerCfg.CockpitMode[1]!=CM_REAR_VIEW))
@@ -1243,7 +1246,12 @@ void render_frame(fix eye_offset, window_rendered_data &window)
 		}
 		g3_set_view_matrix(Viewer_eye,Viewer->orient,fixdiv(Render_zoom,Zoom_factor));
 #else
-		g3_set_view_matrix(Viewer_eye,Viewer->orient,Render_zoom);
+		vms_angvec Player_head_angles;
+		Player_head_angles.p = Player_head_angles.h = Player_head_angles.b = 0;
+  		vms_matrix trackm = vm_angles_2_matrix(Player_head_angles);
+		const vms_matrix headm = getht(trackm);
+		const auto viewm = vm_matrix_x_matrix(Viewer->orient,headm);
+		g3_set_view_matrix(Viewer_eye,viewm,Render_zoom);
 #endif
 	}
 

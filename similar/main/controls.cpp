@@ -85,7 +85,7 @@ void read_flying_controls(const vobjptr_t obj)
 
 		vm_vec_zero(obj->mtype.phys_info.rotthrust);
 
-		rotangs.p = Controls.pitch_time / 2 + Seismic_tremor_magnitude/64;
+		rotangs.p = Controls.pitch_time / 1 + Seismic_tremor_magnitude/64;
 		rotangs.b = Controls.bank_time / 2 + Seismic_tremor_magnitude/16;
 		rotangs.h = Controls.heading_time / 2 + Seismic_tremor_magnitude/64;
 

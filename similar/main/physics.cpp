@@ -185,7 +185,9 @@ static void do_physics_sim_rot(const vobjptr_t obj)
 		r = FrameTime % FT;
 		k = fixdiv(r,FT);
 
-		drag = (obj->mtype.phys_info.drag*5)/2;
+//CHANGE
+//		drag = (obj->mtype.phys_info.drag*5)/2;
+		drag = (obj->mtype.phys_info.drag*5)/10;
 
 		if (obj->mtype.phys_info.flags & PF_USES_THRUST) {
 
@@ -357,7 +359,7 @@ void do_physics_sim(const vobjptridx_t obj)
 				if (have_accel)
 					vm_vec_add2(obj->mtype.phys_info.velocity,accel);
 
-				vm_vec_scale(obj->mtype.phys_info.velocity,f1_0-drag);
+				vm_vec_scale(obj->mtype.phys_info.velocity,f1_0-(drag/5));
 			}
 
 			//do linear scale on remaining bit of time

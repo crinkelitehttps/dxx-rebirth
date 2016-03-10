@@ -31,7 +31,6 @@ extern vms_vector Window_scale;
 extern fix View_zoom;
 extern vms_vector View_position,Matrix_scale;
 extern vms_matrix View_matrix,Unscaled_matrix;
-
 }
 
 //vertex buffers for polygon drawing and clipping
