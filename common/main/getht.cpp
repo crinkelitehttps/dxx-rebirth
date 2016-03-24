@@ -32,15 +32,13 @@ vms_matrix getht(vms_matrix &trackm)
 			std::stringstream data(line);
 			data >> heading >> pitch >> roll >> xpos >> ypos >> zpos >> counter;
 			
-			fix fixx = fl2f(xpos);
-			fix fixy = fl2f(ypos);
-			fix fixz = fl2f(zpos);
-			vms_vector vector;
-			vector.x=fixx;
-			vector.y=fixy;
-			vector.z=fixz;
-			vms_matrix vecmat;  
-			vecmat = vm_vector_2_matrix(vector,&vector,&vector);
+			fix fpitch = fl2f(pitch);
+			fix fheading = fl2f(heading);
+			vms_angvec headOffset;
+			headOffset.h = headOffset.p = headOffset.b = 0;
+			headOffset.h += -fheading/100;
+			headOffset.p += -fpitch/100;
+			vms_matrix vecmat = vm_angles_2_matrix(headOffset);
 			trackm = vm_matrix_x_matrix(vecmat, trackm);
 			return trackm;
 			
